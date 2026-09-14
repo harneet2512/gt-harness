@@ -778,7 +778,31 @@ class GTSession:
             if callable(getattr(environment, "execution_env", None)):
                 self._engine._current_check_environment_sha256 = hashlib.sha256(
                     canonical_json_bytes(environment.execution_env())).hexdigest()
-            apply_requests()
+            outcomes = apply_requests() or []
+            rejected = [outcome for outcome in outcomes if outcome.get("outcome") == "rejected"]
+            if rejected:
+                # The CLI answered "requested"; the journal row is for
+                # auditors. This line is the only way the refusal reaches the
+                # agent that filed it.
+                lines = [
+                    "[GT_PLAN_REQUEST_REJECTED] a `gt-plan` request was refused "
+                    "by the engine; the plan is unchanged:",
+                ]
+                lines.extend(
+                    f"  {outcome['request_id']} ({outcome.get('operation', '')} "
+                    f"{outcome.get('row_id', '')}): {outcome.get('detail', '')}"
+                    for outcome in rejected[:6]
+                )
+                if len(rejected) > 6:
+                    lines.append(f"  ... {len(rejected) - 6} more rejected requests")
+                rendered = "\n".join(lines)
+                self.queue_decision_candidates((GTDecisionCandidate(
+                    rendered=rendered,
+                    kind="plan_request_rejected",
+                    lane="prompt",
+                    dedup_key="plan_request_rejected:" + hashlib.sha256(
+                        rendered.encode()).hexdigest(),
+                ),))
         if getattr(self._engine, "phase", "") == "VERIFY":
             self._drain_verification_boundary()
         candidates = list(self._queued_decision_candidates)

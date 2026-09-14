@@ -199,3 +199,50 @@ def test_every_request_file_is_read_at_most_once(adapter):
     adapter.apply_plan_requests()
     adapter.apply_plan_requests()
     assert adapter.store.receipt()["event_count"] == count
+
+
+def test_apply_returns_typed_outcomes_for_every_request(adapter):
+    """The CLI answered "requested" already; the journal row is for auditors.
+
+    The only channel that can reach the agent is the batch the session builds
+    next turn, so the apply pass must hand its verdicts back, not leave them
+    in the journal where the model never looks.
+    """
+    first, second = [row.row_id for row in adapter.persistent_plan.rows[:2]]
+    digest = _published_digest(adapter)
+    _queue(adapter, "01.json", plan_digest=digest, row_id=first,
+           operation="revise", value={"approach": "accepted"})
+    _queue(adapter, "02.json", plan_digest=digest, row_id=second,
+           operation="prove", value={"state": "PROVEN"})
+    outcomes = adapter.apply_plan_requests()
+
+    assert isinstance(outcomes, list)
+    by_name = {outcome["request_id"]: outcome for outcome in outcomes}
+    assert by_name["01.json"]["outcome"] == "applied"
+    assert by_name["02.json"]["outcome"] == "rejected"
+    assert by_name["02.json"]["detail"]
+    assert by_name["02.json"]["row_id"] == second
+
+
+def test_a_rejected_request_is_surfaced_in_the_next_batch(adapter):
+    """`{"status": "requested"}` must not be the last word the agent hears.
+
+    The queue drains inside `before_model`; a refusal the agent cannot see
+    leaves it executing a plan it believes it revised. Rejections ride the
+    same bounded tail channel as every other progress fact.
+    """
+    from gt_engine.gt_session import GTSession, GTSessionConfig
+
+    row_id = adapter.persistent_plan.rows[0].row_id
+    _queue(adapter, "01.json", plan_digest=_published_digest(adapter),
+           row_id=row_id, operation="prove", value={"state": "PROVEN"})
+    session = GTSession(
+        GTSessionConfig(task_id=adapter.task_id, repo_root=adapter.repo_root,
+                        state_dir=str(adapter.store.root.parent)),
+        engine=adapter,
+    )
+    batch = session.before_model([], iteration=1)
+
+    joined = "\n".join(batch.context_additions)
+    assert "GT_PLAN_REQUEST_REJECTED" in joined
+    assert "unsupported plan operation" in joined

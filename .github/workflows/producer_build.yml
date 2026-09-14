@@ -1,0 +1,140 @@
+name: "GT Harness: certified producer build"
+
+# Builds the vendored static gt-index at an exact upstream commit and emits
+# the gt-index.build.v1 identity the bundle pins. The producer's git_commit
+# is compile-time ldflags-stamped, so every source_commit move needs this
+# run — there is no honest way to re-issue the receipt without rebuilding.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact harneet2512/groundtruth commit to build from
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Pin input shape
+        run: |
+          set -euo pipefail
+          commit='${{ inputs.source_commit }}'
+          if ! grep -qE '^[0-9a-f]{40}$' <<<"$commit"; then
+            echo "source_commit must be a full lowercase sha" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact producer source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: harneet2512/groundtruth
+          ref: ${{ inputs.source_commit }}
+          path: producer-src
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checkout is the requested commit
+        run: |
+          set -euo pipefail
+          head="$(git -C producer-src rev-parse HEAD)"
+          if [ "$head" != '${{ inputs.source_commit }}' ]; then
+            echo "checkout resolved $head, not the requested commit" >&2
+            exit 1
+          fi
+
+      - name: Install build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.22.5"
+
+      - name: Tagged Go test suite on the exact source
+        working-directory: producer-src/gt-index
+        run: go test -tags sqlite_fts5 ./...
+
+      - name: Compute the producer source fingerprint
+        id: fingerprint
+        working-directory: producer-src/gt-index
+        run: |
+          set -euo pipefail
+          # The recipe build-info declares: `git ls-tree -r HEAD` inside
+          # gt-index, restricted to compiled-source extensions and the module
+          # files, sorted, hashed as a `mode blob <oid>\t<path>` listing.
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib, subprocess
+          exts = ('.go', '.c', '.cc', '.cpp', '.h', '.hpp', '.s')
+          lines = []
+          out = subprocess.check_output(['git', 'ls-tree', '-r', 'HEAD'], text=True)
+          for line in out.splitlines():
+              meta, path = line.split('\t')
+              if path.endswith(exts) or path.endswith(('go.mod', 'go.sum')):
+                  lines.append(meta + '\t' + path)
+          lines.sort()
+          print('source_fingerprint=' + hashlib.sha256(('\n'.join(lines) + '\n').encode()).hexdigest())
+          PY
+
+      - name: Build the static producer with compile-time identity
+        working-directory: producer-src/gt-index
+        env:
+          CGO_ENABLED: "1"
+          CC: musl-gcc
+          SOURCE_FINGERPRINT: ${{ steps.fingerprint.outputs.source_fingerprint }}
+        run: |
+          set -euo pipefail
+          utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          toolchain="$(go version | awk '{print $3}')"
+          tags="netgo,osusergo,sqlite_fts5"
+          ldflags="-s -w -extldflags '-static'"
+          ldflags="${ldflags} -X main.commitSHA=${{ inputs.source_commit }}"
+          ldflags="${ldflags} -X main.buildTimeUTC=${utc}"
+          ldflags="${ldflags} -X main.sourceFingerprint=${SOURCE_FINGERPRINT}"
+          ldflags="${ldflags} -X main.goToolchain=${toolchain}"
+          ldflags="${ldflags} -X main.compiledBuildTags=${tags}"
+          go build -tags "$tags" -ldflags "${ldflags}" \
+            -o gt-index-linux-amd64 ./cmd/gt-index/
+          file gt-index-linux-amd64 | grep -F 'statically linked'
+          if readelf -d gt-index-linux-amd64 2>&1 | grep -q '(NEEDED)'; then
+            echo "producer carries a dynamic-library dependency" >&2
+            exit 1
+          fi
+          ./gt-index-linux-amd64 -build-info > gt-index-linux-amd64.build-info.json
+          cat gt-index-linux-amd64.build-info.json
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cp gt-index-linux-amd64 gt-index-linux-amd64.build-info.json "$GITHUB_WORKSPACE/artifacts/"
+
+      - name: Record the builder identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          identity = {
+              "schema": "gt.producer_builder.v1",
+              "runner": "${{ runner.os }}-${{ runner.arch }}",
+              "runner_image_version": os.environ.get("ImageVersion", ""),
+              "go": subprocess.check_output(['go', 'version'], text=True).strip(),
+              "musl_gcc": subprocess.run(
+                  ['musl-gcc', '-dumpversion'], capture_output=True, text=True
+              ).stdout.strip(),
+          }
+          blob = json.dumps(identity, sort_keys=True).encode()
+          identity["builder_image_digest"] = hashlib.sha256(blob).hexdigest()
+          print(json.dumps(identity, indent=2, sort_keys=True))
+          with open('artifacts/builder-identity.json', 'w') as fh:
+              fh.write(json.dumps(identity, indent=2, sort_keys=True) + '\n')
+          PY
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gt-index-linux-amd64-${{ inputs.source_commit }}
+          path: artifacts/
+          retention-days: 30

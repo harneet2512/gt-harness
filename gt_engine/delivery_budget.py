@@ -17,6 +17,9 @@ SEALED_DELIVERY_BYTE_LIMIT = 1_400
 PROMPT_DELIVERY_BYTE_LIMITS = {
     "context_contract": 2_000,
     "context_delta": 1_400,
+    # A refused gt-plan request is a fact the agent cannot learn any other
+    # way; bounded like a context delta because it rides the same tail.
+    "plan_request_rejected": 1_400,
 }
 DELIVERY_BYTE_LIMITS = {
     "sealed": SEALED_DELIVERY_BYTE_LIMIT,

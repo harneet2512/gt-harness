@@ -1533,14 +1533,19 @@ class MiniSweAdapter(GroundtruthController):
                     **accounting["counts"],
                 )
 
-    def apply_plan_requests(self) -> None:
-        """Admit CLI proposals through the single journal/engine owner."""
+    def apply_plan_requests(self) -> list[dict]:
+        """Admit CLI proposals through the single journal/engine owner.
+
+        Returns one typed outcome per request read this pass. The CLI already
+        answered "requested", so the journal row alone leaves the agent blind
+        to a refusal; the session renders rejections into the next batch.
+        """
         from dataclasses import replace
 
         self._restore_plan_revisions()
         plan = getattr(self, "persistent_plan", None)
         if plan is None:
-            return
+            return []
         seen = getattr(self, "_plan_requests_seen", set())
         root = self.store.root / "plan" / "requests"
         # The base every request in this batch could have read. `plan/current.json`
@@ -1551,10 +1556,12 @@ class MiniSweAdapter(GroundtruthController):
         # had already answered "requested". Staleness is unchanged for a request
         # authored against an earlier turn: that digest is not this one.
         published = hashlib.sha256(plan.canonical_json().encode()).hexdigest()
+        outcomes: list[dict] = []
         for path in sorted(root.glob("*.json")):
             if path.name in seen:
                 continue
             seen.add(path.name)
+            operation, row_id = "", ""
             try:
                 request = json.loads(path.read_text(encoding="utf-8"))
                 # The journal still chains on the TRUE pre-application digest,
@@ -1598,10 +1605,16 @@ class MiniSweAdapter(GroundtruthController):
                                   revision_layout="gt.plan_revision.v1", value=value,
                                   reason=request.get("reason", ""),
                                   resulting_plan_digest=hashlib.sha256(plan.canonical_json().encode()).hexdigest())
+                outcomes.append({"request_id": path.name, "outcome": "applied",
+                                 "operation": str(operation), "row_id": str(row_id), "detail": ""})
             except (OSError, ValueError, KeyError, TypeError) as exc:
-                self.store.append("plan_revision_rejected", request_id=path.name, detail=str(exc))
+                detail = str(exc)
+                self.store.append("plan_revision_rejected", request_id=path.name, detail=detail)
+                outcomes.append({"request_id": path.name, "outcome": "rejected",
+                                 "operation": str(operation), "row_id": str(row_id), "detail": detail})
         self._plan_requests_seen = seen
         self.publish_plan_state()
+        return outcomes
 
     def _rebind_check_source(self, spec: Any, digest: str) -> Any:
         """Rebind a check spec to the workspace's current test-source identity.
