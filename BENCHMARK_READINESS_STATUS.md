@@ -342,7 +342,32 @@ SHA-binding window.
 
 The owner then authorized the conditional continuation: DeepSWE smoke20
 dispatched as run `34801009507`, `all-20` stage on `aef3a2f5`, readiness
-reused from `34799716299`, all 20 task jobs in flight on the pinned images.
+reused from `34799716299`.
+
+## DeepSWE smoke20 — run 34801009507 (2026-09-14)
+
+**Outcome: 6/20 solved** (abs-module-cache-flags, abs-stepped-slices,
+actionlint, awilix, csstree, katex — verifier `resolved: true`, reward 1.0);
+12 graded-unsolved genuine failures; 2 typed errors (boa `provider_failure`
+rate-limit, fd `churn_abort`). Workflow `failure`: all three attest
+verification steps rejected on real defects — full census in
+`docs/HANDOFF-2026-09-14-run-34801009507-smoke20-forensics.md`.
+
+Defects the smoke exposed, in fix order: missing-patch bind-step crash on
+non-submitting trials; audit join cannot model legitimate post-recovery
+redelivery (oxvg duplicate identity); 8 tasks missing diagnostics artifacts;
+`GT_GRAPH_REFRESH_FAILED` under rust-class workspace churn (oxvg, pest,
+plus fd's 180 s rust-analyzer readiness stall); `--tsserver-path` unknown
+flag crashing TLS 6.0.0; provider rate-limit at 20-way parallelism.
+
+What held: `lsp_promotion` WORKING on go (`306_edges` published); F9/F10/F11
+under 20-way load; `_leg_serviceable` classification (env-bound legs honest
+`required=False`, serviceable gaps still `required=True`); churn governor;
+typed ERROR outcomes with `reward: null`.
+
+**Status:** smoke20 complete; the defect queue above precedes any next paid
+run. The cohort needs its fixes verified provider-free before another
+gate-one + smoke cycle on a new SHA.
 
 ## Outcome claims
 
