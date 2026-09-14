@@ -243,6 +243,52 @@ No numeric spending ceiling is specified in the user's message. The exact
 dispatch plan and applicable spending limits must be made explicit before any
 paid request. Approval is not evidence of readiness or an actual dispatch.
 
+## Gate-one attempt — run 34790375793 (2026-09-13)
+
+The first paid gate ran task `cyclotruc__gitingest-94` (SWE-bench-Live Lite,
+per the documented pivot from DeepSWE for the paid gate). Verdict: **the task
+solved** — the official verifier executed 23:55:05→23:55:21 and returned
+`reward = 1.0`; `eval_report.json` reports `resolved: true` with all
+PASS_TO_PASS green. Engine evidence was clean: 56/56 provider calls on the
+relace-pinned route, graph CERTIFIED (`cochange_rows = 1242`), 26 deliveries
+admitted / 17 consumed / 7 fair, iter-0 localization hit the gold file with
+`prior_touches: 0`, plan gate suppressed two premature submits and accepted the
+final one `no_blocking_evidence` honestly labeled `submitted_unverified`.
+
+The run was *reported* as ERROR because two consumer-layer defects converted
+the solved journal into `ValueError: refused_then_delivered` plus
+`official_verifier_missing`:
+
+- **F9** — the refusal/delivery join compared refusal sequence against
+  commit-time `evidence_delivery` sequence instead of the admission axis
+  (`delivery_ordinal >= candidate_ordinal`). Legitimate same-batch twin
+  deduplication (`localization_fire_once`, sibling admitted ordinal 1, twin
+  refused candidate ordinal 2) read as refused-then-delivered.
+- **F10** — `_reward` read `metrics[*].reward`, a shape real pier never emits;
+  the production aggregate carries `reward_stats.reward` maps. Every solved
+  run would have classified `missing_verifier`.
+- **F11** — monitor snapshots were written outside the collected artifact
+  tree and transient upload failures were swallowed; zero mid-run artifacts
+  existed for the whole run.
+
+All three are fixed and regression-tested in `e41d1fe9`
+(branch `codex/phase5-harness-proof`). Capability audit found no capability
+defect: the 14 live-INELIGIBLE feature identities were `no_trigger_observed`
+or profile-gated by design (`expected_profile_controls: []`); LSP
+`no_edge_mutations` is an honest environment limit (only JS-edge candidates in
+a Python repo, no `node_modules/typescript`). Full forensic record:
+`docs/HANDOFF-2026-09-14-run-34790375793-forensics.md`.
+
+A main-branch side effect of the workflow registration also broke
+`test_only_closed_supported_workflow_set_is_active` there; repaired in
+`e4fe9661`.
+
+**Status:** this attempt does not authorize a paid retry. Per the standing
+rule and the owner's directive, the next paid run is gated on (a) provider-free
+acceptance and installed rehearsal green on `e41d1fe9`, and (b) fresh explicit
+authorization, and is designated the final paid validation run — not the start
+of an exploratory paid series.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
