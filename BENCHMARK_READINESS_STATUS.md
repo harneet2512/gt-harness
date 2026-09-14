@@ -443,6 +443,14 @@ redaction, env resolution + invalid-env fail-closed, and the
 fault-channel contract. The broken-recorder fault-injection suite still
 proves the terminal receipt survives.
 
+**Gates:** canonical provider-free acceptance GREEN on `01e5eac1` (run
+`34845687656`); installed full-flow rehearsal GREEN on the same SHA (run
+`34845689986`). During that run the serial suite paid real wall-clock for
+scripted retryable failures — `tests/conftest.py` now stubs the
+`provider_pacing._sleep` seam autouse so no test burns real provider
+delays (pacing tests still stub the seam explicitly to assert decisions).
+That test-infra fix lands on the next tip; gates re-verify on it.
+
 Remaining open items before any next paid run: model-route alignment for
 the apples-to-apples comparison (native `deepseek-v4-flash` vs the
 `-0731` relace route — needs an owner credential decision); canonical

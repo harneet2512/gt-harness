@@ -26,6 +26,20 @@ def tmp_workdir(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _no_real_provider_retry_pacing_sleeps(monkeypatch):
+    """Keep provider retry pacing wall-clock-free in tests.
+
+    ``provider_pacing._sleep`` is the single seam through which in-loop
+    pacing delays reach the clock. Scripted retryable failures would
+    otherwise burn real seconds (up to the Retry-After cap) per attempt.
+    Tests that assert pacing timing stub the seam themselves.
+    """
+    from gt_engine import provider_pacing as pacing
+
+    monkeypatch.setattr(pacing, "_sleep", lambda _seconds: None)
+
+
 def write_certifiable_graph(
     graph_state: Path,
     *,
