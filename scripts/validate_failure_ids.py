@@ -37,6 +37,7 @@ EXCLUDED_DIRECTORIES = frozenset(
         ".venv",
         "__pycache__",
         "node_modules",
+        "smoke20_recorded",
         "vendor",
     }
 )

@@ -417,6 +417,39 @@ def test_snapshot_report_is_checkout_location_invariant(tmp_path: Path) -> None:
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
+def test_recorded_capture_payloads_are_not_machine_documents(tmp_path: Path) -> None:
+    # Recorded gt-state trees preserve the verbatim shipped bytes under
+    # deliveries/ and plan_renderings/: a [GT_*] tag line followed by the
+    # JSON payload. They are captured evidence, not authored documents, so
+    # the FD-definition scanner must skip the recorded fixture root while
+    # still flagging the same bytes anywhere else.
+    capture = "[GT_CONTEXT_UNIT] {\"failure_id\": \"FD-001\"}\n"
+    recorded = _write(
+        tmp_path
+        / "smoke20_recorded"
+        / "task"
+        / "agent"
+        / "gt-state"
+        / "task"
+        / "deliveries"
+        / "abc.json",
+        capture,
+    )
+    authored = _write(tmp_path / "docs" / "payload.json", capture)
+    _write(tmp_path / "ledger.md", "### FD-001 - canonical defect\n")
+
+    report = validate_failure_ids.validate([tmp_path])
+
+    assert report["status"] == "fail"
+    assert not any(
+        "smoke20_recorded/" in entry for entry in report["malformed_definitions"]
+    )
+    assert any(
+        entry.startswith("docs/payload.json:")
+        for entry in report["malformed_definitions"]
+    )
+
+
 def test_repository_snapshot_and_ci_are_wired() -> None:
     repository = Path(__file__).resolve().parents[1]
     snapshot = repository / "config" / "failure_id_ledger_snapshot.json"
