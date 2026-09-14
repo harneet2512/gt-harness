@@ -193,7 +193,10 @@ class _Sim:
         )
 
     def _install_lsp_stubs(self, monkeypatch) -> None:
-        scheduler = type("_Scheduler", (), {"_handles": []})()
+        scheduler = type(
+            "_Scheduler", (),
+            {"_handles": [], "close": lambda self, **kw: None},
+        )()
         self.adapter._lsp_scheduler = scheduler
 
         def leg_factory(request, base):
@@ -739,3 +742,66 @@ def test_a_published_salvage_schedules_a_fresh_leg_on_the_merged_graph(
         "the salvage-published graph was never offered a convergence leg: "
         f"scheduled={[row.get('graph_revision') for row in scheduled]}"
     )
+
+
+def test_seal_converges_the_tier_churn_denied_mid_run(
+    monkeypatch, tmp_path
+):
+    """Seal is the one window a promotion leg cannot lose: no edit lands.
+
+    Run 34904339448 sealed 26s after a partial salvage - inside the armed
+    60s churn backoff - so the post-salvage schedule the drain performs
+    could never fire and the partial tier froze as the verdict. Close must
+    converge instead: drain the work already paid for, then offer the
+    adopted graph the leg no publication can obsolete, before the journal
+    seals. The churn defer is deliberately bypassed - there is no churn
+    left to wait out.
+    """
+    sim = _Sim(monkeypatch, tmp_path)
+
+    from gt_engine.miniswe_integration import GraphBuildArtifact
+
+    def certify(request, base, terminal):
+        candidate = Path(str(terminal["candidate_path"]))
+        return GraphBuildArtifact(
+            True, str(candidate),
+            hashlib.sha256(candidate.read_bytes()).hexdigest(),
+        )
+
+    monkeypatch.setattr(sim.adapter, "_certify_lsp_candidate", certify)
+    # A leg scheduled from inside close must finish there: release its
+    # handle on schedule so the bounded join returns with a terminal.
+    schedule = sim.adapter._schedule_lsp_candidate
+
+    def releasing(request, base):
+        handle = schedule(request, base)
+        handle.release()
+        return handle
+
+    monkeypatch.setattr(
+        sim.adapter, "_schedule_lsp_candidate", releasing
+    )
+
+    sim.boundary()
+    sim.edit("mod.py")
+    sim.finish_legs()
+    sim.provider_wait()
+    sim.provider_wait()
+    salvages = sim.journal("lsp_salvage")
+    assert salvages and salvages[-1].get("outcome") == "published", salvages
+    merged = salvages[-1]["graph_revision"]
+
+    # Seal inside the armed backoff - the paid run's real tail shape. No
+    # boundary ever fired post-window; only close itself can converge.
+    sim.adapter.close_graph_lifecycle()
+
+    scheduled = sim.journal("lsp_promotion_scheduled")
+    assert any(
+        row.get("graph_revision") == merged for row in scheduled
+    ), f"seal never offered the merged graph a leg: {scheduled}"
+    terminals = sim.journal("lsp_promotion_terminal")
+    assert terminals[-1].get("disposition") == "published", terminals[-1]
+    assert sim.journal("lsp_seal_convergence")
+
+    caps = sim.capabilities()
+    assert caps["lsp_promotion"][0] == "WORKING", caps["lsp_promotion"]

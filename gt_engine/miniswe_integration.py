@@ -8,6 +8,7 @@ import re
 import shlex
 import shutil
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -149,6 +150,15 @@ class ExternalStateStore:
         self.startup_plan_events: list[dict] = []
         self.startup_journal_valid = True
         self.anchor_path = self.root / "events.anchor.json"
+        # Opt-in live tail: GT_JOURNAL_TEE=1 mirrors each committed row to
+        # stderr as one compact GT_EVENT|<json> line. The journal inside the
+        # task environment is invisible until artifacts upload; the tee
+        # makes LSP/graph health readable from streamed logs mid-run, on any
+        # benchmark, with zero protocol surface. Off by default - the file
+        # remains the journal of record; the tee is observability plumbing.
+        self._tee = os.environ.get("GT_JOURNAL_TEE", "").lower() in {
+            "1", "true", "yes",
+        }
         if self.path.exists():
             try:
                 verified = verify_event_journal(self.path)
@@ -254,6 +264,14 @@ class ExternalStateStore:
             self._sequence = sequence
             self._head = row["event_hash"]
             self._write_anchor()
+            if self._tee:
+                try:
+                    sys.stderr.write(f"GT_EVENT|{encoded}\n")
+                    sys.stderr.flush()
+                except OSError:
+                    # A dead stderr must never take a journal append down
+                    # with it - the file already holds the row.
+                    pass
 
     def receipt(self) -> dict[str, int | str]:
         with self._lock:
@@ -469,6 +487,10 @@ class MiniSweAdapter(GroundtruthController):
         # what it proved.
         self._lsp_churn_streak = 0
         self._lsp_churn_defer_until = 0.0
+        # Last terminal disposition per base revision, so close can tell a
+        # base whose leg lost the publication race (retryable at seal, when
+        # nothing can publish under it) from one already answered.
+        self._lsp_outcomes_by_base: dict[str, str] = {}
         # Memory backoff: an index refusal on cgroup headroom means the
         # container is already pressured - often by a resident LSP server.
         # Scheduling a fresh ~1GB leg the moment a recovery lands just
@@ -3320,6 +3342,7 @@ class MiniSweAdapter(GroundtruthController):
             if self._lsp_active == task_id:
                 self._lsp_active = None
             disposition = self._lsp_terminal_disposition(request, base, terminal)
+            self._lsp_outcomes_by_base[str(base.graph_revision or "")] = disposition
             self._note_lsp_churn_outcome(disposition)
             self._record_lsp_terminal(request, base, terminal, disposition)
             if disposition != "published":
@@ -4129,6 +4152,13 @@ class MiniSweAdapter(GroundtruthController):
             self._record_graph_publication()
         except Exception:  # noqa: BLE001 - observing a refresh never fails a close
             pass
+        # Converge the LSP tier on the final graph while the workspace is
+        # quiescent - the only window where a leg cannot lose the
+        # publication race. Bounded and journaled; never fails a close.
+        try:
+            self._seal_lsp_convergence()
+        except Exception:  # noqa: BLE001 - convergence never fails a close
+            pass
         # From here the journal is sealed for observations. The run is about to
         # write `session_closed` and then seal its manifest; work still in
         # flight must not append past that point.
@@ -4166,6 +4196,164 @@ class MiniSweAdapter(GroundtruthController):
             )
         except Exception:  # noqa: BLE001
             pass
+
+    #: Bounded seal-time convergence. A mid-run leg races every publication
+    #: that lands while it runs - near seal it almost always loses, the
+    #: salvage merge conserves live's newer rows as skipped_*, and the churn
+    #: defer then outlives the run (run 34904339448 sealed 26s after a
+    #: partial salvage, inside the armed 60s window). At close the workspace
+    #: is quiescent: no boundary can publish under a leg scheduled here, so
+    #: this is the one schedule whose base is still current when it lands.
+    #: The budget bounds the join, not the work - an unfinished leg keeps
+    #: running into the wait=False close exactly as it does today.
+    SEAL_LSP_CONVERGENCE_SECONDS = 90.0
+
+    def _seal_drain_promotion_work(self, deadline: float) -> bool:
+        """Join in-flight promotion work to the journal before it seals.
+
+        Queued salvage merges are launched and drained (a merge already
+        computed is coverage the run paid for) and a running leg gets a
+        bounded join sliced so pending work keeps moving around it. Returns
+        True when nothing promotion-shaped is left running or queued; the
+        iteration cap is what terminates the loop under a frozen test clock
+        if a worker stalls.
+        """
+        for _ in range(2000):
+            if self._wait_scheduler is not None:
+                self._wait_scheduler.begin_window()
+                self._drain_wait_work()
+            self._poll_lsp_promotions()
+            active = self._lsp_active
+            pending = (
+                self._wait_scheduler.pending_names()
+                if self._wait_scheduler is not None
+                else ()
+            )
+            if active is None and not pending:
+                self._record_graph_publication()
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if active is not None and self._lsp_scheduler is not None:
+                handle = next(
+                    (
+                        h
+                        for h in getattr(self._lsp_scheduler, "_handles", ())
+                        or ()
+                        if str(getattr(h, "task_id", "") or "") == str(active)
+                    ),
+                    None,
+                )
+                if handle is not None:
+                    try:
+                        handle.terminal_receipt(
+                            timeout=min(0.25, remaining)
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+            time.sleep(0.05)
+        return False
+
+    def _seal_lsp_convergence(self) -> None:
+        """Offer the last adopted graph one promotion no edit can obsolete.
+
+        The verdict reads the tier on the FINAL graph, and the final graph
+        is minted in the run's highest-churn window - so mid-run scheduling
+        alone can never guarantee it. Here, nothing remains that can move
+        the base: drain what is already running, then offer the adopted
+        graph a leg it has not already definitively answered. Refusals and
+        stalls are journaled and the run seals exactly as it would have -
+        an unconverged tier still reads DEGRADED, never WORKING-by-decree.
+        """
+        deadline = time.monotonic() + self.SEAL_LSP_CONVERGENCE_SECONDS
+        if not self._seal_drain_promotion_work(deadline):
+            self.store.append("lsp_seal_convergence", outcome="drain_incomplete")
+            return
+        if (
+            not self.engine_state.graph_current
+            or self._index_memory_defer_until > time.monotonic()
+        ):
+            return
+        # Freeze the workspace NOW, not _latest_workspace_snapshot: the last
+        # action can be an edit with no boundary after it, and a request
+        # carrying a stale source_revision drains obsolete against the very
+        # engine state it was meant to enrich. At close the workspace is
+        # quiescent, so a fresh capture is exact.
+        from .runtime_observation import capture_workspace
+
+        try:
+            snapshot = capture_workspace(Path(self.repo_root))
+        except Exception as exc:  # noqa: BLE001 - a failed capture is data
+            self.store.append(
+                "lsp_seal_convergence", outcome="capture_failed",
+                reason=str(exc)[:200],
+            )
+            return
+        if str(snapshot.revision) != str(self.engine_state.source_revision):
+            # The adopted graph is behind a workspace nothing witnessed -
+            # no promotion can close that; the verdict stands on the graph
+            # the run actually had.
+            self.store.append(
+                "lsp_seal_convergence", outcome="workspace_unwitnessed",
+                graph_revision=str(self.engine_state.graph_revision or ""),
+            )
+            return
+        # The churn defer exists to throttle scheduling under churn; at
+        # close there is no churn left to wait out, so it is not honored.
+        try:
+            request = self._frozen_graph_input(snapshot)
+        except Exception as exc:  # noqa: BLE001 - a refused freeze is data
+            self.store.append(
+                "lsp_seal_convergence", outcome="freeze_refused",
+                reason=str(exc)[:200],
+            )
+            return
+        base = GraphBuildArtifact(
+            True,
+            self.engine_state.graph_path,
+            self.engine_state.graph_revision,
+        )
+        identity = self._lsp_enrichment_identity(request, base)
+        prior = self._lsp_outcomes_by_base.get(str(base.graph_revision or ""))
+        if identity in self._lsp_considered and (
+            prior is not None and prior not in self._LSP_CHURN_OBSOLETE
+        ):
+            # This exact base+input already has its definitive answer in
+            # the journal - published, no_op, failed all settle the tier
+            # question a seal retry cannot improve. A lost race (obsolete*)
+            # or a handle that never reported is the only debt a quiescent
+            # graph can still repay.
+            return
+        self._lsp_considered.add(identity)
+        try:
+            handle = self._schedule_lsp_candidate(request, base)
+        except Exception as exc:  # noqa: BLE001 - a refused schedule is data
+            self.store.append(
+                "lsp_seal_convergence", outcome="schedule_refused",
+                reason=str(exc)[:200],
+            )
+            return
+        self._lsp_bases[handle.task_id] = (request, base)
+        self._lsp_active = handle.task_id
+        try:
+            handle.terminal_receipt(
+                timeout=max(0.0, deadline - time.monotonic())
+            )
+            outcome = "terminated"
+        except Exception:  # noqa: BLE001 - a stall is data, not a close failure
+            outcome = "timeout"
+        self._poll_lsp_promotions()
+        self._record_graph_publication()
+        # The terminal may have staged a salvage; it merges against a graph
+        # nothing can move now, so it gets the same bounded window.
+        self._seal_drain_promotion_work(deadline)
+        self.store.append(
+            "lsp_seal_convergence", outcome=outcome,
+            task_id=str(getattr(handle, "task_id", "") or ""),
+            graph_revision=str(base.graph_revision or ""),
+        )
 
     def _record_graph_refresh_failure(
         self, cause: str, *, phase: str, severity: str = "ERROR",
