@@ -69,12 +69,18 @@ def test_only_closed_supported_workflow_set_is_active() -> None:
     # evidence for a release gate. `swelive_gt_harness_paid.yaml` is the
     # reviewed paid smoke path: workflow_dispatch-only, approval-gated by its
     # own input, and bound to the manifest pins -- admitted by name, not by
-    # loosening the rule.
+    # loosening the rule. `producer_build.yml` is admitted the same way: it
+    # is the certified producer-build lane (dispatch-only, builds the pinned
+    # Groundtruth gt-index binary with stamped source commit/fingerprint and
+    # static-link verification), touches no paid path, and exists so the
+    # producer artifact carries an auditable CI recipe rather than an
+    # unreproducible workstation build.
     assert active == [
         "deepswe_cache_images.yml",
         "deepswe_gt_harness_product.yml",
         "deepswe_gt_harness_product_p0731.yaml",
         "installed_rehearsal.yml",
+        "producer_build.yml",
         "swelive_gt_harness_paid.yaml",
         "tb2_cache_images.yml",
     ]

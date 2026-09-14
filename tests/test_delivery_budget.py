@@ -35,11 +35,13 @@ def test_delivery_policy_preserves_size_caps_and_uses_storm_backstop() -> None:
         "sealed": 1_400,
         "context_contract": 2_000,
         "context_delta": 1_400,
+        "plan_request_rejected": 1_400,
     }
     assert PROMPT_CONTEXT_BYTE_LIMIT == 1_400
     assert delivery_byte_limit(lane="sealed", kind="localization") == 1_400
     assert delivery_byte_limit(lane="prompt", kind="context_contract") == 2_000
     assert delivery_byte_limit(lane="prompt", kind="context_delta") == 1_400
+    assert delivery_byte_limit(lane="prompt", kind="plan_request_rejected") == 1_400
     assert TOTAL_DELIVERY_BYTE_LIMIT == 9_600
     assert MAX_TASK_DELIVERIES == 24
 
@@ -306,12 +308,14 @@ def test_refusal_reasons_match_what_the_runtime_can_emit():
 
 
 def test_prompt_delivery_kinds_match_the_kind_the_session_can_produce():
-    """The gate's prompt-kind set must track the expression that produces it.
+    """The gate's prompt-kind set must track the expressions that produce it.
 
     The same pair was hand-copied in four places, two of which raise, and the
-    producer is a two-valued expression in gt_session. Being one expression
-    from the emission makes a copy easy to VERIFY; it does not make it unable
-    to DRIFT. A third prompt kind would have lost runs with nothing going red.
+    producers are a two-valued `contract_kind` expression in gt_session plus
+    literal `kind=` arguments on prompt-lane GTDecisionCandidate calls. Being
+    one expression from each emission makes a copy easy to VERIFY; it does not
+    make it unable to DRIFT. A further prompt kind would have lost runs with
+    nothing going red.
     """
     import ast
     from pathlib import Path as _Path
@@ -323,16 +327,39 @@ def test_prompt_delivery_kinds_match_the_kind_the_session_can_produce():
     ).read_text(encoding="utf-8")
 
     produced = set()
+    offenders = []
     for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and getattr(node.targets[0], "id", None) == "contract_kind"
+        ):
+            for inner in ast.walk(node.value):
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    produced.add(inner.value)
             continue
-        if getattr(node.targets[0], "id", None) != "contract_kind":
+        if not isinstance(node, ast.Call):
             continue
-        for inner in ast.walk(node.value):
-            if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                produced.add(inner.value)
+        func = node.func
+        if getattr(func, "attr", getattr(func, "id", None)) != "GTDecisionCandidate":
+            continue
+        keywords = {kw.arg: kw.value for kw in node.keywords}
+        lane = keywords.get("lane")
+        if not (isinstance(lane, ast.Constant) and lane.value == "prompt"):
+            continue
+        kind = keywords.get("kind")
+        if isinstance(kind, ast.Constant) and isinstance(kind.value, str):
+            produced.add(kind.value)
+        elif isinstance(kind, ast.Name) and kind.id == "contract_kind":
+            pass
+        else:
+            offenders.append(f"gt_session.py:{node.lineno}")
 
-    assert produced, "no contract_kind assignment found - the scan is broken"
+    assert produced, "no prompt-kind producer found - the scan is broken"
+    assert not offenders, (
+        f"prompt-lane candidates must carry a literal kind or contract_kind "
+        f"so the emission domain stays extractable; offenders at {offenders}"
+    )
     assert produced == set(PROMPT_DELIVERY_KINDS), (
         f"session produces {sorted(produced)} but the budget table and every "
         f"gate keyed on it allow {sorted(PROMPT_DELIVERY_KINDS)}"

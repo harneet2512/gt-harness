@@ -826,14 +826,13 @@ class GTSession:
             tag = "GT_TASK_CONTRACT" if not contract_was_shipped else "GT_OBLIGATION_DELTA"
             rendered = f"[{tag}]\n{delta}"
             if self.model_visible:
-                kind = contract_kind
                 payload_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
                 supersession_key = "obligations:task"
                 active = self._active_context_units.get(supersession_key)
                 reference = self._store_context_unit(rendered)
                 candidates.append(GTDecisionCandidate(
                     rendered=rendered,
-                    kind=kind,
+                    kind=contract_kind,
                     dedup_key=f"prompt:{payload_hash}",
                     lane="prompt",
                     target="provider_prompt",
