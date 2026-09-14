@@ -274,3 +274,209 @@ def test_verification_pass_budget_is_shared_by_all_pending_checks(tmp_path, monk
     assert len(adapter._pending_check_ids) == 1
     assert adapter.plan_row_state(row_id) == "UNVERIFIED"
     assert verify_event_journal(adapter.store.path).valid
+
+
+def _stub_check_env(calls, *, returncode=0, writes=None):
+    class Env:
+        def execution_env(self):
+            return lambda *a, **k: None
+
+        def execute(self, payload, **kwargs):
+            calls.append(payload)
+            if writes is not None:
+                writes()
+            return {"returncode": returncode,
+                    "output": "1 passed" if returncode == 0 else "1 failed",
+                    "extra": {"capture_complete": True,
+                              "environment_sha256": "env-1"}}
+    return Env()
+
+
+def _seal_session(tmp_path, monkeypatch, *, predicates=()):
+    """An adapter that bound+passed one check at revision R, then moved to
+    R' - the exact staleness shape that attested product_completion_unverified
+    while the official verifier scored the task solved."""
+    from gt_engine.runtime_observation import capture_workspace
+
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_widget.py").write_text(
+        "def test_widget(): assert True\n", encoding="utf-8")
+    adapter = MiniSweAdapter(task_id="seal", repo_root=str(repo),
+                             state_dir=tmp_path / "state",
+                             predicates=predicates)
+    adapter.start_task()
+    adapter.persistent_plan = build_plan(None, build_plan_inputs(
+        "The widget must preserve compatibility.",
+        repo_root=str(repo), capture_baseline=False))
+    row_id = adapter.persistent_plan.rows[0].row_id
+    check_id = adapter.bind_plan_check(
+        {"argv": ["pytest", "-v", "test_widget.py"],
+         "requirement_ids": [row_id]})
+    return repo, adapter, row_id, check_id, capture_workspace
+
+
+def test_seal_recheck_refreshes_stale_check_evidence(tmp_path, monkeypatch):
+    from gt_engine.miniswe_controller import Predicate
+
+    repo, adapter, row_id, check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch, predicates=[Predicate("p", "mapped assertion")])
+    adapter.plan_row_predicates = {row_id: ("p",)}
+    calls = []
+    environment = _stub_check_env(calls)
+    adapter.drain_plan_checks(environment)
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    adapter.record_receipt("p", "assertion fixture", 0, "1 passed",
+                           epoch=adapter.workspace_epoch, status="GREEN",
+                           semantic=True)
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    adapter._phase = "FINISHED"
+    session = GTSession(GTSessionConfig(
+        task_id="seal", repo_root=str(repo), mode="advisory",
+        state_dir=str(tmp_path / "sstate"),
+        capabilities=("exact_provider_payload", "provider_response_ids",
+                      "structured_actions", "structured_results",
+                      "workspace_deltas", "filesystem_snapshots",
+                      "tool_call_deferral", "parsed_test_results")),
+        engine=adapter)
+    session._plan_agent = SimpleNamespace(env=environment)
+    state = session.completion_state()
+    assert len(calls) == 2
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    assert state["verified"] is True
+    events = [json.loads(line) for line in
+              adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    rechecks = [row for row in events if row["event"] == "plan_seal_recheck"]
+    assert rechecks[-1]["reason"] == "converged"
+    assert check_id in rechecks[-1]["repended"]
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_seal_recheck_failed_check_stays_unverified(tmp_path, monkeypatch):
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch)
+    calls = []
+    adapter.drain_plan_checks(_stub_check_env([]))
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    adapter._phase = "FINISHED"
+    session = GTSession(GTSessionConfig(task_id="seal", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._plan_agent = SimpleNamespace(
+        env=_stub_check_env(calls, returncode=1))
+    state = session.completion_state()
+    assert len(calls) == 1
+    assert adapter.plan_row_state(row_id) == "CHECK_FAILED"
+    assert state["verified"] is False
+    assert row_id in state["unmet_plan_rows"]
+    events = [json.loads(line) for line in
+              adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    rechecks = [row for row in events if row["event"] == "plan_seal_recheck"]
+    assert rechecks[-1]["reason"] == "still_unverified"
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_seal_recheck_check_side_effects_do_not_unsubmit(tmp_path, monkeypatch):
+    """A check whose own run writes files (pytest cache, coverage data) moves
+    the workspace revision inside the drain. The transaction machinery needs
+    IMPLEMENT to record that; the seal borrows the phase and must restore
+    FINISHED unconditionally or final_state loses the verified block."""
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch)
+    adapter.drain_plan_checks(_stub_check_env([]))
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    adapter._phase = "FINISHED"
+
+    def dirty():
+        (repo / ".check-cache").write_text("run\n", encoding="utf-8")
+
+    calls = []
+    session = GTSession(GTSessionConfig(task_id="seal", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._plan_agent = SimpleNamespace(
+        env=_stub_check_env(calls, writes=dirty))
+    session.completion_state()
+    assert adapter.phase == "FINISHED"
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_seal_recheck_bounded_under_perpetual_churn(tmp_path, monkeypatch):
+    """Two checks that each dirty the tree can never hold a simultaneous
+    fresh revision. The seal must bound the fixpoint instead of chasing it -
+    the verdict stays honestly unverified rather than hanging close()."""
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch)
+    (repo / "test_widget2.py").write_text(
+        "def test_widget2(): assert True\n", encoding="utf-8")
+    adapter.bind_plan_check({"argv": ["pytest", "-v", "test_widget2.py"],
+                             "requirement_ids": [row_id]})
+    adapter.drain_plan_checks(_stub_check_env([]))
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    adapter._phase = "FINISHED"
+    counter = [0]
+
+    def churn():
+        counter[0] += 1
+        (repo / f".churn-{counter[0]}").write_text("x\n", encoding="utf-8")
+
+    calls = []
+    session = GTSession(GTSessionConfig(task_id="seal", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._plan_agent = SimpleNamespace(
+        env=_stub_check_env(calls, writes=churn))
+    state = session.completion_state()
+    assert adapter.phase == "FINISHED"
+    assert len(calls) <= 2 * adapter.SEAL_PLAN_RECHECK_PASSES
+    assert state["verified"] is False
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_seal_recheck_skips_when_not_finished(tmp_path, monkeypatch):
+    repo, adapter, _row_id, _check_id, _cw = _seal_session(tmp_path, monkeypatch)
+    calls = []
+    session = GTSession(GTSessionConfig(task_id="seal", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._plan_agent = SimpleNamespace(env=_stub_check_env(calls))
+    session.completion_state()
+    assert not calls
+    events = [json.loads(line) for line in
+              adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    assert not any(row["event"] == "plan_seal_recheck" for row in events)
+
+
+def test_seal_recheck_executes_real_pytest_on_submitted_tree(tmp_path, monkeypatch):
+    """End-to-end with the real isolation boundary: pytest's own cache writes
+    are the check side-effect the phase borrow exists for."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux process-tree capture required")
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch)
+    environment = CredentialIsolatedLocalEnvironment(
+        cwd=str(repo), timeout=20, evidence_root=tmp_path / "evidence")
+    adapter.drain_plan_checks(environment)
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    adapter._phase = "FINISHED"
+    session = GTSession(GTSessionConfig(task_id="seal", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._plan_agent = SimpleNamespace(env=environment)
+    session.completion_state()
+    assert adapter.phase == "FINISHED"
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    assert verify_event_journal(adapter.store.path).valid

@@ -1072,6 +1072,10 @@ class MiniSweAdapter(GroundtruthController):
     #: five to eight distinct commands, not fifteen.
     REVERIFY_PASS_BUDGET_SECONDS = 30.0
     REVERIFY_COMMAND_TIMEOUT_SECONDS = 15.0
+    #: Total wall-clock the seal may spend re-observing stale plan checks on
+    #: the submitted tree. Independent of the LSP seal-convergence window.
+    SEAL_PLAN_RECHECK_BUDGET_SECONDS = 60.0
+    SEAL_PLAN_RECHECK_PASSES = 3
 
     def _reverify_after_edit(self, candidates: dict[str, str]) -> None:
         """Invalidate now; coalesce registered checks at a verification boundary.
@@ -1875,6 +1879,113 @@ class MiniSweAdapter(GroundtruthController):
             getattr(self, "_pending_program_check_ids", set()).discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
         self.publish_plan_state()
+
+    def _stale_plan_check_ids(self) -> dict[str, str]:
+        """Bound checks lacking conclusive evidence on the submitted tree.
+
+        Maps check_id -> pending-set attribute so argv and program checks
+        re-pend through the same drain path. Three gaps count: no observation
+        at all, an observation whose source revision or environment predates
+        the current tree, and a current-revision observation that classified
+        UNVERIFIED - inconclusive, most often because the check's own side
+        effects (a pytest cache appearing mid-run) moved the tree under it;
+        side effects are usually idempotent, so one bounded retry converges.
+        CHECK_FAILED is never re-pended: negative evidence stands.
+        """
+        observations = getattr(self, "_plan_check_observations", {})
+        environment_sha = getattr(self, "_current_check_environment_sha256", "")
+        stale: dict[str, str] = {}
+        for attribute, specs in (
+                ("_pending_check_ids", getattr(self, "_check_specs", {})),
+                ("_pending_program_check_ids",
+                 getattr(self, "_program_check_specs", {}))):
+            for check_id in specs:
+                observation = observations.get(check_id)
+                if (observation is None
+                        or observation.source_revision != self.repository_revision
+                        or observation.environment_sha256 != environment_sha
+                        or observation.state == "UNVERIFIED"):
+                    stale[check_id] = attribute
+        return stale
+
+    def seal_plan_recheck(self, environment: Any, *,
+                          budget_seconds: float | None = None,
+                          max_passes: int = SEAL_PLAN_RECHECK_PASSES) -> dict:
+        """Re-observe bound plan checks against the final submitted tree.
+
+        A check observed at revision R stops being evidence the moment the
+        workspace moves to R', and the agent's last verification command
+        usually predates its last edit - so rows that honestly passed mid-run
+        read UNVERIFIED on the tree that is actually scored, and the submit
+        gate's drain cannot fix that when the task's remaining budget no
+        longer clears the refusal reserve. At FINISHED the workspace is
+        quiescent: re-pending the stale checks and draining them through the
+        same isolation boundary produces current-revision evidence. A failed
+        recheck stays CHECK_FAILED, a check that cannot run stays UNVERIFIED;
+        nothing is relabeled.
+        """
+        rows = tuple(getattr(getattr(self, "persistent_plan", None), "rows", ()) or ())
+        summary: dict[str, Any] = {
+            "layout_schema": "gt.plan_seal_recheck.v1",
+            "ran": False, "passes": 0, "repended": [],
+            "remaining_unverified": [], "reason": "",
+        }
+        if self.phase != "FINISHED" or not rows:
+            summary["reason"] = "no_final_plan"
+            return summary
+        if (os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1"
+                or not callable(getattr(environment, "execution_env", None))):
+            summary["reason"] = "executor_unavailable"
+            self.store.append("plan_seal_recheck", **summary)
+            return summary
+        budget = (self.SEAL_PLAN_RECHECK_BUDGET_SECONDS
+                  if budget_seconds is None else max(0.0, budget_seconds))
+        deadline = time.monotonic() + budget
+        repended: set[str] = set()
+        # The drain records check side-effects through the ordinary
+        # transaction path, and note_edit refuses any phase but IMPLEMENT.
+        # A pytest cache write must not un-submit a finished task, so the
+        # seal borrows the phase for the drain's duration and restores it
+        # unconditionally.
+        self._phase = "IMPLEMENT"
+        try:
+            while summary["passes"] < max_passes:
+                stale = self._stale_plan_check_ids()
+                if not stale and not (
+                        getattr(self, "_pending_check_ids", set())
+                        or getattr(self, "_pending_program_check_ids", set())):
+                    break
+                for check_id, attribute in stale.items():
+                    pending = getattr(self, attribute, None) or set()
+                    pending.add(check_id)
+                    setattr(self, attribute, pending)
+                repended |= set(stale)
+                if deadline - time.monotonic() < 1:
+                    break
+                try:
+                    self.drain_plan_checks(
+                        environment,
+                        budget_seconds=deadline - time.monotonic())
+                except Exception as exc:  # noqa: BLE001 - never lose the seal
+                    summary["reason"] = f"drain_error:{type(exc).__name__}"
+                    break
+                summary["passes"] += 1
+                summary["ran"] = True
+        finally:
+            self._phase = "FINISHED"
+        summary["repended"] = sorted(repended)
+        summary["remaining_unverified"] = [
+            row.row_id for row in rows
+            if self.plan_row_state(row.row_id) not in {"CHECK_PASSED", "PROVEN"}
+        ]
+        if not summary["reason"]:
+            if summary["remaining_unverified"]:
+                summary["reason"] = "still_unverified"
+            else:
+                summary["reason"] = ("converged" if summary["ran"]
+                                     else "already_current")
+        self.store.append("plan_seal_recheck", **summary)
+        return summary
 
     def _record_check_pass_receipts(
         self, spec: Any, returncode: Any, output: str

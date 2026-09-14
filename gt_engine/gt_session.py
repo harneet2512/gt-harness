@@ -1658,10 +1658,38 @@ class GTSession:
         batch = GTDecisionBatch(policy=["accept" if accepted else "deny"])
         return accepted, batch
 
+    def _seal_plan_recheck(self) -> None:
+        """Refresh stale bound-check evidence on the submitted tree.
+
+        The submit gate is deliberately lenient - it blocks only on current
+        negative evidence - so a task can reach FINISHED with rows whose only
+        defect is evidence captured before the last edits. completion_state
+        is the last point where the workspace is quiescent and the journal is
+        still open. Never raises: verification plumbing must not lose the
+        run's receipts.
+        """
+        engine = self._engine
+        if engine is None or self.disabled:
+            return
+        if getattr(engine, "phase", "") != "FINISHED":
+            return
+        plan = getattr(engine, "persistent_plan", None)
+        if plan is None or not getattr(plan, "rows", ()):
+            return
+        environment = getattr(self._plan_agent, "env", None)
+        recheck = getattr(engine, "seal_plan_recheck", None)
+        if environment is None or not callable(recheck):
+            return
+        try:
+            recheck(environment)
+        except Exception as exc:  # noqa: BLE001 - verification plumbing fault
+            self.degrade("plan_seal_recheck", exc)
+
     def completion_state(self) -> dict[str, Any]:
         """Final session state, including honest verified/unverified."""
         if self._engine is None:
             return {"verified": False, "terminal": "internal_error"}
+        self._seal_plan_recheck()
         state = dict(self._engine.final_state())
         state.update({
             "gt_mode": self.mode.value,
