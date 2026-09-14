@@ -1,42 +1,38 @@
 artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
-source_commit=3f5ff8e18195951ffb91f431a14475ff1fdae842
-source_tree=1abb13f6c80c23211c04d8e93fbb94c76c611095
-sha256=e3b82b1bc9a3b92915556423f72bc928f5f5415bdff9eb71bdbb17c542a8043c
-build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
+source_commit=4f19c80a6263cc0f45539ad329f4d3a200941231
+source_tree=357e8d2e49ac34d4bff01e9485782d3c15915261
+sha256=0d3c72c549a4eb99149687cc46a5d96ad9287dc63fa51b297a8b98e7a8ba2082
+build_command=python -m build --wheel (from committed working tree)
 
-upstream_fix=3f5ff8e on branch wheel-patch-lsp-inventory (parent 6b4c923):
-  groundtruth/resolve.py — LSP type-enrichment now evicts each mutated
-  node row from parser_node_inventory in the same transaction as its
-  UPDATE nodes SET signature/return_type, restoring batch-amend parse
-  equality (producer DeepEqual on parser-owned rows); 3f5ff8e folds the
-  patch's one over-long line so the pinned source passes ruff format.
-  Verified: rebuilt wheel differs from pre-patch artifact only in
-  resolve.py + RECORD.
-  Pre-patch artifact sha256:
-  b1b8b2ba5b5b83c186f020a76354ede1ac98ec8791e69b91afe51e91631daf98
-  6b4c923 artifact sha256 (superseded by format fix, source-identical
-  modulo whitespace):
-  dd02fcb19c04f5c20e172a8f46b9a6a9e7a97886bb35d45aa5c32ae813037c337
+upstream_fix=e65febd3 + 4f19c80a on branch wheel-patch-lsp-inventory
+(parent 3f5ff8e):
+  e65febd3 — runtime language-matrix wave landed upstream:
+    groundtruth/resolve.py — pyright-langserver/pyright readiness budget
+    at 150s; server<->budget invariant so every promotable language's
+    server has a readiness budget (smoke20 bandit-taint cold-start fix).
+    groundtruth/runtime/obligations.py — subject_bound_test_runner proof
+    consolidated onto canonical TEST_RUNNER_RE/TEST_PASS_RE/TEST_FAIL_RE.
+    groundtruth/runtime/patterns.py — per-language runner/pass/fail/
+    static/compiler/env marker coverage (go, rust, java/mvn/gradle,
+    dotnet, node/jest/vitest/bun/deno/ava, ruby/bundler/rspec, php,
+    swift, elixir, sbt, bazel); single shared wrapper-prefix constant;
+    path-prefixed binaries (./mvnw, vendor/bin/phpunit,
+    node_modules/.bin/*); coded compile diagnostics anchored to
+    file:line: error shape.
+    groundtruth/runtime/repo_adapters.py — JS adapter no longer emits
+    npm test for absent/placeholder scripts.test; subpackage manifest
+    reach via manager scoping flags; per-language test_commands
+    coverage.
+    groundtruth/runtime/test_runner.py — runner detection widened
+    (dotnet/sbt/mix/phpunit/bazel/deno/bun); count families (bun
+    pass/fail, dotnet Passed:/Failed:, maven Tests run:); per-language
+    passing-name parsers; ::-path and bare-name .rs identity resolution.
+  4f19c80a — style: ruff-format conformance on the same files
+  (format-only; fixes the lint failure that red CI on e65febd3).
+  Verified: verify_wheel_source correspondence PASS vs src/
+  (committed tree, no worktree delta).
 
-harness_fix (uncommitted working-tree delta on 3f5ff8e, sha e3b82b1c):
-  groundtruth/runtime/repo_adapters.py — JavaScriptRepoAdapter no longer
-  emits `npm test` for a package.json whose scripts.test is absent or the
-  npm-init placeholder (smoke20 claude-code: "Missing script: test" ->
-  no_tests_observed), and reaches test scripts declared in immediate
-  subpackage manifests (backend/, frontend/) via the manager's scoping
-  flag (--prefix/--dir/--cwd).
-  groundtruth/resolve.py — pyright-langserver/pyright added to
-  _READY_BUDGET_S_BY_SERVER at 150s (smoke20 bandit-taint: all 36 legs
-  cold-started a fresh pyright whose ~202-file + site-packages index never
-  converged inside the 20s default, so every probing leg ran project_ready
-  =false and resolved zero call edges). The barrier early-exits on the
-  first real answer, so warm legs are not slowed.
-  Wheel rebuilt from the recorded source tree; verify_wheel_source PASS
-  (323 files byte-identical). The delta must land upstream before this
-  artifact is treated as a clean-commit wheel. Prior artifact sha256:
-  e11bb0430068637b01558695e0a64815f59f5360ac510975fca63b48ce6fe395
-
-Recorded source tree carries 2456 committed files.
+Recorded source tree carries the committed 4f19c80a tree.
 This pin records the vendored artifact's identity only. It does not certify installed
 validation or whole-product readiness; those are recorded in Linear HAR-87.
