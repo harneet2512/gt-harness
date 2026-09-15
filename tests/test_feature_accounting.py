@@ -404,6 +404,87 @@ def test_feature_evaluated_recovery_steer_due_but_undelivered_is_starved():
     assert "steer_due" in row["evidence"]
 
 
+def test_def_partition_declines_correctly_when_the_lattice_never_matched():
+    # Run 35016130850 dynaconf: 72 search-boundary invocations, zero
+    # def_ref_partition rows. Dispatch on AMBIGUOUS_HIT/FLOOD is
+    # unconditional, so absence of a row means the outcome never classified
+    # ambiguous - never eligible, a correct abstention, not NO_DELIVERY.
+    events = [
+        TASK_START,
+        {"event": "producer_invocation", "event_type": "search_result",
+         "producer": "ranked_localization", "outcome": "entered"},
+        {"event": "producer_invocation", "event_type": "search_result",
+         "producer": "ranked_localization", "outcome": "returned_fact"},
+        {"event": "producer_invocation", "event_type": "failed_search",
+         "producer": "ranked_localization", "outcome": "returned_nothing"},
+    ]
+
+    row = row_for("def_partition", account(events))
+
+    assert row["state"] == "DECLINED_CORRECTLY"
+    assert "AMBIGUOUS_HIT/FLOOD" in row["evidence"]
+
+
+def test_def_partition_dispatched_and_abstained_declines_correctly():
+    # Dispatched (the lattice matched) but the producer found no production
+    # definition to assert - a correct abstention, not starvation.
+    events = [
+        TASK_START,
+        {"event": "producer_invocation", "event_type": "search_result",
+         "producer": "def_ref_partition", "feature_id": "def_partition",
+         "outcome": "entered", "returned_fact": False},
+    ]
+
+    row = row_for("def_partition", account(events))
+
+    assert row["state"] == "DECLINED_CORRECTLY"
+    assert "dispatched 1x" in row["evidence"]
+
+
+def test_def_partition_returned_fact_but_undelivered_is_starved():
+    events = [
+        TASK_START,
+        {"event": "producer_invocation", "event_type": "search_result",
+         "producer": "def_ref_partition", "feature_id": "def_partition",
+         "outcome": "returned_fact", "returned_fact": True},
+    ]
+
+    row = row_for("def_partition", account(events))
+
+    assert row["state"] == "STARVED"
+    assert "returned_fact=true" in row["evidence"]
+
+
+def test_submit_refusal_counts_action_suppressed_as_the_delivery():
+    # Run 35016130850 dynaconf: the gate saw active_red and the refusal WAS
+    # enforced via session.suppress -> action_suppressed reason=submit_refused
+    # (the suppressed action's result is what the model sees). Those rows
+    # carry no delivery_identity, so without this arm an enforced refusal
+    # audits as STARVED.
+    events = [
+        TASK_START,
+        {"event": "submit_decision", "active_red": ["pred-1"]},
+        {"event": "action_suppressed", "reason": "submit_refused"},
+        {"event": "action_suppressed", "reason": "submit_refused"},
+        {"event": "session_closed", "terminal": "submitted_unverified"},
+    ]
+
+    report = account(events)
+
+    assert row_for("submit_refusal", report)["state"] == "DELIVERED"
+    assert row_for("submit_refusal", report)["delivered"] == 2
+
+
+def test_submit_refusal_without_suppression_still_starves():
+    events = [
+        TASK_START,
+        {"event": "submit_decision", "active_red": ["pred-1"]},
+        {"event": "session_closed", "terminal": "submitted_unverified"},
+    ]
+
+    assert row_for("submit_refusal", account(events))["state"] == "STARVED"
+
+
 def test_newfile_precedent_is_eligible_when_a_change_operation_is_create():
     # runtime_observation.py:594 - operation is one of create/delete/modify.
     events = [TASK_START, {"event": "edit_transaction", "changed_paths": ["pkg/new.py"]}]
@@ -592,13 +673,15 @@ def test_a_producer_that_returned_a_fact_and_delivered_nothing_is_starved():
 
 
 def test_an_underivable_row_names_the_producer_invocation_it_is_missing():
-    events = [TASK_START, {"event": "producer_invocation",
-                           "event_type": "search_result"}]
+    # With no search boundary witnessed at all there is nothing to derive
+    # from: search_result is not a decidable-absence boundary, so the honest
+    # state is unknown - and it names the row that would have decided it.
+    events = [TASK_START]
 
     row = row_for("def_partition", account(events))
 
-    assert row["state"] == "NO_DELIVERY"
-    assert "no producer_invocation row with feature_id=def_partition" in row["evidence"]
+    assert row["state"] == "BOUNDARY_UNKNOWN"
+    assert "producer_invocation" in row["evidence"]
 
 
 def test_blob_derived_eligibility_outranks_the_producer_invocation_fallback():

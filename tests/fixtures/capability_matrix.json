@@ -56,12 +56,20 @@
     },
     {
      "id": "gtbridge_owned_features_unwired",
-     "observed": "swelive remaining run 34996816912 feature accounting: covering_red STARVED (eligible 1x on source-edit -> failing-test ordering, delivered nothing); recovery, def_partition, GT_HYPOTHESIS NO_DELIVERY (boundaries reached test_result x10 / tool_result x46 / search_result x20, zero producer_invocation rows for those feature_ids). Eligibility rows (feature.evaluated) are emitted only by GTBridge._trace_record; GTBridge is constructed solely by create_bridge (gt_engine/__init__.py), whose only caller is the nano dev CLI - never the Mini-SWE shipping path. On every Mini-SWE run these four features are either dead or unverifiable; the audit cannot distinguish 'never eligible' from 'never dispatched'. PARTIALLY RESOLVED: _run_evidence now emits feature_evaluated (layout gt.feature_evaluation.v1) for the covering_red and recovery local lanes on every failing-test boundary - eligible flag + attributed/no_edited_file_link/no_prior_edit or steer_due/tracked_no_steer - and feature_accounting reads those rows before the ordering proxy, so abstained-vs-never-entered is now distinguishable. STILL OPEN: def_partition has no Mini-SWE lane at all (zero dispatches by construction) - needs wiring or an honest not-on-this-path classification.",
+     "observed": "swelive remaining run 34996816912 feature accounting: covering_red STARVED (eligible 1x on source-edit -> failing-test ordering, delivered nothing); recovery, def_partition, GT_HYPOTHESIS NO_DELIVERY (boundaries reached test_result x10 / tool_result x46 / search_result x20, zero producer_invocation rows for those feature_ids). Eligibility rows (feature.evaluated) are emitted only by GTBridge._trace_record; GTBridge is constructed solely by create_bridge (gt_engine/__init__.py), whose only caller is the nano dev CLI - never the Mini-SWE shipping path. RESOLVED (audit-side): _run_evidence now emits feature_evaluated (layout gt.feature_evaluation.v1) for the covering_red and recovery local lanes on every failing-test boundary - eligible flag + attributed/no_edited_file_link/no_prior_edit or steer_due/tracked_no_steer - and feature_accounting reads those rows before the ordering proxy. def_partition turned out to be WIRED all along: _produce_def_ref_partition dispatches unconditionally on AMBIGUOUS_HIT/FLOOD in the wheel's outcome lattice, so on witnessed search boundaries a missing invocation row IS the eligibility fact (never eligible -> declined correctly); accounting now derives that and run 35016130850 reads DECLINED_CORRECTLY where it previously read NO_DELIVERY. GT_HYPOTHESIS resolves through owner recovery. REMAINING GAP: feature_evaluated rows only exist on journals produced after this fix - earlier runs still audit under the ordering proxy.",
      "covering_tests": [
       "tests/test_miniswe_runtime.py",
       "tests/test_feature_accounting.py"
      ],
-     "status": "open - observability fixed for covering_red/recovery local lanes; def_partition remains unwired with no local lane"
+     "status": "fixed - observability closed for covering_red/recovery/def_partition; earlier runs audit under the ordering proxy (honest STARVED/NO_DELIVERY)"
+    },
+    {
+     "id": "submit_refusal_delivery_invisible",
+     "observed": "run 35016130850 dynaconf-1241: submit_refusal + its GT_SS_SUBMIT_RED/GT_CERT_DELIVERY caps audited STARVED - '1 of 1 submit_decision rows carry active_red and no refusal was delivered' - while the refusal was in fact enforced: session.suppress journals action_suppressed rows (reason=submit_refused, executed=false) and the suppressed action result is what the model sees. The rows carry no delivery_identity so the identity pass could never attribute them. Fixed: account() counts action_suppressed reason=submit_refused as the submit_refusal delivery",
+     "covering_tests": [
+      "tests/test_feature_accounting.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

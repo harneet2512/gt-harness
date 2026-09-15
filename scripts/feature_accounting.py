@@ -383,6 +383,61 @@ def journal_eligibility(
             ),
         }
 
+    # def_partition and the other outcome-lattice features (name_fold,
+    # wrong_surface, body_concept) differ from covering_red/recovery: their
+    # dispatch is UNCONDITIONAL once classify_outcome lands on their class
+    # (gateway _produce_def_ref_partition on AMBIGUOUS_HIT/FLOOD carries no
+    # kill-switch), and every dispatch - entered, abstained, suppressed - is
+    # journaled through producer_recorder. So on a reached search boundary a
+    # missing invocation row is not an audit gap: it means the lattice never
+    # classified a search ambiguous or flooded, which is "never eligible", a
+    # correct abstention. The eligibility decision lives in the outcome
+    # classifier, not in a feature_evaluated row.
+    search_boundaries = [
+        event for event in events
+        if str(event.get("event") or "") == "producer_invocation"
+        and str(event.get("event_type") or "") in {"search_result", "failed_search"}
+    ]
+    if search_boundaries:
+        lattice_dispatched = [
+            event for event in events
+            if str(event.get("event") or "") == "producer_invocation"
+            and str(event.get("feature_id") or "") == "def_partition"
+        ]
+        # A candidate exists only when an invocation carried returned_fact -
+        # entered-but-abstained (production_definition_absent et al.) is the
+        # producer correctly declining on its own evidence, same semantics as
+        # the generic producer_invocation fallback below.
+        facts = sum(
+            1 for event in lattice_dispatched if event.get("returned_fact")
+        )
+        if not lattice_dispatched:
+            eligible["def_partition"] = {
+                "eligible": 0,
+                "of": len(search_boundaries),
+                "declined_because": (
+                    f"{len(search_boundaries)} search boundaries ran the "
+                    "outcome lattice and none classified AMBIGUOUS_HIT/FLOOD "
+                    "- dispatch on that outcome is unconditional, so no "
+                    "invocation row means the precondition never held"
+                ),
+                "starved_because": "",
+            }
+        else:
+            eligible["def_partition"] = {
+                "eligible": facts,
+                "of": len(search_boundaries),
+                "declined_because": (
+                    f"dispatched {len(lattice_dispatched)}x on "
+                    f"{len(search_boundaries)} search boundaries; no "
+                    "invocation carries returned_fact=true"
+                ),
+                "starved_because": (
+                    f"{facts} of {len(lattice_dispatched)} dispatches "
+                    "carried returned_fact=true and nothing was delivered"
+                ),
+            }
+
     # newfile_precedent - a created file exposes a sibling/registry precedent.
     # runtime_observation.py:594 writes one of create/delete/modify per change,
     # in the edit_transactions blob rather than in the journal row, which
@@ -586,6 +641,17 @@ def account(
     refused: collections.Counter[str] = collections.Counter()
     for unit, feature in identity_feature.items():
         (refused if identity_refused.get(unit) else delivered)[feature] += 1
+    # submit_refusal's delivery is the suppression itself: session.suppress
+    # journals action_suppressed rows carrying reason=submit_refused, and the
+    # suppressed action's result is what the model sees (gt_session.py:1721).
+    # They carry no delivery_identity, so the identity pass above can never
+    # see them - count them here or an enforced refusal reads as starvation.
+    for event in events:
+        if (
+            str(event.get("event") or "") == "action_suppressed"
+            and str(event.get("reason") or "") == "submit_refused"
+        ):
+            delivered["submit_refusal"] += 1
     # One delivery can be seen from several sides, and the sides disagree about
     # how much they know: the ledger row carries the supersession key, the lane
     # row carries only the kind. Resolve at the end so the best-informed view of
