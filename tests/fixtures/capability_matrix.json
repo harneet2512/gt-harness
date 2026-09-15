@@ -53,6 +53,11 @@
       "tests/test_delivery_payload.py"
      ],
      "status": "covered"
+    },
+    {
+     "id": "gtbridge_owned_features_unwired",
+     "observed": "swelive remaining run 34996816912 feature accounting: covering_red STARVED (eligible 1x on source-edit -> failing-test ordering, delivered nothing); recovery, def_partition, GT_HYPOTHESIS NO_DELIVERY (boundaries reached test_result x10 / tool_result x46 / search_result x20, zero producer_invocation rows for those feature_ids). Eligibility rows (feature.evaluated) are emitted only by GTBridge._trace_record; GTBridge is constructed solely by create_bridge (gt_engine/__init__.py), whose only caller is the nano dev CLI - never the Mini-SWE shipping path. On every Mini-SWE run these four features are either dead or unverifiable; the audit cannot distinguish 'never eligible' from 'never dispatched'.",
+     "status": "open - covering_red confirmed starved on a real eligible boundary; recovery/def_partition/GT_HYPOTHESIS need either Mini-SWE-path wiring or an honest not-on-this-path classification; eligibility observability (feature.evaluated outside GTBridge) is a prerequisite"
     }
    ]
   },
