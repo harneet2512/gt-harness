@@ -14,6 +14,23 @@ carries an ``evidence_type``, and ``attribution.feature_for_evidence`` already
 maps those onto the census identities, so nothing new has to be invented or
 maintained alongside the producer.
 
+An answer of "unknown" has to earn itself
+-----------------------------------------
+Half this table used to read unknown, and none of those unknowns were about
+the run: they were about which rows this script opened. Two rules now hold.
+
+A boundary is NOT_REACHED only when its witness is one the producer writes on
+every path it could have occurred on (``DECIDABLE_ABSENCE``); otherwise the row
+stays unknown and the evidence string NAMES the journal row it wanted, so a
+reader can check the claim instead of trusting it.
+
+An evidence type is "unattributed" only when no feature and no channel claims
+it. ``execution_evidence`` and ``verification_plan`` are capability CHANNELS
+and get their own section; ``context_delta`` is a prompt-lane byte budget that
+resolves through its supersession key, or is reported as lane-kind-only when it
+carries none. None of the three is a census gap, and reporting them as one
+turned 19 ordinary deliveries into a phantom drift.
+
 Three states, and the third is not a failure
 --------------------------------------------
 DELIVERED      the feature put evidence in front of the model, with a count.
@@ -41,20 +58,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gt_engine.attribution import (  # noqa: E402
     CAPABILITY_OWNERS,
     DIRECT_FEATURES,
+    LANE_KINDS,
+    channel_for_evidence,
     feature_for_evidence,
+    feature_for_supersession,
 )
 from gt_engine.delivery_budget import REFUSAL_EVENTS  # noqa: E402
-
-# Which journal events prove a declared boundary was reached. Only boundaries
-# derivable UNAMBIGUOUSLY appear here: the feature vocabulary (edit_result,
-# submit, search_result, file_view, test_result, tool_result) and the journal's
-# own (task_start, before_action, after_action) are different vocabularies, and
-# inventing a join between them is the mistake this file exists to stop making.
-# A boundary absent from this map is reported unknown, never assumed.
-BOUNDARY_EVIDENCE = {
-    "task_start": ("runtime_layout",),
-    "edit_result": ("edit_transaction",),
-}
 
 # The submit boundary is decided by a POSITIVE DECLARATION, not by an absence.
 # session_closed fires once on every path and carries how the run ended, so
@@ -69,7 +78,110 @@ BOUNDARY_EVIDENCE = {
 # this derivation safe where the other was not.
 SUBMIT_TERMINALS = frozenset({"submitted", "submitted_verified", "submitted_unverified"})
 
+# A run can end without ever reaching close. run_terminal is the supervisor's
+# own row and carries the same `terminal` field, so a timed-out run says
+# `timeout` here rather than saying nothing at all - which is exactly the case
+# 34996816912 was in, and why its whole submit column read unknown.
+TERMINAL_EVENTS = ("session_closed", "run_terminal")
+
 SCHEMA = "gt.feature_accounting.v1"
+
+# Everything this script opens. Printed with each underivable row so a reader
+# can tell "the run does not record it" from "the script did not look".
+EXAMINED = "events.jsonl, transaction_artifacts/, edit_transactions/"
+
+
+def _row(name: str, **fields: str):
+    """A predicate matching one journal event name, optionally on field values."""
+    def check(event: dict) -> bool:
+        if str(event.get("event") or "") != name:
+            return False
+        return all(str(event.get(key) or "") == value for key, value in fields.items())
+    return check
+
+
+def _submit_terminal(event: dict) -> bool:
+    return (
+        str(event.get("event") or "") in TERMINAL_EVENTS
+        and str(event.get("terminal") or "") in SUBMIT_TERMINALS
+    )
+
+
+# Which journal rows prove a declared boundary was reached. The feature
+# vocabulary (edit_result, submit, search_result, file_view, test_result,
+# tool_result, task_start) and the journal's own event names are different
+# vocabularies, and inventing a join between them is the mistake this file
+# exists to stop making. Every join below is one the producer itself writes:
+#
+#   producer_invocation.event_type IS the feature vocabulary - the gateway
+#   stamps the semantic boundary from miniswe_evidence._derive_semantic_events
+#   onto every dispatch (miniswe_integration.py:5134).
+#   execution_evidence.kind == "test" is the parsed test observation.
+#   execution_finished is one completed repository action.
+#
+# Each entry is (what the row is, predicate). The label is printed verbatim
+# when the witness is missing, so an unknown always names the field it wanted.
+BOUNDARY_EVIDENCE = {
+    "task_start": (
+        ("runtime_layout", _row("runtime_layout")),
+    ),
+    "edit_result": (
+        ("edit_transaction", _row("edit_transaction")),
+    ),
+    "file_view": (
+        ("producer_invocation.event_type=file_view",
+         _row("producer_invocation", event_type="file_view")),
+    ),
+    "search_result": (
+        ("producer_invocation.event_type=search_result",
+         _row("producer_invocation", event_type="search_result")),
+        ("producer_invocation.event_type=failed_search",
+         _row("producer_invocation", event_type="failed_search")),
+    ),
+    "test_result": (
+        ("execution_evidence.kind=test", _row("execution_evidence", kind="test")),
+    ),
+    "tool_result": (
+        ("execution_finished", _row("execution_finished")),
+    ),
+    "submit": (
+        ("plan_gate_decision", _row("plan_gate_decision")),
+        ("submission_patch_observed.stage=submit",
+         _row("submission_patch_observed", stage="submit")),
+        (f"session_closed/run_terminal terminal in {sorted(SUBMIT_TERMINALS)}",
+         _submit_terminal),
+    ),
+}
+
+# Boundaries whose ABSENCE is itself evidence, because their witness is written
+# once per occurrence on every path: the layout at task start, a transaction per
+# edit, a parsed observation per test, a finish per action, and for submit a row
+# that fires whether the gate accepted, refused, or the supervisor killed the
+# run.
+#
+# file_view and search_result are deliberately NOT here. producer_invocation is
+# emitted per producer DISPATCH, not per boundary, so zero rows means "no
+# producer was dispatched at that boundary" and cannot be read as "the model
+# never searched". Those stay unknown, and the unknown names the field.
+DECIDABLE_ABSENCE = frozenset({
+    "task_start", "edit_result", "test_result", "tool_result", "submit",
+})
+
+# Deliveries a feature proves with its own journal row instead of through the
+# delivery_identity ledger. Both of these put bytes in front of the model -
+# the rendered plan (gt_session persistent plan delivery) and the plan gate's
+# directive, appended to the next request as a user message
+# (miniswe_runtime.py:2118) - and neither travels as an evidence_type, so the
+# ledger alone reports them as silence.
+ROW_DELIVERIES = {
+    "persistent_plan_delivered": "persistent_plan",
+    "plan_gate_directive_prepared": "plan_gate",
+}
+
+# Paths whose edit cannot start a covering-test regression, because they are
+# the test. Kept crude on purpose: a false NEGATIVE here would invent an
+# eligibility the run never had.
+_TEST_PATH_MARKERS = ("test_", "_test.", "/tests/", "tests/", "conftest.py")
 
 
 def edit_eligibility(artifacts: list[dict]) -> dict[str, dict]:
@@ -117,6 +229,10 @@ def edit_eligibility(artifacts: list[dict]) -> dict[str, dict]:
             "eligible": syntax_eligible,
             "of": syntax_checked,
             "unchecked": syntax_unchecked,
+            "declined_because": (
+                f"its precondition never held in {syntax_checked} checked "
+                "edit transactions"
+            ),
             # No artifact on record contains a non-empty `diagnostics`, so this
             # negative has never been positively controlled - the query has not
             # been shown capable of finding one. `valid: True` on every parsed
@@ -128,11 +244,198 @@ def edit_eligibility(artifacts: list[dict]) -> dict[str, dict]:
             "eligible": signature_eligible,
             "of": len(artifacts),
             "caller_coverage": dict(coverage),
+            "declined_because": (
+                f"its precondition never held in {len(artifacts)} checked "
+                "edit transactions"
+            ),
         },
     }
 
 
-def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
+def _is_test_path(path: str) -> bool:
+    text = str(path or "").replace("\\", "/")
+    name = text.rsplit("/", 1)[-1]
+    return any(marker in text for marker in _TEST_PATH_MARKERS) or name.startswith("test_")
+
+
+def journal_eligibility(
+    events: list[dict],
+    transactions: list[dict] | None = None,
+    known: frozenset[str] | set[str] = frozenset(),
+) -> dict[str, dict]:
+    """The preconditions that live in the journal rather than in a blob.
+
+    Three of these rows used to read "eligibility not derivable", which is a
+    claim about where this script looked. The producer writes every field they
+    need; the script was not reading them.
+
+    ``known`` names the features an earlier, stronger source already decided.
+    They are excluded from the producer_invocation fallback at the bottom:
+    "the edit changed no signature" describes the run, while "the producer
+    returned nothing" describes only the producer, and the first outranks the
+    second wherever both exist.
+
+    A feature absent from the returned mapping stays underivable ON PURPOSE -
+    the caller prints that scope rather than an unknown. `newfile_precedent`
+    is the case: without the ``edit_transactions/`` blobs there is no
+    ``operation`` field anywhere, and answering "no file was created" from the
+    journal alone would be answering from an absence.
+    """
+    eligible: dict[str, dict] = {}
+
+    # covering_red - an executed covering test fails because of an edited
+    # source file. The attribution half (which source broke which test) is the
+    # covering runner's own job and is not in the journal; what IS in the
+    # journal is the ordering that has to hold before it can have one. Edits
+    # confined to test files are excluded: a test that fails after only tests
+    # changed is not a regression in a source file.
+    source_edits = 0
+    failure_followed = 0
+    pending = 0
+    for event in events:
+        name = str(event.get("event") or "")
+        if name == "edit_transaction":
+            paths = [str(p) for p in event.get("changed_paths") or ()]
+            if any(not _is_test_path(path) for path in paths):
+                source_edits += 1
+                pending += 1
+        elif (
+            name == "execution_evidence"
+            and str(event.get("kind") or "") == "test"
+            and str(event.get("observed_test_outcome") or "") == "fail"
+            and pending
+        ):
+            failure_followed += pending
+            pending = 0
+    eligible["covering_red"] = {
+        "eligible": failure_followed,
+        "of": source_edits,
+        "declined_because": (
+            "no execution_evidence kind=test observed_test_outcome=fail followed "
+            f"any of the {source_edits} source-file edit transactions"
+        ),
+        "starved_because": (
+            f"{failure_followed} of {source_edits} source-file edit transactions "
+            "were followed by an execution_evidence kind=test "
+            "observed_test_outcome=fail and no covering verdict was delivered"
+        ),
+    }
+
+    # newfile_precedent - a created file exposes a sibling/registry precedent.
+    # runtime_observation.py:594 writes one of create/delete/modify per change,
+    # in the edit_transactions blob rather than in the journal row, which
+    # carries only `changed_paths`.
+    if transactions is not None:
+        creates = 0
+        inspected = 0
+        silent = 0
+        for blob in transactions:
+            changes = blob.get("changes") or ()
+            if not changes:
+                silent += 1
+                continue
+            inspected += 1
+            if any(str(c.get("operation") or "") == "create" for c in changes):
+                creates += 1
+        eligible["newfile_precedent"] = {
+            "eligible": creates,
+            "of": inspected,
+            "unchecked": silent,
+            "declined_because": (
+                f"no change in {inspected} edit transactions carries "
+                "operation=create"
+            ),
+            "starved_because": (
+                f"{creates} of {inspected} edit transactions carry a change with "
+                "operation=create and no precedent was delivered"
+            ),
+        }
+
+    # persistent_plan - built once, before the first edit, and delivered once.
+    built = sum(1 for e in events if str(e.get("event") or "") == "persistent_plan_built")
+    eligible["persistent_plan"] = {
+        "eligible": 1 if built else 0,
+        "of": 1,
+        "declined_because": "no persistent_plan_built row exists",
+        "starved_because": (
+            f"{built} persistent_plan_built row(s) exist and no "
+            "persistent_plan_delivered or plan_cursor delivery followed"
+        ),
+    }
+
+    # plan_gate - consulted at submit; `accepted: false` is the gate holding.
+    decisions = [e for e in events if str(e.get("event") or "") == "plan_gate_decision"]
+    if decisions:
+        refusals = sum(1 for e in decisions if e.get("accepted") is False)
+        eligible["plan_gate"] = {
+            "eligible": refusals,
+            "of": len(decisions),
+            "declined_because": (
+                f"all {len(decisions)} plan_gate_decision rows carry accepted=true "
+                "(no plan row was left without evidence)"
+            ),
+            "starved_because": (
+                f"{refusals} of {len(decisions)} plan_gate_decision rows carry "
+                "accepted=false and no plan_gate_directive_prepared row followed"
+            ),
+        }
+
+    # submit_refusal - refuse once when submission is attempted with unresolved
+    # positive failing evidence. submit_decision.active_red IS that evidence.
+    submits = [e for e in events if str(e.get("event") or "") == "submit_decision"]
+    if submits:
+        reds = sum(1 for e in submits if e.get("active_red"))
+        eligible["submit_refusal"] = {
+            "eligible": reds,
+            "of": len(submits),
+            "declined_because": (
+                f"active_red was empty on all {len(submits)} submit_decision rows"
+            ),
+            "starved_because": (
+                f"{reds} of {len(submits)} submit_decision rows carry a non-empty "
+                "active_red and no refusal was delivered"
+            ),
+        }
+    # Last resort for every other feature: the gateway's own invocation rows.
+    # `feature_id` is stamped by the producer recorder from the invocation's
+    # evidence_types (miniswe_integration.py:5140), so this is the producer
+    # naming its own census identity rather than a join this script invented.
+    # `returned_fact` is the producer saying it had something; a dispatch that
+    # returned nothing is the producer declining, which is the distinction the
+    # whole table is for.
+    #
+    # Applied ONLY where nothing better exists - the blob-derived preconditions
+    # above describe what the edit looked like, which is stronger than what the
+    # producer did about it.
+    invocations: collections.defaultdict = collections.defaultdict(list)
+    for event in events:
+        if str(event.get("event") or "") == "producer_invocation":
+            invocations[str(event.get("feature_id") or "")].append(event)
+    for feature, calls in invocations.items():
+        if not feature or feature in eligible or feature in known:
+            continue
+        facts = sum(1 for e in calls if e.get("returned_fact"))
+        entered = sum(1 for e in calls if str(e.get("outcome") or "") == "entered")
+        eligible[feature] = {
+            "eligible": facts,
+            "of": len(calls),
+            "declined_because": (
+                f"its producer was dispatched {len(calls)} times, entered {entered}, "
+                "and no invocation carries returned_fact=true"
+            ),
+            "starved_because": (
+                f"{facts} of {len(calls)} producer_invocation rows carry "
+                "returned_fact=true and nothing was delivered"
+            ),
+        }
+    return eligible
+
+
+def account(
+    events: list[dict],
+    artifacts: list[dict] | None = None,
+    transactions: list[dict] | None = None,
+) -> dict:
     """Resolve each DELIVERY once, then count deliveries - never events.
 
     The two identity-bearing event classes are disjoint and describe the same
@@ -150,18 +453,33 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
     """
     identity_feature: dict[str, str] = {}
     identity_refused: dict[str, bool] = {}
+    identity_channel: dict[str, str] = {}
     identity_kinds: dict[str, str] = {}
     reached: collections.Counter[str] = collections.Counter()
+    witnessed: dict[str, collections.Counter] = collections.defaultdict(
+        collections.Counter
+    )
     terminal: str | None = None
 
-    for event in events:
+    for position, event in enumerate(events):
         name = str(event.get("event") or "")
-        for boundary, markers in BOUNDARY_EVIDENCE.items():
-            if name in markers:
-                reached[boundary] += 1
+        for boundary, witnesses in BOUNDARY_EVIDENCE.items():
+            for label, matches in witnesses:
+                if matches(event):
+                    reached[boundary] += 1
+                    witnessed[boundary][label] += 1
 
-        if name == "session_closed":
-            terminal = str(event.get("terminal") or "")
+        if name in TERMINAL_EVENTS and event.get("terminal") is not None:
+            # session_closed wins when both exist: it is the engine's own close,
+            # while run_terminal is the supervisor's, and only one of them is
+            # written on the path where the engine got to finish.
+            if terminal is None or name == "session_closed":
+                terminal = str(event.get("terminal") or "")
+        if name in ROW_DELIVERIES:
+            # These carry no delivery_identity of their own, so they get a
+            # synthetic one keyed by position. It cannot collide with a real
+            # identity (those are hex digests) and cannot collide with itself.
+            identity_feature[f"{name}#{position}"] = ROW_DELIVERIES[name]
         supersession = str(event.get("supersession_key") or "")
         evidence_type = str(event.get("evidence_type") or "")
         if not supersession and not evidence_type:
@@ -179,15 +497,24 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
         # same deliveries is the prompt-lane KIND (context_contract for the
         # first contract delivery, context_delta for every one after,
         # gt_session.py:582), which says only how its bytes are budgeted.
-        feature = None
+        #
+        # A capability CHANNEL is checked before the census: execution_evidence
+        # and verification_plan are real deliveries that no feature identity
+        # claims by design, and letting them fall through to the unattributed
+        # bucket reported a transport lane as a census gap.
+        feature = channel = None
         if supersession:
-            feature = feature_for_evidence(supersession) or feature_for_evidence(
-                supersession.split(":", 1)[0]
-            )
-        if not feature and evidence_type:
-            feature = feature_for_evidence(evidence_type)
+            channel = channel_for_evidence(supersession)
+            if not channel:
+                feature = feature_for_supersession(supersession)
+        if not feature and not channel and evidence_type:
+            channel = channel_for_evidence(evidence_type)
+            if not channel:
+                feature = feature_for_evidence(evidence_type)
         if feature:
             identity_feature[unit] = feature
+        elif channel:
+            identity_channel.setdefault(unit, channel)
         else:
             identity_kinds.setdefault(unit, supersession or evidence_type)
         if name in REFUSAL_EVENTS:
@@ -197,11 +524,29 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
     refused: collections.Counter[str] = collections.Counter()
     for unit, feature in identity_feature.items():
         (refused if identity_refused.get(unit) else delivered)[feature] += 1
+    # One delivery can be seen from several sides, and the sides disagree about
+    # how much they know: the ledger row carries the supersession key, the lane
+    # row carries only the kind. Resolve at the end so the best-informed view of
+    # an identity wins, rather than whichever row happened to come first.
+    resolved = set(identity_feature) | set(identity_channel)
+    channels = collections.Counter(
+        channel for unit, channel in identity_channel.items()
+        if unit not in identity_feature
+    )
+    lane_only = collections.Counter(
+        kind for unit, kind in identity_kinds.items()
+        if unit not in resolved and kind in LANE_KINDS
+    )
     unattributed = collections.Counter(
-        kind for unit, kind in identity_kinds.items() if unit not in identity_feature
+        kind for unit, kind in identity_kinds.items()
+        if unit not in resolved and kind not in LANE_KINDS
     )
 
-    eligible = edit_eligibility(artifacts or [])
+    from_blobs = edit_eligibility(artifacts or [])
+    eligible = {
+        **from_blobs,
+        **journal_eligibility(events, transactions, known=set(from_blobs)),
+    }
     rows = []
     # All 19 identities, not the 12 owners. Seven of the 19 are capability
     # aliases whose evidence is produced by another feature (CAPABILITY_OWNERS),
@@ -216,10 +561,15 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
         boundaries = tuple(DIRECT_FEATURES[source].get("boundaries", ()))
         derivable = [b for b in boundaries if b in BOUNDARY_EVIDENCE]
         hits = {b: reached[b] for b in derivable if reached[b]}
-        if "submit" in boundaries and terminal is not None:
-            derivable.append("submit")
-            if terminal in SUBMIT_TERMINALS:
-                hits["submit"] = 1
+        # A boundary is only DENIABLE when its witness is written on every path
+        # it could have occurred on. `submit` earns that only once a terminal
+        # row exists to read: a run killed before either close row is genuinely
+        # unknown, and unknown must not be rendered as "never happened".
+        deniable = [
+            b for b in derivable
+            if b in DECIDABLE_ABSENCE and (b != "submit" or terminal is not None)
+        ]
+        undecidable = [b for b in boundaries if b not in deniable and b not in hits]
         if count:
             state, evidence = "DELIVERED", f"{count} deliveries the model saw"
         elif declined:
@@ -252,12 +602,18 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
                 # An UNKNOWN is a claim about the world; "I did not look" is a
                 # claim about the reader. Only one of those is verifiable from
                 # in here, and this script used to emit the other. Say the scope.
-                evidence = (f"no delivery at {where}; eligibility not derivable "
-                            f"(examined: events.jsonl, transaction_artifacts/)")
+                # Name the row that would have decided it. "Eligibility not
+                # derivable" is a claim about the reader; "the run has no
+                # producer_invocation row with feature_id=recovery" is a claim
+                # about the journal, and a reader can check it.
+                evidence = (
+                    f"no delivery at {where}; eligibility not derivable - the run "
+                    f"has no producer_invocation row with feature_id={source} "
+                    f"(examined: {EXAMINED})"
+                )
             elif not elig["eligible"]:
                 state = "DECLINED_CORRECTLY"
-                evidence = (f"no delivery at {where}; its precondition never held "
-                            f"in {elig['of']} checked edit transactions")
+                evidence = f"no delivery at {where}; {elig['declined_because']}"
                 if elig.get("unchecked"):
                     evidence += f"; {elig['unchecked']} could not be checked"
                 if elig.get("uncontrolled_negative"):
@@ -269,17 +625,32 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
                     unavail = elig["caller_coverage"].get("unavailable", 0)
                     detail = (f"; caller_coverage unavailable on {unavail}/"
                               f"{elig['of']} edits")
-                evidence = (f"eligible {elig['eligible']}x in {elig['of']} edit "
-                            f"transactions and delivered nothing{detail}")
-        elif derivable:
+                evidence = elig.get("starved_because") or (
+                    f"eligible {elig['eligible']}x in {elig['of']} edit "
+                    "transactions and delivered nothing"
+                )
+                evidence += detail
+        elif not undecidable:
             state = "NOT_REACHED"
-            evidence = "its boundary never occurred: " + ", ".join(sorted(derivable))
-            if "submit" in derivable and terminal:
+            evidence = "its boundary never occurred: " + ", ".join(sorted(deniable))
+            if "submit" in deniable and terminal:
                 evidence += f" (run ended {terminal})"
         else:
+            # Not "no journal evidence defines X". That sentence was true of the
+            # script, not of the journal, and it is what put seven of this run's
+            # 21 rows in the unknown column while the deciding rows sat in the
+            # same file. An unknown now has to name the row it wanted.
             state = "BOUNDARY_UNKNOWN"
-            evidence = ("no journal evidence defines " + ", ".join(sorted(boundaries))
-                        + " (examined: events.jsonl, transaction_artifacts/)")
+            wanted = [
+                label
+                for boundary in sorted(undecidable)
+                for label, _ in BOUNDARY_EVIDENCE.get(boundary, ())
+            ]
+            evidence = (
+                "no journal row witnesses " + ", ".join(sorted(undecidable))
+                + "; the run has no " + ", ".join(wanted) + " row"
+                + f" (examined: {EXAMINED})"
+            )
         if owner:
             evidence = f"via {owner}: {evidence}"
         rows.append({
@@ -322,8 +693,20 @@ def account(events: list[dict], artifacts: list[dict] | None = None) -> dict:
         "not_reached": sum(1 for row in rows if row["state"] == "NOT_REACHED"),
         "boundary_unknown": sum(1 for row in rows if row["state"] == "BOUNDARY_UNKNOWN"),
         "boundaries_reached": dict(sorted(reached.items())),
+        "boundary_witnesses": {
+            boundary: dict(sorted(counts.items()))
+            for boundary, counts in sorted(witnessed.items())
+        },
         "terminal": terminal,
         "capability_aliases": dict(sorted(CAPABILITY_OWNERS.items())),
+        # Deliveries that are accounted for WITHOUT being a census feature.
+        # They are reported because they are real bytes the model saw, and they
+        # are reported separately because calling them unattributed implied a
+        # census gap that does not exist.
+        "channel_evidence": dict(channels.most_common()),
+        "channel_evidence_total": sum(channels.values()),
+        "lane_kind_only": dict(lane_only.most_common()),
+        "lane_kind_only_total": sum(lane_only.values()),
         "unattributed_evidence": dict(unattributed.most_common()),
         "unattributed_total": sum(unattributed.values()),
         "rows": rows,
@@ -356,6 +739,22 @@ def render(report: dict) -> str:
     for row in report["rows"]:
         if row["trigger"]:
             lines.append(f"  {row['feature']:22s} {row['trigger']}")
+    if report.get("channel_evidence_total"):
+        lines.append("")
+        lines.append(
+            f"channel evidence (not a feature) - {report['channel_evidence_total']} "
+            "deliveries a capability ships as a lane, which no census identity claims:"
+        )
+        for kind, count in report["channel_evidence"].items():
+            lines.append(f"    {kind:38s} {count}")
+    if report.get("lane_kind_only_total"):
+        lines.append("")
+        lines.append(
+            f"prompt-lane kind only - {report['lane_kind_only_total']} deliveries "
+            "carrying a byte-budget kind and no supersession key:"
+        )
+        for kind, count in report["lane_kind_only"].items():
+            lines.append(f"    {kind:38s} {count}")
     if report["unattributed_total"]:
         lines.append("")
         lines.append(
@@ -387,7 +786,17 @@ def main() -> int:
     ]
     blobs = sorted(path.parent.glob("transaction_artifacts/*.json"))
     artifacts = [json.loads(b.read_text(encoding="utf-8")) for b in blobs]
-    report = account(events, artifacts)
+    # `edit_transactions/` is a SEPARATE directory from `transaction_artifacts/`
+    # and carries a different thing: the per-change `operation`
+    # (create/delete/modify) that newfile_precedent's precondition is made of.
+    # None, not [], when the directory is absent - an empty list would let the
+    # script report "nothing was created" about a run it never opened.
+    edits = sorted(path.parent.glob("edit_transactions/*.json"))
+    transactions = (
+        [json.loads(b.read_text(encoding="utf-8")) for b in edits]
+        if (path.parent / "edit_transactions").is_dir() else None
+    )
+    report = account(events, artifacts, transactions)
     print(render(report))
     if args.json_out:
         Path(args.json_out).write_text(

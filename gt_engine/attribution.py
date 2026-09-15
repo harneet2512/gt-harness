@@ -209,12 +209,95 @@ _EVIDENCE_FEATURES = {
 }
 
 
+# Evidence a capability ships as a CHANNEL rather than as a census feature.
+#
+# `execution_evidence` is the parsed result of a command the model itself ran
+# (miniswe_runtime.py:2026-2070) and `verification_plan` is the post-edit check
+# list (miniswe_integration.py:2755). Both are real deliveries with a real
+# delivery_identity, and neither is one of the 21 census identities - no entry
+# in DIRECT_FEATURES declares them and none ever will, because they are the
+# transport a feature's facts travel on, not a fact anyone can be right or
+# wrong about.
+#
+# Before this set existed they fell through feature_for_evidence into an
+# "unattributed evidence - a type no feature claims" bucket, which is a true
+# sentence with a false implication: it reads as a producer/census drift, and
+# on run 34996816912 it put 14 of the run's 19 unclaimed items there when
+# nothing was drifting at all. Naming them makes the report say which lane
+# carried them instead of implying someone forgot to register a feature.
+CAPABILITY_CHANNELS: frozenset[str] = frozenset({
+    "execution_evidence",
+    "verification_plan",
+})
+
+# The supersession namespace each channel is keyed under. `execution_evidence`
+# is superseded by `execution:<command_sha256>` so a re-run of the same command
+# replaces its predecessor; the evidence_type and the namespace therefore do
+# not spell the same word and both have to be recognised.
+_CHANNEL_NAMESPACES: dict[str, str] = {
+    "execution": "execution_evidence",
+    "verification_plan": "verification_plan",
+}
+
+# Supersession namespaces that name a feature but are NOT evidence types.
+#
+# The plan cursor (gt_session.py:_plan_cursor_candidate) is keyed
+# `plan_cursor:task` and shipped as prompt-lane kind `context_delta`. Its kind
+# says only how its bytes are budgeted, so the key is the only thing in the
+# journal that says which feature the delivery belongs to. Putting it in
+# _EVIDENCE_FEATURES would be wrong in the other direction: `plan_cursor` is
+# never an evidence_type, and feature_for_evidence is also what decides the
+# `feature_id` stamped on producer_invocation rows.
+_SUPERSESSION_FEATURES: dict[str, str] = {
+    "plan_cursor": "persistent_plan",
+}
+
+# Prompt-lane KINDS. These describe a delivery's byte budget, never its
+# identity: `context_contract` is the first contract delivery and
+# `context_delta` is every one after it (gt_session.py:818). A delivery that
+# carries one of these and nothing else - the GT_FINALIZATION advisory is the
+# case, dedup-keyed and deliberately unsuperseded - has no feature to belong
+# to. That is a property of the delivery, not a gap in the census.
+LANE_KINDS: frozenset[str] = frozenset({"context_contract", "context_delta"})
+
+
 def feature_for_evidence(evidence_type: str | None) -> str | None:
     """Map a concrete envelope type to its 17-feature census identity."""
     value = str(evidence_type or "")
     if value.startswith(("missing_role:", "missing_role_postcreate:")):
         return "newfile_precedent"
     return _EVIDENCE_FEATURES.get(value)
+
+
+def channel_for_evidence(value: str | None) -> str | None:
+    """Name the capability channel an evidence_type or supersession key rides.
+
+    Returns None for anything that is a feature's evidence or an unknown type,
+    so a caller can keep treating a genuine unknown as a genuine unknown.
+    """
+    text = str(value or "")
+    if text in CAPABILITY_CHANNELS:
+        return text
+    return _CHANNEL_NAMESPACES.get(text.split(":", 1)[0])
+
+
+def feature_for_supersession(key: str | None) -> str | None:
+    """Resolve a supersession key to a census identity, namespace included.
+
+    The producer's declared key beats the envelope kind, so this is tried
+    first: `obligations:task` and `localization:task` resolve through the
+    evidence vocabulary they share a word with, and `plan_cursor:task` through
+    _SUPERSESSION_FEATURES, which exists for the keys that share none.
+    """
+    text = str(key or "")
+    if not text:
+        return None
+    namespace = text.split(":", 1)[0]
+    return (
+        feature_for_evidence(text)
+        or feature_for_evidence(namespace)
+        or _SUPERSESSION_FEATURES.get(namespace)
+    )
 
 
 def _canonical_bytes(value: Any) -> bytes:

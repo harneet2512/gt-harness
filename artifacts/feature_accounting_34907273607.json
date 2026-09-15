@@ -1,0 +1,470 @@
+{
+  "boundaries_reached": {
+    "edit_result": 23,
+    "file_view": 12,
+    "search_result": 8,
+    "submit": 5,
+    "task_start": 1,
+    "test_result": 6,
+    "tool_result": 42
+  },
+  "boundary_unknown": 0,
+  "boundary_witnesses": {
+    "edit_result": {
+      "edit_transaction": 23
+    },
+    "file_view": {
+      "producer_invocation.event_type=file_view": 12
+    },
+    "search_result": {
+      "producer_invocation.event_type=search_result": 8
+    },
+    "submit": {
+      "plan_gate_decision": 3,
+      "session_closed/run_terminal terminal in ['submitted', 'submitted_unverified', 'submitted_verified']": 1,
+      "submission_patch_observed.stage=submit": 1
+    },
+    "task_start": {
+      "runtime_layout": 1
+    },
+    "test_result": {
+      "execution_evidence.kind=test": 6
+    },
+    "tool_result": {
+      "execution_finished": 42
+    }
+  },
+  "capability_aliases": {
+    "GT_CERT_DELIVERY": "submit_refusal",
+    "GT_CHANGE_SURFACE": "newfile_precedent",
+    "GT_EDIT_CHECK": "syntax_result",
+    "GT_HYPOTHESIS": "recovery",
+    "GT_LOC_RESLOT": "localization",
+    "GT_PATCH_DELTA": "signature_delta",
+    "GT_SS_SUBMIT_RED": "submit_refusal"
+  },
+  "capability_aliases_shown": 7,
+  "channel_evidence": {
+    "execution_evidence": 6,
+    "verification_plan": 6
+  },
+  "channel_evidence_total": 12,
+  "delivered": 8,
+  "deliveries_resolved": 31,
+  "direct_features": 14,
+  "identities": 21,
+  "journal_rows": 932,
+  "lane_kind_only": {
+    "context_delta": 1
+  },
+  "lane_kind_only_total": 1,
+  "no_delivery": 3,
+  "not_reached": 0,
+  "refused": 0,
+  "rows": [
+    {
+      "alias_of": "submit_refusal",
+      "boundaries": [
+        "submit"
+      ],
+      "boundaries_reached": {
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "via submit_refusal: no delivery at submit x5; active_red was empty on all 1 submit_decision rows",
+      "feature": "GT_CERT_DELIVERY",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "submission is attempted with unresolved positive failing evidence",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "newfile_precedent",
+      "boundaries": [
+        "search_result",
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "search_result": 8
+      },
+      "delivered": 0,
+      "evidence": "via newfile_precedent: no delivery at edit_result x23, search_result x8; no change in 6 edit transactions carries operation=create; 17 could not be checked",
+      "feature": "GT_CHANGE_SURFACE",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "repeated failed search or a new file exposes a verified sibling/registry precedent",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "syntax_result",
+      "boundaries": [
+        "edit_result",
+        "submit"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "via syntax_result: no delivery at edit_result x23, submit x5; its precondition never held in 6 checked edit transactions; negative uncontrolled - no artifact on record trips it",
+      "feature": "GT_EDIT_CHECK",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "an executed syntax/compiler check fails on an edited source file",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "recovery",
+      "boundaries": [
+        "test_result",
+        "tool_result"
+      ],
+      "boundaries_reached": {
+        "test_result": 6,
+        "tool_result": 42
+      },
+      "delivered": 0,
+      "evidence": "via recovery: no delivery at test_result x6, tool_result x42; eligibility not derivable - the run has no producer_invocation row with feature_id=recovery (examined: events.jsonl, transaction_artifacts/, edit_transactions/)",
+      "feature": "GT_HYPOTHESIS",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "NO_DELIVERY",
+      "trigger": "the same test failure recurs after an intervening edit, a fresh attributable required RED persists near the iteration limit, or a repository action repeats without information gain",
+      "triggered": "yes",
+      "worked": "unknown"
+    },
+    {
+      "alias_of": "localization",
+      "boundaries": [
+        "task_start",
+        "search_result"
+      ],
+      "boundaries_reached": {
+        "search_result": 8,
+        "task_start": 1
+      },
+      "delivered": 3,
+      "evidence": "via localization: 3 deliveries the model saw",
+      "feature": "GT_LOC_RESLOT",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "the indexed task or search has ranked relevant source locations",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "signature_delta",
+      "boundaries": [
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23
+      },
+      "delivered": 0,
+      "evidence": "via signature_delta: no delivery at edit_result x23; its precondition never held in 6 checked edit transactions",
+      "feature": "GT_PATCH_DELTA",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "a before/after edit changes a callable signature with verified call sites",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "submit_refusal",
+      "boundaries": [
+        "submit"
+      ],
+      "boundaries_reached": {
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "via submit_refusal: no delivery at submit x5; active_red was empty on all 1 submit_decision rows",
+      "feature": "GT_SS_SUBMIT_RED",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "submission is attempted with unresolved positive failing evidence",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "file_view",
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "file_view": 12
+      },
+      "delivered": 2,
+      "evidence": "2 deliveries the model saw",
+      "feature": "caller_contract",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "a viewed or signature-edited callable has verified callers",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "file_view",
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "file_view": 12
+      },
+      "delivered": 8,
+      "evidence": "8 deliveries the model saw",
+      "feature": "cochange_prior",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "the indexed revision contains a verified co-change companion for the viewed or edited file",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "edit_result",
+        "submit"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "no delivery at edit_result x23, submit x5; no execution_evidence kind=test observed_test_outcome=fail followed any of the 4 source-file edit transactions",
+      "feature": "covering_red",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "an executed covering test fails because of an edited source file",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "search_result"
+      ],
+      "boundaries_reached": {
+        "search_result": 8
+      },
+      "delivered": 0,
+      "evidence": "no delivery at search_result x8; eligibility not derivable - the run has no producer_invocation row with feature_id=def_partition (examined: events.jsonl, transaction_artifacts/, edit_transactions/)",
+      "feature": "def_partition",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "NO_DELIVERY",
+      "trigger": "a symbol search contains definitions and references that can be partitioned",
+      "triggered": "yes",
+      "worked": "unknown"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "task_start",
+        "search_result"
+      ],
+      "boundaries_reached": {
+        "search_result": 8,
+        "task_start": 1
+      },
+      "delivered": 3,
+      "evidence": "3 deliveries the model saw",
+      "feature": "localization",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "the indexed task or search has ranked relevant source locations",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "search_result",
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "search_result": 8
+      },
+      "delivered": 0,
+      "evidence": "no delivery at edit_result x23, search_result x8; no change in 6 edit transactions carries operation=create; 17 could not be checked",
+      "feature": "newfile_precedent",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "repeated failed search or a new file exposes a verified sibling/registry precedent",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "task_start"
+      ],
+      "boundaries_reached": {
+        "task_start": 1
+      },
+      "delivered": 3,
+      "evidence": "3 deliveries the model saw",
+      "feature": "obligations",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "issue text yields non-empty, evidence-backed implementation obligations",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "task_start"
+      ],
+      "boundaries_reached": {
+        "task_start": 1
+      },
+      "delivered": 11,
+      "evidence": "11 deliveries the model saw",
+      "feature": "persistent_plan",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "a task-level plan is built before the first edit from the prompt, the base-commit repository and the graph, and delivered once",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "submit"
+      ],
+      "boundaries_reached": {
+        "submit": 5
+      },
+      "delivered": 2,
+      "evidence": "2 deliveries the model saw",
+      "feature": "plan_gate",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "submission is attempted while a plan requirement has no evidence, or a test that was green before the first edit is now failing",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "test_result",
+        "tool_result"
+      ],
+      "boundaries_reached": {
+        "test_result": 6,
+        "tool_result": 42
+      },
+      "delivered": 0,
+      "evidence": "no delivery at test_result x6, tool_result x42; eligibility not derivable - the run has no producer_invocation row with feature_id=recovery (examined: events.jsonl, transaction_artifacts/, edit_transactions/)",
+      "feature": "recovery",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "NO_DELIVERY",
+      "trigger": "the same test failure recurs after an intervening edit, a fresh attributable required RED persists near the iteration limit, or a repository action repeats without information gain",
+      "triggered": "yes",
+      "worked": "unknown"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "task_start"
+      ],
+      "boundaries_reached": {
+        "task_start": 1
+      },
+      "delivered": 2,
+      "evidence": "2 deliveries the model saw",
+      "feature": "select_catalog",
+      "kind": "CAP",
+      "refused": 0,
+      "state": "DELIVERED",
+      "trigger": "a versioned bootstrap catalog is constructed and offered to the model",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "edit_result"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23
+      },
+      "delivered": 0,
+      "evidence": "no delivery at edit_result x23; its precondition never held in 6 checked edit transactions",
+      "feature": "signature_delta",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "a before/after edit changes a callable signature with verified call sites",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "submit"
+      ],
+      "boundaries_reached": {
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "no delivery at submit x5; active_red was empty on all 1 submit_decision rows",
+      "feature": "submit_refusal",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "submission is attempted with unresolved positive failing evidence",
+      "triggered": "yes",
+      "worked": "yes"
+    },
+    {
+      "alias_of": "",
+      "boundaries": [
+        "edit_result",
+        "submit"
+      ],
+      "boundaries_reached": {
+        "edit_result": 23,
+        "submit": 5
+      },
+      "delivered": 0,
+      "evidence": "no delivery at edit_result x23, submit x5; its precondition never held in 6 checked edit transactions; negative uncontrolled - no artifact on record trips it",
+      "feature": "syntax_result",
+      "kind": "FACT",
+      "refused": 0,
+      "state": "DECLINED_CORRECTLY",
+      "trigger": "an executed syntax/compiler check fails on an edited source file",
+      "triggered": "yes",
+      "worked": "yes"
+    }
+  ],
+  "schema": "gt.feature_accounting.v1",
+  "terminal": "submitted_unverified",
+  "unattributed_evidence": {},
+  "unattributed_total": 0
+}
