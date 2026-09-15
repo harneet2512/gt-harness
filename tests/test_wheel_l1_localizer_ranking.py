@@ -101,13 +101,50 @@ def _make_beets_db(tmp_path):
 
 
 def test_installed_wheel_ranks_witnessed_file_above_witnessless(tmp_path):
+    """Two-layer contract: the localizer must rank the witnessed file above
+    witnessless hard negatives, and the delivered brief order must agree.
+
+    The strict arm lives at ``localize()`` — the layer that owns the ranking
+    defect — because ``result.files`` is a render-join over the assembled
+    brief: when the container's render pipeline emits no numbered candidate
+    lines (run 34943918731: localizer healthy, ``entries=4``, yet
+    ``files == []``), the delivered-order arm is vacuous. An empty delivered
+    set dumps full diagnostics instead of silently passing or masking the
+    join failure.
+    """
+    from groundtruth.pretask.graph_localizer import localize
     from groundtruth.pretask.v1r_brief import generate_v1r_brief
 
     repo, db = _make_beets_db(tmp_path)
+
+    loc = localize(_BEETS_ISSUE, db, repo_root=repo)
+    loc_order = [c.file_path.replace("\\", "/") for c in loc.candidates]
+    assert "beets/importer.py" in loc_order, (
+        f"witnessed importer.py absent from localizer candidates: {loc_order}"
+    )
+    imp = loc_order.index("beets/importer.py")
+    for witnessless in ("beets/util/pipeline.py", "beets/library.py"):
+        if witnessless in loc_order:
+            assert imp < loc_order.index(witnessless), (
+                f"localizer ranked witness-less {witnessless} above "
+                f"witnessed importer.py: {loc_order}"
+            )
+
     result = generate_v1r_brief(
         _BEETS_ISSUE, repo, db, bug_id="beets-5495-synth"
     )
     paths = [entry.path for entry in result.files]
+    assert paths, (
+        "installed wheel delivered zero file candidates in this environment "
+        f"(localizer order was {loc_order}). brief_text:\n"
+        f"{result.brief_text}\n"
+        f"delivered_candidate_count={result.delivered_candidate_count} "
+        f"rendered_candidate_count={result.rendered_candidate_count} "
+        f"budget_suppressed={result.budget_suppressed} "
+        f"confidence_tier={result.confidence_tier} "
+        f"localizer_confident={loc.confident} "
+        f"localizer_gate={loc.gate_reason}"
+    )
     assert "beets/importer.py" in paths
     imp = paths.index("beets/importer.py")
     for witnessless in ("beets/util/pipeline.py", "beets/library.py"):
