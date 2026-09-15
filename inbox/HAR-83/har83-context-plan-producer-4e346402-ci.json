@@ -1,0 +1,38 @@
+{
+ "basis": "exact_ci_pytest_matrix_pretask_embedder_identity_fix",
+ "detail": {
+  "ci_conclusion": "success",
+  "ci_matrix": "lint + go-build + benchmark + test x {ubuntu,macos,windows} x {3.11,3.12} - all green",
+  "ci_workflow_run_id": 34988179204,
+  "changes": [
+   "835c680f fix(pretask): foreign-model cache masquerade + silent witness-path death - model_identity reports a truthful class-qualified foreign:<module>.<qualname> identity for models without the adapter surface (raw SentenceTransformer, stubs) instead of the configured (gte-modernbert-base,768) default, closing the shared-passage-cache dim collision that raised np.dot(768,384) and was silently swallowed as _loc=None (whole witness path dead, zero trace); _semantic_score_by_file skips wrong-width cached vectors instead of feeding np.dot; [GT_WARN] stderr marker on the localize() swallow; sorted() on the _stem_files set (B5-4 parity)",
+   "4e346402 style(tests): ruff format + drop unused pytest import in brief determinism test (lint-only, tests/ scope)"
+  ],
+  "full_producer_ci_conclusion": "not_run_separately_python_only",
+  "measured": {
+   "binding": "wheel_source_correspondence PASS vs git-archive LF export of 4e346402 src/ - 323 package files, 0 missing/extra/changed; wheel_sha256==56a65a20; src/ subtree identical across 835c680f..4e346402 (00fb2c9a, lint commit touches tests/ only)",
+   "e2e": "acceptance run 34985500743 localize() arm in-container: loc_order=[importer.py, db.py, library.py, pipeline.py] - witnessed importer.py first; empty .files traced to Profile-2 brief flags leaked by apply_profile_env in the serial suite (honest minimal-brief posture, delivered_candidate_count=None C15 marker), not a wheel defect; harness-side posture pinning + env isolation landed in 05587d3e",
+   "edges": "post_certification_changed_paths 750 (749 + tests/pretask/test_brief_determinism.py); commit touches src/groundtruth/{memory/enrich/embed.py, pretask/graph_localizer.py, pretask/v1r_brief.py} + tests/pretask/test_brief_determinism.py; Go producer src untouched",
+   "python_tests": "tests/pretask/test_brief_determinism.py 5 green locally (model_identity truth table, wrong-width-cache resilience, 4-seed PYTHONHASHSEED subprocess order sweep); product CI matrix green on 4e346402 (run 34988179204)",
+   "go_tests": "not run - no Go changes; producer binary carried forward from 1e893f63 (run 34900591114, sha b3572fb0, tags netgo,osusergo,sqlite_fts5)"
+  },
+  "producer_sha256": "b3572fb08819616f44a20d62e2a89ac6b1b57951b053b5da1ff53b01f3da8fd0",
+  "remaining": [
+   "canonical provider-free acceptance on final bundle SHA (vendored wheel 56a65a20 + manifest repin)",
+   "installed full-flow rehearsal on new wheel+binary",
+   "2-task SWE-Live smoke re-run on repinned bundle, then 20-task DeepSWE matched cohort",
+   "paid smoke approval gate"
+  ],
+  "repository": "harneet2512/groundtruth",
+  "scope": "Pretask embedder-identity + witness-path resilience: truthful foreign-model cache identity, wrong-width dot guard, [GT_WARN] on localize() swallow, _stem_files sort; wheel rebuilt from git-archive LF export",
+  "source_tree": "885fa423d18f19f454db9d50efa6ebb3b544339e",
+  "wheel_sha256": "56a65a2057992730593d0adf550c2e3ce448eb445482f6075e91a3f6827c01dd"
+ },
+ "head_sha": "4e346402f534e9d126d10d5719087b9899ac2efc",
+ "kind": "check_outcome",
+ "packet_id": "har83-context-plan-producer-4e346402-ci",
+ "schema": "gt.review_packet.v1",
+ "status": "PASS",
+ "ticket": "HAR-83",
+ "packet_digest_sha256": "330d82b106df5001bc2247e96ce5d1db03b6012a5e9398ad95a7c16aaf3a5d18"
+}

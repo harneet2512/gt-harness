@@ -180,7 +180,8 @@
     "rev-220-har74-interim",
     "rev-221-transport-rewind-fixed",
     "rev-222-har69-interim",
-    "rev-222-reviewer-interim"
+    "rev-222-reviewer-interim",
+    "har83-context-plan-producer-4e346402-ci"
   ],
   "schema":"gt.review_inbox.v1",
   "tickets":{
@@ -424,7 +425,8 @@
       "har83-context-plan-producer-f1e0a7f3-ci",
       "har83-final-hardening-exact-build-08fe997d0",
       "har83-final-hardening-producer-9d0d8079f",
-      "har83-unified-source-1ecd03674"
+      "har83-unified-source-1ecd03674",
+      "har83-context-plan-producer-4e346402-ci"
     ],
     "HAR-87":[
       "har87-groundtruth-green-ci-193b9d93b"
