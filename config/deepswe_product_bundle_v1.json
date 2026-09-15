@@ -22,11 +22,11 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "1e893f63dad16b5b473ce2335791cc9b70ad4d44",
-    "source_tree": "b50f748f1f295fe90851e6ae21b457f208162ebb",
+    "source_commit": "4e346402f534e9d126d10d5719087b9899ac2efc",
+    "source_tree": "885fa423d18f19f454db9d50efa6ebb3b544339e",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "160120290c2584a2a6e54a61ba9b5e6327de4eabb62656f18c0a8fbce0092180",
+    "wheel_sha256": "56a65a2057992730593d0adf550c2e3ce448eb445482f6075e91a3f6827c01dd",
     "producer_path": "vendor/gt-index-linux-amd64",
     "producer_sha256": "b3572fb08819616f44a20d62e2a89ac6b1b57951b053b5da1ff53b01f3da8fd0",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
@@ -65,7 +65,7 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "1e893f63dad16b5b473ce2335791cc9b70ad4d44",
+      "source_commit": "4e346402f534e9d126d10d5719087b9899ac2efc",
       "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -204,7 +204,9 @@
         "3f5ff8e18195951ffb91f431a14475ff1fdae842",
         "e65febd39ec8c93c2911f7335465de02e4d500a7",
         "4f19c80a6263cc0f45539ad329f4d3a200941231",
-        "1e893f63dad16b5b473ce2335791cc9b70ad4d44"
+        "1e893f63dad16b5b473ce2335791cc9b70ad4d44",
+        "835c680f0a3da41d25416ae34bdfa5029a943ff9",
+        "4e346402f534e9d126d10d5719087b9899ac2efc"
       ],
       "post_certification_changed_paths": [
         ".gitattributes",
@@ -692,6 +694,7 @@
         "tests/pretask/test_anchors.py",
         "tests/pretask/test_audit_snapshot_readonly.py",
         "tests/pretask/test_brief_5lang_labels.py",
+        "tests/pretask/test_brief_determinism.py",
         "tests/pretask/test_brief_fact_correctness.py",
         "tests/pretask/test_contract_blast_facts.py",
         "tests/pretask/test_contract_map.py",
@@ -957,7 +960,7 @@
         "tests/wrapper/test_router_v2_telemetry.py",
         "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
       ],
-      "review_inbox_commit": "baf73a42d388904bc97e91d603c2acc7f89e22dc",
+      "review_inbox_commit": "4a6a94f07c69fb172b8416e3c4b475741712d259",
       "review_packets": [
         {
           "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -1122,6 +1125,15 @@
           "status": "PASS",
           "basis": "exact_ci_static_build_inventory_divergence_heal",
           "packet_digest_sha256": "8c9d4d4f84e363f14353dec05609325095d8cf0b823ecdd82423bf3b2644a31f"
+        },
+        {
+          "path": "inbox/HAR-83/har83-context-plan-producer-4e346402-ci.json",
+          "packet_id": "har83-context-plan-producer-4e346402-ci",
+          "head_sha": "4e346402f534e9d126d10d5719087b9899ac2efc",
+          "kind": "check_outcome",
+          "status": "PASS",
+          "basis": "exact_ci_pytest_matrix_pretask_embedder_identity_fix",
+          "packet_digest_sha256": "330d82b106df5001bc2247e96ce5d1db03b6012a5e9398ad95a7c16aaf3a5d18"
         }
       ],
       "product_review_packets": [
@@ -1142,7 +1154,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "d88ec518f66406561b6deee868282f9bc3b9d2226c2bfd2b2bc1afce40aaf263"
+      "attestation_digest_sha256": "d7bfac8bcd8f0666f995d8069ef80aec1afd3a90822c2d1acf91486917f41837"
     }
   },
   "capabilities": [
