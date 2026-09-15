@@ -34,7 +34,8 @@ def test_classified_payload_rebuilds_the_delivered_clause():
     block = expected_execution_evidence_block(
         _payload(baseline_classification=classification), "pytest tests/test_x.py"
     )
-    assert "; baseline: 1 unverified-scope (tests/test_x.py::test_a)" in block
+    assert ("; baseline: tests/test_x.py::test_a passed at baseline; it failed here "
+            "in a scoped run - run the full suite before investigating") in block
 
 
 def test_advisory_payload_rebuilds_the_delivered_clause():
@@ -73,7 +74,8 @@ def test_row_only_keys_reach_the_block_when_the_blob_cannot_hold_them():
     from scripts.gt_installed_rehearsal import expected_block_for_row
 
     block = expected_block_for_row(row, blob_payload, "python -m unittest")
-    assert "; baseline: 1 regression (tests/test_y.py::test_b)" in block
+    assert ("; baseline: tests/test_y.py::test_b passed before your edits and fails "
+            "in the full suite - this one is yours") in block
     assert block.endswith("; suite green vs baseline")
     # the blob-only rebuild is what regressed: it must be strictly shorter
     assert block != expected_execution_evidence_block(blob_payload, "python -m unittest")
