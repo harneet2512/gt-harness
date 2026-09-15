@@ -480,3 +480,58 @@ def test_seal_recheck_executes_real_pytest_on_submitted_tree(tmp_path, monkeypat
     assert adapter.phase == "FINISHED"
     assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
     assert verify_event_journal(adapter.store.path).valid
+
+
+def test_stale_red_receipt_does_not_block_a_current_check_pass(
+        tmp_path, monkeypatch):
+    """A lexically-associated failure on revision R must not veto a bound
+    check passing on R' - the normal edit/test/fix/test cycle would otherwise
+    leave every run unverifiable (run 34914512942: task solved, verified=False
+    on RED receipts from a tree the workspace had already left)."""
+    from gt_engine.miniswe_controller import Predicate, PredicateStatus
+
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch, predicates=[Predicate("p", "mapped assertion")])
+    adapter.plan_row_predicates = {row_id: ("p",)}
+    snapshot = capture_workspace(str(repo))
+    adapter.record_repository_snapshot(snapshot, boundary="task_start")
+    revision_r = adapter.repository_revision
+    adapter.record_receipt(
+        "p", "pytest test_widget.py", 1, "1 failed",
+        epoch=adapter.workspace_epoch, status="RED", semantic=True,
+        evidence_kind="failing_execution",
+        coverage_basis="lexically_associated_failure",
+        source_revision_at_observation=revision_r)
+    (repo / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="agent_edit")
+    assert adapter.repository_revision != revision_r
+    calls = []
+    adapter.drain_plan_checks(_stub_check_env(calls))
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    assert adapter.predicate_status("p") is PredicateStatus.GREEN
+    assert "p" not in adapter.unmet_predicates
+
+
+def test_current_red_receipt_still_blocks_a_later_check_pass(
+        tmp_path, monkeypatch):
+    """Precedence preserved: a RED observed on the CURRENT tree is a live
+    failure and a passing bound check must not paper over it."""
+    from gt_engine.miniswe_controller import Predicate, PredicateStatus
+
+    repo, adapter, row_id, _check_id, capture_workspace = _seal_session(
+        tmp_path, monkeypatch, predicates=[Predicate("p", "mapped assertion")])
+    adapter.plan_row_predicates = {row_id: ("p",)}
+    adapter.record_repository_snapshot(
+        capture_workspace(str(repo)), boundary="task_start")
+    adapter.record_receipt(
+        "p", "pytest test_widget.py", 1, "1 failed",
+        epoch=adapter.workspace_epoch, status="RED", semantic=True,
+        evidence_kind="failing_execution",
+        coverage_basis="lexically_associated_failure",
+        source_revision_at_observation=adapter.repository_revision)
+    calls = []
+    adapter.drain_plan_checks(_stub_check_env(calls))
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    assert adapter.predicate_status("p") is PredicateStatus.RED
+    assert "p" in adapter.unmet_predicates

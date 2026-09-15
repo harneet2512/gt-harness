@@ -173,6 +173,14 @@
       "tests/test_plan_verification_boundary.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "stale_red_semantic_veto",
+     "observed": "run 34914512942 solved (reward=1) but verified=False: lexically-associated RED receipts observed at an earlier revision kept vetoing the GREEN receipts that current-revision bound-check passes should have emitted; a stale failure was treated with live-failure precedence",
+     "covering_tests": [
+      "tests/test_plan_verification_boundary.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

@@ -2023,11 +2023,24 @@ class MiniSweAdapter(GroundtruthController):
                 if predicate_id not in self.predicates:
                     continue
                 if self.predicate_status(predicate_id) is PredicateStatus.RED:
-                    # The channels are independent: a passing check discharges
-                    # the row's check obligation but cannot rewrite a live RED
-                    # semantic receipt -- a current failure hidden by a later
-                    # GREEN is exactly the precedence unmet_plan_rows enforces.
-                    continue
+                    receipt = self._receipts.get(predicate_id)
+                    observed = str(
+                        getattr(receipt, "source_revision_at_observation", "")
+                        or ""
+                    )
+                    current = str(self.repository_revision or "")
+                    if not observed or observed == current:
+                        # The channels are independent: a passing check
+                        # discharges the row's check obligation but cannot
+                        # rewrite a live RED semantic receipt -- a current
+                        # failure hidden by a later GREEN is exactly the
+                        # precedence unmet_plan_rows enforces.
+                        continue
+                    # The RED was observed on a revision the tree has since
+                    # left, and this check just passed on the submitted tree.
+                    # A stale failure cannot outweigh current positive
+                    # evidence; otherwise every agent that ever ran a failing
+                    # test before fixing it could never verify.
                 self.record_receipt(
                     predicate_id,
                     spec.command,

@@ -229,6 +229,7 @@ def _run_logs(run_id: str) -> list[str]:
         out = subprocess.run(
             ["gh", "run", "view", run_id, "--log"],
             capture_output=True, text=True, timeout=120,
+            encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.TimeoutExpired):
         return []

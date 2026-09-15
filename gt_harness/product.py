@@ -28,7 +28,7 @@ TASK_RESULT_SCHEMA = "gt.benchmark_task_result.v1"
 SUMMARY_SCHEMA = "gt.benchmark_summary.v1"
 CLOSEOUT_SCHEMA = "gt.product_closeout.v1"
 
-_SAFE_GT_ENV = frozenset({"GT_INDEX_BINARY", "GT_RETRIEVAL_MODE", "GT_RL_PROFILE"})
+_SAFE_GT_ENV = frozenset({"GT_INDEX_BINARY", "GT_JOURNAL_TEE", "GT_RETRIEVAL_MODE", "GT_RL_PROFILE"})
 _HASH = frozenset("0123456789abcdef")
 
 

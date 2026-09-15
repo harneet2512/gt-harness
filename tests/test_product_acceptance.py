@@ -226,6 +226,7 @@ def test_task_environment_is_closed_and_never_contains_credentials() -> None:
         "GT_RL_PROFILE": "2",
         "GT_RETRIEVAL_MODE": "hybrid_required",
         "GT_INDEX_BINARY": "/safe/gt-index",
+        "GT_JOURNAL_TEE": "1",
         "GT_EVIL": "must-not-pass",
         "OPENAI_API_KEY": "secret-openai",
         "DEEPSEEK_API_KEY": "secret-deepseek",
@@ -235,6 +236,7 @@ def test_task_environment_is_closed_and_never_contains_credentials() -> None:
     projected = project_task_environment(host, treatment="groundtruth")
     assert projected == {
         "GT_INDEX_BINARY": "/safe/gt-index",
+        "GT_JOURNAL_TEE": "1",
         "GT_RETRIEVAL_MODE": "hybrid_required",
         "GT_RL_PROFILE": "2",
         "GT_TREATMENT": "groundtruth",
