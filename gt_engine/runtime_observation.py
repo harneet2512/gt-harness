@@ -15,9 +15,11 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sqlite3
 import stat
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -200,6 +202,48 @@ def _is_utf8(payload: bytes) -> bool:
         return False
 
 
+def _baseline_model_clause(classification: object) -> str:
+    """Render verdicts for the model line, e.g.
+    ``1 unverified-scope (tests/t.py::t_x), 1 baseline-noise``.
+
+    Accepts the dataclass or its ``as_dict`` form - auditors rebuild the line
+    from the stored journal payload, which carries the dict.
+    """
+    if hasattr(classification, "verdicts"):
+        verdicts = classification.verdicts
+        summary = classification.summary
+    else:
+        verdicts = [
+            (entry[0], entry[1])
+            for entry in (classification.get("verdicts") or [])
+        ]
+        summary = classification.get("summary") or {}
+    order = (
+        "regression_new", "unverified_scope", "suite_failing",
+        "scope_artifact", "baseline_noise", "untracked",
+    )
+    labels = {
+        "regression_new": "regression",
+        "unverified_scope": "unverified-scope",
+        "suite_failing": "suite-failing",
+        "scope_artifact": "scope-artifact",
+        "baseline_noise": "baseline-noise",
+        "untracked": "untracked",
+    }
+    parts = []
+    for key in order:
+        count = summary.get(key, 0)
+        if not count:
+            continue
+        clause = f"{count} {labels[key]}"
+        if key in ("regression_new", "unverified_scope", "suite_failing"):
+            examples = [n for n, v in verdicts if v == key][:2]
+            if examples:
+                clause += " (" + ", ".join(examples) + ")"
+        parts.append(clause)
+    return ", ".join(parts)
+
+
 def execution_evidence_model_line(
     *,
     command: str,
@@ -207,6 +251,8 @@ def execution_evidence_model_line(
     outcome: str,
     returncode: int | None,
     observed_test_outcome: str = "",
+    baseline_classification: object = None,
+    submit_window: str = "",
 ) -> str:
     """The model-facing execution-evidence line - the only supported render.
 
@@ -228,7 +274,204 @@ def execution_evidence_model_line(
     )
     if observed_test_outcome:
         line += f"; tests: {observed_test_outcome}"
+    if baseline_classification:
+        clause = _baseline_model_clause(baseline_classification)
+        if clause:
+            line += f"; baseline: {clause}"
+    if submit_window:
+        line += f"; {submit_window}"
     return line
+
+
+_BASELINE_CLASSIFICATION_LAYOUT = "gt.baseline_classification.v1"
+_BASELINE_FILTER_RE = re.compile(
+    r"^(?:-k|-m|--deselect|--ignore|--lf|--ff|--last-failed|--failed-first)"
+)
+
+
+def test_command_scope(command: str) -> str:
+    """Classify a pytest invocation's coverage shape.
+
+    ``suite``   - no positional selection; coverage is the whole collection
+    ``scoped``  - positional path/nodeid args or name filters narrow coverage
+    ``unknown`` - anything else (compound, piped, non-pytest, unparseable)
+
+    Conservative direction: an ambiguous suite reads ``scoped`` and loses only
+    a ledger-promotion opportunity; a scoped run must never read ``suite``.
+    """
+    try:
+        words = shlex.split(command or "", posix=True)
+    except ValueError:
+        return "unknown"
+    idx = None
+    for i, word in enumerate(words):
+        if word in ("|", "||", "&&", ";"):
+            return "unknown"
+        if word == "pytest" or word.endswith("/pytest"):
+            idx = i
+            break
+        if word == "-m" and i + 1 < len(words) and words[i + 1].startswith("pytest"):
+            idx = i + 1
+            break
+    if idx is None:
+        return "unknown"
+    for arg in words[idx + 1:]:
+        if arg in ("|", "||", "&&", ";"):
+            return "unknown"
+        if arg.startswith("-"):
+            if _BASELINE_FILTER_RE.match(arg):
+                return "scoped"
+            continue
+        return "scoped"
+    return "suite"
+
+
+def _name_covered(name: str, prefixes: tuple[str, ...]) -> bool:
+    """Whether a ``file::test`` name sits inside a run's declared coverage."""
+    if not prefixes:
+        return True
+    file_part = name.split("::", 1)[0]
+    for prefix in prefixes:
+        if "::" in prefix:
+            if name == prefix:
+                return True
+        elif file_part == prefix or file_part.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
+@dataclass
+class SuiteVerdictLedger:
+    """Current-tree suite truth joined against the task baseline.
+
+    The baseline name sets are attribution only: a name passed at baseline is
+    NOT suite-pass evidence under the agent's tree. Scoped runs only track
+    observed names for later promotion; they never write suite verdicts,
+    because fixture ordering differs under isolation (run 34996816912:
+    test_get_item passed baseline and full suite, failed standalone).
+    """
+
+    baseline_passing: tuple[str, ...] = ()
+    baseline_failing: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.baseline_passing = frozenset(self.baseline_passing)
+        self.baseline_failing = frozenset(self.baseline_failing)
+        self._suite: dict[str, str] = {}
+        self._observed: set[str] = set()
+
+    def suite_verdict(self, name: str) -> str | None:
+        return self._suite.get(name)
+
+    def regression_count(self) -> int:
+        """Baseline-passing names currently failing at suite scope."""
+        return sum(
+            1 for name, verdict in self._suite.items()
+            if verdict == "fail" and name in self.baseline_passing
+        )
+
+    def note_failing(self, names: Iterable[str]) -> None:
+        self._observed.update(names)
+
+    def record_suite_run(
+        self,
+        *,
+        passing: Iterable[str] = (),
+        failing: Iterable[str] = (),
+        observed_names: Iterable[str] = (),
+        failed_count: int | None = None,
+        covered_prefixes: tuple[str, ...] = (),
+    ) -> None:
+        """Fold one aggregate run into suite truth; latest run wins.
+
+        A run reporting zero failures promotes every known name inside its
+        coverage - unnamed dot output still means "nothing failed".
+        """
+        for name in failing:
+            self._suite[name] = "fail"
+        for name in passing:
+            self._suite[name] = "pass"
+        self._observed.update(observed_names)
+        if failed_count == 0:
+            candidates = (
+                self._observed
+                | set(self.baseline_passing)
+                | set(self.baseline_failing)
+            )
+            for name in candidates:
+                if _name_covered(name, tuple(covered_prefixes)):
+                    self._suite[name] = "pass"
+
+    def _verdict_for(self, name: str) -> str:
+        suite = self._suite.get(name)
+        if suite == "fail":
+            if name in self.baseline_passing:
+                return "regression_new"
+            if name in self.baseline_failing:
+                return "baseline_noise"
+            return "suite_failing"
+        if suite == "pass":
+            return "scope_artifact"
+        if name in self.baseline_failing:
+            return "baseline_noise"
+        if name in self.baseline_passing:
+            return "unverified_scope"
+        return "untracked"
+
+
+@dataclass(frozen=True)
+class BaselineClassification:
+    scope: str
+    verdicts: tuple[tuple[str, str], ...]
+    summary: dict[str, int]
+    layout_schema: str = _BASELINE_CLASSIFICATION_LAYOUT
+
+    def as_dict(self) -> dict:
+        return {
+            "layout_schema": self.layout_schema,
+            "scope": self.scope,
+            "verdicts": [[name, verdict] for name, verdict in self.verdicts],
+            "summary": dict(sorted(self.summary.items())),
+        }
+
+
+def classify_failures_vs_baseline(
+    *,
+    command: str,
+    output: str | bytes,
+    ledger: SuiteVerdictLedger | None,
+) -> BaselineClassification | None:
+    """Classify observed failing test names against baseline + suite truth.
+
+    Returns ``None`` when there is no ledger (baseline never captured) or the
+    output parses to no failing names - absent evidence, never an error. The
+    canonical producer's extractors are the only supported name source; both
+    baseline and observation sides must parse identically.
+    """
+    if ledger is None:
+        return None
+    text = (
+        output.decode("utf-8", errors="replace")
+        if isinstance(output, (bytes, bytearray))
+        else output
+    )
+    try:
+        from groundtruth.runtime.test_runner import _parse_failing_test_names
+    except ImportError as exc:
+        raise RuntimeError("canonical_name_extractor_unavailable") from exc
+    failing = _parse_failing_test_names(text or "")
+    if not failing:
+        return None
+    ledger.note_failing(failing)
+    verdicts = tuple((name, ledger._verdict_for(name)) for name in failing)
+    summary: dict[str, int] = {}
+    for _name, verdict in verdicts:
+        summary[verdict] = summary.get(verdict, 0) + 1
+    return BaselineClassification(
+        scope=test_command_scope(command),
+        verdicts=verdicts,
+        summary=summary,
+    )
 
 
 def capture_workspace(

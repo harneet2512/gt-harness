@@ -210,6 +210,22 @@
       "tests/test_gt_task_contract.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "baseline_noise_chase",
+     "observed": "swelive remaining run 34996816912 dynaconf-1241: verifier-SOLVED worktree died as typed timeout. Trajectory: @merge fix landed mid-run; agent then burned ~40% of the 3060s budget editing its own test assertions (tests/test_base.py [64][72]) and chasing test_get_item KeyError 'DOTENV_INT' - a fixture-ordering artifact that fails isolated file runs [61][77] but passes in the full suite [78] (375/375 green). Instead of submitting at all-green, the agent went back to investigate the ghost ([79][80] grep test_get_item) and was SIGKILLed mid-command at elapsed 3077s. Root cause: no baseline-vs-current failure classification - a check failure unrelated to the diff reads identically to a regression the agent introduced. FIXED (provider-free): SuiteVerdictLedger joins baseline name sets with the agent's own suite-scope observations; classify_failures_vs_baseline emits unverified_scope/scope_artifact/baseline_noise/regression_new/suite_failing/untracked per failing name into execution_evidence rows (layout_schema gt.baseline_classification.v1) and the GT_EXECUTION_EVIDENCE model line. Conservative direction held: scoped runs never write suite verdicts, zero-failure promotion requires passed>0, missing baseline means no classification field at all. NOT YET proven online.",
+     "covering_tests": [
+      "tests/test_baseline_classification.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "submit_window_no_nudge",
+     "observed": "same trajectory tail: suite all-green at [78] but nothing pushed the agent toward submit - the plan gate can refuse submits but never surfaces 'checks green vs baseline, submit window open' as a positive advisory. FIXED (provider-free): record_execution_evidence now appends a gt.submit_window.v1 advisory on suite-scope observations with zero effective failures - 'suite green vs baseline; N plan requirement(s) still unverified' while rows are outstanding, 'submit window is open' only when bound rows verify and regression_count is zero. Advisory only; gate authority unchanged. No-plan case surfaces the suite fact without a vacuous 'verified' claim. NOT YET proven online.",
+     "covering_tests": [
+      "tests/test_baseline_classification.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

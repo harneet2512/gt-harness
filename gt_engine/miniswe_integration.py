@@ -388,6 +388,7 @@ class MiniSweAdapter(GroundtruthController):
         # call the agent's n_calls never sees.
         self._persistent_plan_bootstrap_calls = 0
         self.plan_inputs = None
+        self._suite_verdict_ledger = None
         self.persistent_plan = None
         self.plan_row_predicates: dict[str, tuple[str, ...]] = {}
         self._contract_shipped = False
@@ -2943,6 +2944,19 @@ class MiniSweAdapter(GroundtruthController):
         artifact_digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("execution_evidence", artifact_digest, encoded)
         payload = json.loads(encoded)
+        classification, suite_green = self._classify_execution_vs_baseline(
+            artifact, command
+        )
+        if classification is not None:
+            payload["baseline_classification"] = classification.as_dict()
+        advisory = ""
+        if suite_green:
+            advisory = self._submit_window_advisory()
+            if advisory:
+                payload["submit_window"] = {
+                    "layout_schema": "gt.submit_window.v1",
+                    "advisory": advisory,
+                }
         self.store.append(
             "execution_evidence",
             artifact_sha256=artifact_digest,
@@ -2955,8 +2969,139 @@ class MiniSweAdapter(GroundtruthController):
             command=command, kind=artifact.kind, outcome=artifact.outcome,
             returncode=artifact.returncode,
             observed_test_outcome=artifact.observed_test_outcome,
+            baseline_classification=classification,
+            submit_window=advisory,
         )
         return "[GT_EXECUTION_EVIDENCE]\n" + line
+
+    def _suite_ledger(self) -> Any:
+        """The baseline-vs-current ledger, seeded once baseline capture lands.
+
+        ``None`` whenever no baseline exists - the classification layer must
+        never invent baseline evidence.
+        """
+        ledger = self._suite_verdict_ledger
+        if ledger is not None:
+            return ledger
+        baseline = getattr(self.plan_inputs, "baseline", None)
+        if baseline is None or not baseline.captured:
+            return None
+        from .runtime_observation import SuiteVerdictLedger
+
+        ledger = SuiteVerdictLedger(
+            baseline_passing=tuple(baseline.passing_names),
+            baseline_failing=tuple(baseline.failing_names),
+        )
+        self._suite_verdict_ledger = ledger
+        return ledger
+
+    def _classify_execution_vs_baseline(
+        self, artifact: Any, command: str
+    ) -> tuple[Any, bool]:
+        """Join this run's failing names against baseline + suite truth.
+
+        A suite-scope observation is folded into the ledger BEFORE the
+        verdict: a baseline-passing name failing in a suite run is a real
+        regression, not an unverified scope question. Scoped observations only
+        track names - fixture ordering under isolation is not suite truth.
+
+        Returns ``(classification, suite_green)`` - the second element marks a
+        suite-scope run whose recorded observation had zero effective failures.
+        """
+        ledger = self._suite_ledger()
+        if ledger is None:
+            return None, False
+        output = artifact.raw_output
+        if output is None:
+            captured = str(getattr(artifact, "output_artifact_path", "") or "")
+            if not captured:
+                return None, False
+            try:
+                output = Path(captured).read_bytes()
+            except OSError:
+                return None, False
+        text = (
+            output.decode("utf-8", errors="replace")
+            if isinstance(output, (bytes, bytearray))
+            else output
+        )
+        from .runtime_observation import (
+            classify_failures_vs_baseline,
+            test_command_scope,
+        )
+
+        suite_green = False
+        if test_command_scope(command) == "suite":
+            suite_green = self._record_suite_observation(ledger, command, text)
+        return (
+            classify_failures_vs_baseline(
+                command=command, output=text, ledger=ledger
+            ),
+            suite_green,
+        )
+
+    def _submit_window_advisory(self) -> str:
+        """The positive half of the plan gate: a green suite observation with
+        zero current regressions is the moment to say the submit window is
+        open, not merely to stop refusing it. Advisory only - the gate's
+        authority is unchanged.
+        """
+        ledger = self._suite_verdict_ledger
+        if ledger is None or ledger.regression_count() > 0:
+            return ""
+        plan = getattr(self, "persistent_plan", None)
+        if plan is None or not getattr(plan, "rows", ()):
+            # No bound plan - "verified" would be vacuous. The suite fact
+            # alone is still worth surfacing; the window claim is not made.
+            return "suite green vs baseline"
+        unmet = self.unmet_plan_rows()
+        if unmet:
+            return (
+                "suite green vs baseline; "
+                f"{len(unmet)} plan requirement(s) still unverified"
+            )
+        return (
+            "suite green vs baseline and plan requirements verified - "
+            "submit window is open"
+        )
+
+    def _record_suite_observation(
+        self, ledger: Any, command: str, output: str
+    ) -> bool:
+        """Fold a suite-scope run into the ledger; True when the run is green.
+
+        Zero-failure promotion requires the run to have observed at least one
+        pass - an unparseable or collection-broken output proves nothing, so
+        ``passed > 0`` is the gate that keeps "we could not read it" from
+        reading as "nothing failed".
+        """
+        try:
+            words = shlex.split(command or "", posix=True)
+        except ValueError:
+            return False
+        try:
+            from groundtruth.runtime.test_runner import (
+                _parse_failing_test_names,
+                _parse_passing_test_names,
+                _parse_test_output,
+            )
+        except ImportError as exc:
+            raise RuntimeError("canonical_name_extractor_unavailable") from exc
+        counts = _parse_test_output(output or "", words)
+        passing = _parse_passing_test_names(output or "")
+        failing = _parse_failing_test_names(output or "")
+        # A parsed FAILED row outranks a truncated summary count: names the
+        # output calls failed must never reach the zero-failure promotion.
+        effective_failed = max(counts["failed"] + counts["errored"], len(failing))
+        if effective_failed == 0 and counts["passed"] == 0 and not passing:
+            return False
+        ledger.record_suite_run(
+            passing=passing,
+            failing=failing,
+            observed_names=[*passing, *failing],
+            failed_count=effective_failed,
+        )
+        return effective_failed == 0
 
     def _poll_startup_index(self) -> None:
         """Adopt the asynchronously-built initial index once it lands.
