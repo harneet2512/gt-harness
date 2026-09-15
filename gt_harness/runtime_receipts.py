@@ -25,6 +25,7 @@ from gt_engine.delivery_budget import (
     MAX_TASK_DELIVERIES,
     PROMPT_DELIVERY_KINDS,
     TOTAL_DELIVERY_BYTE_LIMIT,
+    WINDOW_POSITIONAL_REFUSAL_REASONS,
     delivery_byte_limit,
 )
 from gt_engine.graph_utilisation import graph_utilisation
@@ -426,6 +427,34 @@ def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return refusals
 
 
+def _delivery_rescinds_refusal(refusal: dict, delivery: dict) -> bool:
+    """True when a delivery in the refusal's window voids that refusal.
+
+    Identity arm: the exact refused payload shipped. For positional ceilings
+    (WINDOW_POSITIONAL_REFUSAL_REASONS) that is a violation only when the
+    delivered copy sits at or after the refused candidate position - a lower
+    ordinal means a later boundary scan admitted it into a slot the window
+    freed, whose legality _validate_delivery_boundaries proves on the
+    committed set. Every other reason is payload- or task-intrinsic and no
+    ordinal makes it legal. Key arm unchanged: a same-key delivery admitted
+    at or after the refused position is the rescinded candidate.
+    """
+    delivered_ordinal = int(delivery.get("delivery_ordinal") or 0)
+    candidate_ordinal = int(refusal.get("candidate_ordinal") or 0)
+    same_identity = bool(
+        str(delivery.get("delivery_identity") or "")
+        and str(delivery.get("delivery_identity") or "")
+        == str(refusal.get("delivery_identity") or "")
+    )
+    positional = str(refusal.get("reason") or "") in WINDOW_POSITIONAL_REFUSAL_REASONS
+    if same_identity and not positional:
+        return True
+    return (
+        same_identity
+        or str(delivery.get("dedup_key") or "") == str(refusal.get("dedup_key") or "")
+    ) and delivered_ordinal >= candidate_ordinal
+
+
 def _provider_usage(
     events: list[dict[str, Any]], *, attempted_calls: int
 ) -> dict[str, int | float]:
@@ -791,27 +820,13 @@ def issue_runtime_receipts(
         # localization twin refused at ordinal 2, sibling delivered at 1.
         later_delivery = any(
             delivery["observed_iteration"] == refusal["observed_iteration"]
-            and (
-                delivery["delivery_identity"] == refusal["delivery_identity"]
-                or (
-                    delivery["dedup_key"] == refusal["dedup_key"]
-                    and int(delivery.get("delivery_ordinal") or 0)
-                    >= refusal["candidate_ordinal"]
-                )
-            )
+            and _delivery_rescinds_refusal(refusal, delivery)
             for delivery in deliveries
         )
         if later_delivery:
             raise ValueError("refused_then_delivered")
         if any(row["observed_iteration"] == refusal["observed_iteration"]
-               and (
-                   row["delivery_identity"] == refusal["delivery_identity"]
-                   or (
-                       row["dedup_key"] == refusal["dedup_key"]
-                       and int(row.get("delivery_ordinal") or 0)
-                       >= refusal["candidate_ordinal"]
-                   )
-               )
+               and _delivery_rescinds_refusal(refusal, row)
                for row in delivery_events) and not duplicate:
             raise ValueError("refused_delivery_present")
         if duplicate and refusal["delivery_identity"] not in delivered_identities:
@@ -1744,14 +1759,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             isinstance(delivery, dict)
             and (not decision_scoped or delivery.get("observed_iteration")
                  == refusal.get("observed_iteration"))
-            and (
-                delivery.get("delivery_identity") == refusal.get("delivery_identity")
-                or (
-                    delivery.get("dedup_key") == refusal.get("dedup_key")
-                    and int(delivery.get("delivery_ordinal") or 0)
-                    >= int(refusal.get("candidate_ordinal") or 0)
-                )
-            )
+            and _delivery_rescinds_refusal(refusal, delivery)
             for delivery in deliveries
         )
         if later_delivery:
@@ -1765,14 +1773,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
                 isinstance(row, dict)
                 and (not decision_scoped or row.get("observed_iteration")
                      == refusal.get("observed_iteration"))
-                and (
-                    row.get("delivery_identity") == refusal.get("delivery_identity")
-                    or (
-                        row.get("dedup_key") == refusal.get("dedup_key")
-                        and int(row.get("delivery_ordinal") or 0)
-                        >= int(refusal.get("candidate_ordinal") or 0)
-                    )
-                ) for row in deliveries))
+                and _delivery_rescinds_refusal(refusal, row)
+                for row in deliveries))
             or (
                 duplicate
                 and str(refusal.get("delivery_identity") or "") not in set(delivery_identities)

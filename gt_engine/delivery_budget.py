@@ -84,6 +84,22 @@ DELIVERY_REFUSAL_REASONS = frozenset({
     "request_delivery_byte_ceiling",
 })
 
+# Refusals whose basis is the candidate's POSITION inside one decision window.
+# The boundary scan re-runs as evidence streams in, and a later scan can
+# legitimately admit the same payload at a lower ordinal when an earlier
+# sibling drops out (run 34925475946, gitingest-94: a cochange unit refused at
+# candidate_ordinal 5 twice, then committed at delivery_ordinal 4 after a
+# prompt-lane candidate disappeared). The window invariants are proven on the
+# committed set by _validate_delivery_boundaries, so a same-identity delivery
+# below the refused position is a re-admission, not a rescinded refusal.
+# Task-scoped and payload-intrinsic refusals are NOT in this set: a payload
+# refused for delivery_byte_ceiling is still too big at any ordinal, and a
+# cochange/localization task ceiling does not decrease inside one window.
+WINDOW_POSITIONAL_REFUSAL_REASONS = frozenset({
+    "boundary_claim_ceiling",
+    "request_delivery_byte_ceiling",
+})
+
 
 def compact_localization(value: str, limit: int = 1_400) -> str:
     """Drop whole ranked location items; never slice a factual statement.

@@ -26,6 +26,7 @@ from ..task_contract import (
     _is_workflow_noise,
     _key,
     _leaks_test_identity,
+    _section_marker_name,
     _subjects,
     _task_mode,
     _typed_predicates,
@@ -69,44 +70,6 @@ _IDENTIFIERISH_RE = re.compile(
 # names ``task_contract._normative_issue_text`` drops, so the two views of the
 # prompt cannot disagree about what is normative.
 NON_NORMATIVE_SECTIONS = frozenset({"background", "baseline", "cost model"})
-
-# A line that is only a section marker in issue prose. The heading patterns
-# catch "## Expected" and "Expected:"; they do NOT catch a bare "Expected" or
-# "Result" line, which then passed _carries_requirement (a lone word is
-# identifier-shaped) and minted a row bound to the whole suite. Measured on
-# dynaconf-1241 (run 34919574013): "Expected" and "Result" became rows, the
-# first bound to bare `pytest` (uncollectable on a duplicate-basename tree),
-# the second to three same-named app_test.py files (same defect) - three
-# unprovable rows made verified unreachable on any tree.
-_SECTION_MARKER_WORDS = frozenset({
-    "expected", "actual", "result", "results", "output", "outcome",
-    "reproduction", "repro", "reproducer", "description", "summary",
-    "context", "problem", "issue", "solution", "note", "notes",
-    "environment", "version", "versions", "log", "logs", "traceback",
-    "error", "errors", "example", "examples", "motivation", "related",
-    "references", "screenshot", "screenshots", "demo", "demonstration",
-    "question", "answer", "goal", "setup", "dependency", "dependencies",
-    "evidence", "observation", "impact", "severity", "workaround",
-    "background", "details", "proposed", "rationale",
-})
-_SECTION_MARKER_PHRASE_RE = re.compile(
-    r"(?i)^(?:expected|actual|current|desired|intended|observed)\s+"
-    r"(?:behaviou?r|results?|output|response|error|issue|value)\.?$"
-    r"|^(?:steps? to reproduce|how to reproduce|to reproduce|"
-    r"minimal (?:reproducible )?example|"
-    r"additional (?:context|information)|related issues?|"
-    r"what (?:should|was expected to|actually)\s+\w+.*)\.?$"
-)
-
-
-def _section_marker_name(text: str) -> str | None:
-    """The marker label when a cleaned line is only a section marker, else None."""
-    low = text.strip().lower().rstrip(":.")
-    if low in _SECTION_MARKER_WORDS:
-        return low
-    if _SECTION_MARKER_PHRASE_RE.match(low):
-        return low
-    return None
 
 # A line that is only brackets, commas or operators carries no requirement even
 # inside a normative region (the closing "})" of an API sketch).

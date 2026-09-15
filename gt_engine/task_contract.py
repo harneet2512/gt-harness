@@ -213,6 +213,48 @@ def _is_workflow_noise(text: str) -> bool:
     return bool(_WORKFLOW_STEP_RE.match(low))
 
 
+# A line that is only a section marker in issue prose. The heading patterns
+# catch "## Expected" and "Expected:"; they do NOT catch a bare "Expected" or
+# "Result" line, which then minted rows and obligations bound to unprovable
+# checks. Measured twice on dynaconf-1241: run 34919574013 put "Expected" and
+# "Result" into the persistent plan (bound to the whole suite and to three
+# same-named app_test.py files); run 34925475946 then put "Expected" into the
+# task CONTRACT via extract_spec_v2's normative region, where it compiled to
+# a behavior predicate with no expected_relation - structurally
+# undischargable, unmet on every tree, verified unreachable. The two
+# extractors must share one definition of "not a requirement" or a line one
+# rejects becomes an orphan predicate the other can never link.
+_SECTION_MARKER_WORDS = frozenset({
+    "expected", "actual", "result", "results", "output", "outcome",
+    "reproduction", "repro", "reproducer", "description", "summary",
+    "context", "problem", "issue", "solution", "note", "notes",
+    "environment", "version", "versions", "log", "logs", "traceback",
+    "error", "errors", "example", "examples", "motivation", "related",
+    "references", "screenshot", "screenshots", "demo", "demonstration",
+    "question", "answer", "goal", "setup", "dependency", "dependencies",
+    "evidence", "observation", "impact", "severity", "workaround",
+    "background", "details", "proposed", "rationale",
+})
+_SECTION_MARKER_PHRASE_RE = re.compile(
+    r"(?i)^(?:expected|actual|current|desired|intended|observed)\s+"
+    r"(?:behaviou?r|results?|output|response|error|issue|value)\.?$"
+    r"|^(?:steps? to reproduce|how to reproduce|to reproduce|"
+    r"minimal (?:reproducible )?example|"
+    r"additional (?:context|information)|related issues?|"
+    r"what (?:should|was expected to|actually)\s+\w+.*)\.?$"
+)
+
+
+def _section_marker_name(text: str) -> str | None:
+    """The marker label when a cleaned line is only a section marker, else None."""
+    low = text.strip().lower().rstrip(":.")
+    if low in _SECTION_MARKER_WORDS:
+        return low
+    if _SECTION_MARKER_PHRASE_RE.match(low):
+        return low
+    return None
+
+
 def _markdown_candidates(issue_text: str) -> list[tuple[str, str]]:
     """Return (source, text) candidates, excluding fenced examples."""
     candidates: list[tuple[str, str]] = []
@@ -404,6 +446,7 @@ def extract_task_contract(issue_text: str) -> TaskContract:
             or low.endswith("replace it with placeholder values as follows")
             or _leaks_test_identity(text)
             or _is_workflow_noise(text)
+            or _section_marker_name(text) is not None
         ):
             continue
         # Do not add nested copies of a row already retained.

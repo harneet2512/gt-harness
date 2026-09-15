@@ -197,6 +197,14 @@
       "tests/test_persistent_plan_ledger.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "section_marker_obligation_undischargable",
+     "observed": "run 34925475946 dynaconf-1241 solved (reward=1), plan gate all_rows_verified, seal recheck already_current - yet verified=False on product_unmet_predicates: extract_spec_v2's normative region fed the bare-word section marker 'Expected' to extract_task_contract, which minted obligation obl-cea23dd4b87e -> behavior predicate with no expected_relation, a kind no observation can ever satisfy; it stayed unmet for all 99 iterations and was listed active_red at submit. The e370054b ledger fix covered only the plan side; the two extractors now share one section-marker definition in task_contract and the central candidate filter drops markers from every source",
+     "covering_tests": [
+      "tests/test_gt_task_contract.py"
+     ],
+     "status": "fixed"
     }
    ]
   },
@@ -394,6 +402,14 @@
       "tests/test_gt_session.py"
      ],
      "status": "covered"
+    },
+    {
+     "id": "positional_refusal_readmission_flagged",
+     "observed": "run 34925475946 gitingest-94 submitted_verified in-journal (seal recheck converged) but receipt issuance raised refused_then_delivered -> status ERROR -> product_not_completed + treatment_delivery_refusal_invalid on a solved task: a cochange unit refused at candidate_ordinal 5 for boundary_claim_ceiling was legitimately re-admitted at delivery_ordinal 4 when a sibling candidate dropped between boundary scans; the receipt's identity arm ignored ordinals and treated refusal as binding within the window. The identity arm is now ordinal-aware only for window-positional reasons (boundary_claim_ceiling, request_delivery_byte_ceiling); payload-intrinsic and task-scoped refusals still flag at any ordinal, and _validate_delivery_boundaries proves the committed window's invariants independently",
+     "covering_tests": [
+      "tests/test_runtime_receipts.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

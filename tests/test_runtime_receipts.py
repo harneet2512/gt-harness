@@ -1432,3 +1432,42 @@ def test_ambiguous_delivery_identity_still_raises():
     ]
     with pytest.raises(ValueError, match="delivery_receipt_identity_join_failed"):
         _provider_delivery_receipts(rows)
+def test_positional_refusal_readmitted_below_candidate_is_not_a_violation():
+    """Run 34925475946 (gitingest-94): a cochange unit was refused at
+    candidate_ordinal 5 twice for boundary_claim_ceiling, then a later scan in
+    the same decision window admitted the identical payload at
+    delivery_ordinal 4 after a sibling candidate dropped - the committed
+    window respected the ceiling and _validate_delivery_boundaries proves it.
+    The unconditional identity arm read that legitimate re-admission as
+    refused_then_delivered and aborted receipt issuance on a submitted_verified
+    run. Positional refusals flag only at-or-after the refused position;
+    payload- and task-intrinsic refusals still flag at any ordinal."""
+    from gt_harness.runtime_receipts import _delivery_rescinds_refusal
+
+    identity = "a" * 64
+    refusal = {
+        "reason": "boundary_claim_ceiling",
+        "candidate_ordinal": 5,
+        "delivery_identity": identity,
+        "dedup_key": "cochange-x",
+    }
+    base = {"delivery_identity": identity, "dedup_key": "cochange-x"}
+    # The production case: identical payload re-admitted below the refused
+    # position is a freed slot, not a rescinded refusal.
+    assert not _delivery_rescinds_refusal(refusal, dict(base, delivery_ordinal=4))
+    # Same payload admitted at or after the refused position: the ceiling was
+    # bypassed - still a violation.
+    assert _delivery_rescinds_refusal(refusal, dict(base, delivery_ordinal=5))
+    # A refusal whose reason is not positional cannot be laundered by ordinal:
+    # the payload is still too big no matter which slot it took.
+    intrinsic = dict(refusal, reason="delivery_byte_ceiling")
+    assert _delivery_rescinds_refusal(intrinsic, dict(base, delivery_ordinal=1))
+    task_scoped = dict(refusal, reason="localization_fire_once")
+    assert _delivery_rescinds_refusal(task_scoped, dict(base, delivery_ordinal=1))
+    # Key arm unchanged: a different identity sharing the dedup key flags only
+    # at-or-after the refused position (the sibling that caused the refusal
+    # sits below it).
+    sibling_low = dict(base, delivery_identity="b" * 64, delivery_ordinal=4)
+    assert not _delivery_rescinds_refusal(refusal, sibling_low)
+    sibling_high = dict(base, delivery_identity="b" * 64, delivery_ordinal=5)
+    assert _delivery_rescinds_refusal(refusal, sibling_high)

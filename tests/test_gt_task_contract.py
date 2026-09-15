@@ -47,6 +47,53 @@ Call your implementation `HeadlessTerminal(BaseTerminal)` and put it in
 """
 
 
+_DYNACONF_ISSUE = """Please solve this issue: [bug] using `@merge` with comma separated values, does not infer type
+
+```py
+settings = Dynaconf(
+    data=[1,2,3]
+)
+```
+
+```bash
+APP_DATA="@merge 4,5,6" dynaconf list -k DATA
+```
+
+Result
+
+```
+DATA<list>: [1, 2, 3, "4", "5", "6"]
+```
+
+Expected
+
+```
+DATA<list>: [1, 2, 3, 4, 5, 6]
+```
+
+You are working in the `dynaconf/dynaconf` repository, checked out at `/testbed`. Investigate the issue described above and modify the code under `/testbed` to resolve it.
+"""
+
+
+@requires_gt
+def test_contract_never_mints_a_section_marker_obligation():
+    """Run 34925475946 (dynaconf-1241): extract_spec_v2 classified the bare
+    "Expected" line as normative and the contract minted obl-cea23dd4b87e from
+    it - a behavior predicate with no expected_relation, so no observation
+    could ever satisfy it. It stayed unmet for all 99 iterations and the run
+    attested product_unmet_predicates on a solved task. The ledger's marker
+    table moved here so the contract and the plan share one definition."""
+    from gt_engine.task_contract import extract_task_contract
+
+    contract = extract_task_contract(_DYNACONF_ISSUE)
+    texts = {item.text.strip().lower().rstrip(":.") for item in contract.obligations}
+    assert "expected" not in texts
+    assert "result" not in texts
+    assert not any(
+        "working in" in t or "investigate the issue" in t for t in texts
+    )
+
+
 @requires_gt
 def test_contract_keeps_every_sanitize_requirement():
     from gt_engine.task_contract import extract_task_contract
