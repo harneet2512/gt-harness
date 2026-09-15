@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -601,3 +602,251 @@ def test_parse_collects_names_from_verbose_output():
     assert counts["passed"] == 2 and counts["failed"] == 1
     assert "tests/test_a.py::test_one" in passing
     assert "tests/test_b.py::test_bad" in failing
+
+
+# ---------------------------------------------------------------------------
+# Collection-interrupted baselines (run 34996816912, dynaconf__dynaconf-1241)
+# ---------------------------------------------------------------------------
+# The discovered command was `pytest -v` (basis config:pytest_ini). It exited
+# 2 after 4.4s with errored=4, passed=0, failed=0 and ZERO names, so the
+# capture came back `no_test_verdicts` - pytest aborts the WHOLE session the
+# moment any module fails to collect. A local checkout says it out loud:
+# `pytest --collect-only` -> "743 tests collected, 10 errors", then
+# "Interrupted: 10 errors during collection". 743 collectable tests were
+# sitting right there and the baseline recorded none of them, which is why
+# the baseline-vs-suite classifier and the submit-window advisory - both
+# keyed on `baseline.captured` - never fired on the one run that motivated
+# them.
+
+_INTERRUPTED_OUTPUT = """\
+============================= test session starts ==============================
+rootdir: /testbed
+configfile: pytest.ini
+collected 743 items / 4 errors
+
+==================================== ERRORS ====================================
+_____________________ ERROR collecting tests/test_vault.py _____________________
+tests/test_vault.py:3: in <module>
+    import hvac
+E   ModuleNotFoundError: No module named 'hvac'
+ERROR tests/test_vault.py
+ERROR tests/test_vault_userpass.py
+ERROR tests/test_redis.py
+ERROR tests/test_toml_loader.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!
+=============================== 4 errors in 4.40s ==============================
+"""
+
+_CONTINUED_OUTPUT = """\
+============================= test session starts ==============================
+rootdir: /testbed
+configfile: pytest.ini
+collected 743 items / 4 errors
+
+tests/test_toml_format.py::test_toml_dump PASSED                         [  1%]
+tests/test_toml_format.py::test_toml_round_trip PASSED                   [  2%]
+tests/test_cli.py::test_init_writes_settings FAILED                      [  3%]
+
+==================================== ERRORS ====================================
+ERROR tests/test_vault.py
+ERROR tests/test_vault_userpass.py
+ERROR tests/test_redis.py
+ERROR tests/test_toml_loader.py
+=================== 370 passed, 1 failed, 4 errors in 8.10s ====================
+"""
+
+_STILL_INTERRUPTED_OUTPUT = """\
+============================= test session starts ==============================
+collected 0 items / 4 errors
+
+ERROR tests/test_vault.py
+ERROR tests/test_vault_userpass.py
+ERROR tests/test_redis.py
+ERROR tests/test_toml_loader.py
+=============================== 4 errors in 4.60s ==============================
+"""
+
+_MISMATCH_THEN_INTERRUPTED_OUTPUT = """\
+_ ERROR collecting tests_functional/issues/658_nested_envvar_override/app_test.py _
+import file mismatch:
+imported module 'app_test' has this __file__ attribute:
+  /testbed/tests_functional/issues/1005-key-type-error/app_test.py
+which is not the same as the test file we want to collect:
+  /testbed/tests_functional/issues/658_nested_envvar_override/app_test.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+"""
+
+
+class _Proc:
+    """The shape `_execute_baseline` returns: returncode plus captured text."""
+
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = ""
+
+
+def _scripted_executor(calls, outputs):
+    """Records every argv and replays `outputs` in order, last one repeating."""
+    def executor(command, _repo_root, _budget, _child_env):
+        index = len(calls)
+        calls.append(tuple(command))
+        returncode, stdout = outputs[min(index, len(outputs) - 1)]
+        return _Proc(returncode, stdout)
+    return executor
+
+
+@pytest.mark.parametrize("command", [
+    ("pytest", "-v"),
+    ("python", "-m", "pytest", "-v"),
+])
+def test_interrupted_collection_retries_with_continue_on_collection_errors(
+        repo, monkeypatch, command):
+    """dynaconf-1241: four uncollectable modules aborted a 743-test session,
+    so the baseline saw zero names. The abort is a property of the
+    invocation, not of the tree - retry once inside the same capture window
+    with --continue-on-collection-errors and the already-green names appear.
+    """
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        _scripted_executor(calls, [(2, _INTERRUPTED_OUTPUT),
+                                   (1, _CONTINUED_OUTPUT)]),
+    )
+    result = run_baseline(str(repo), budget_seconds=120, command=command)
+
+    assert len(calls) == 2, calls
+    token = calls[1].index("pytest")
+    assert calls[1][token + 1] == "--continue-on-collection-errors", calls[1]
+    assert result.status == "captured", result.as_dict()
+    assert result.passing_names
+    assert result.passed == 370 and result.failed == 1
+    assert result.errored == 4
+    assert "argv_accommodated:pytest_collection_interrupted" in result.detail
+
+
+def test_collection_retry_without_verdicts_stays_unverdicted(repo, monkeypatch):
+    """Bounded and honest: when even the continued run collects nothing there
+    is still no passing set to conserve, so the status must not improve - but
+    the detail has to record that the retry was spent, or the next reader
+    re-litigates it."""
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        _scripted_executor(calls, [(2, _INTERRUPTED_OUTPUT),
+                                   (2, _STILL_INTERRUPTED_OUTPUT)]),
+    )
+    result = run_baseline(str(repo), budget_seconds=120,
+                          command=("pytest", "-v"))
+
+    # At most once: the retry's own output is interrupted too, and that must
+    # not spawn a third run.
+    assert len(calls) == 2, calls
+    assert result.status == "no_test_verdicts"
+    assert not result.captured
+    assert result.errored == 4
+    assert "argv_accommodated:pytest_collection_interrupted" in result.detail
+
+
+def test_collection_retry_is_skipped_when_the_budget_is_gone(repo, monkeypatch):
+    """A retry that does not fit is not attempted: the capture window is the
+    baseline's whole contract with the wall clock, and a second suite run
+    inside an exhausted budget would steal it from the edit that follows."""
+    calls: list[tuple[str, ...]] = []
+
+    def executor(command, _repo_root, _budget, _child_env):
+        calls.append(tuple(command))
+        time.sleep(3.2)
+        return _Proc(2, _INTERRUPTED_OUTPUT)
+
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline", executor)
+    result = run_baseline(str(repo), budget_seconds=3.0,
+                          command=("pytest", "-v"))
+
+    assert len(calls) == 1, calls
+    assert "argv_accommodated:pytest_collection_interrupted" not in result.detail
+
+
+def test_a_non_pytest_runner_is_never_retried_for_collection(repo, monkeypatch):
+    """--continue-on-collection-errors is a pytest flag. Matching on the text
+    alone would hand `cargo test` an argument it does not have and turn a
+    readable observation into a spawn failure."""
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        _scripted_executor(calls, [(2, _INTERRUPTED_OUTPUT)]),
+    )
+    result = run_baseline(str(repo), budget_seconds=120,
+                          command=("cargo", "test"))
+
+    assert len(calls) == 1, calls
+    assert "argv_accommodated:pytest_collection_interrupted" not in result.detail
+
+
+def test_an_argv_that_already_continues_is_not_retried(repo, monkeypatch):
+    """Idempotence: the accommodation would produce the identical argv, so a
+    retry could only spend the window twice for the same evidence."""
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        _scripted_executor(calls, [(2, _INTERRUPTED_OUTPUT)]),
+    )
+    result = run_baseline(
+        str(repo), budget_seconds=120,
+        command=("pytest", "--continue-on-collection-errors", "-v"))
+
+    assert len(calls) == 1, calls
+    assert result.status == "no_test_verdicts"
+    assert "argv_accommodated:pytest_collection_interrupted" not in result.detail
+
+
+def test_both_argv_accommodations_compose_in_order(repo, monkeypatch):
+    """dynaconf carries both defects at once: duplicate app_test.py basenames
+    AND uncollectable optional-dependency modules. Fixing the first only
+    exposes the second, so the second retry has to build on the first argv,
+    and the detail has to list what was spent in the order it was spent."""
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        _scripted_executor(calls, [(2, _MISMATCH_THEN_INTERRUPTED_OUTPUT),
+                                   (2, _INTERRUPTED_OUTPUT),
+                                   (1, _CONTINUED_OUTPUT)]),
+    )
+    result = run_baseline(str(repo), budget_seconds=120,
+                          command=("pytest", "-v"))
+
+    assert len(calls) == 3, calls
+    assert "--import-mode=importlib" in calls[2]
+    assert "--continue-on-collection-errors" in calls[2]
+    assert result.status == "captured", result.as_dict()
+    assert result.passing_names
+    assert result.detail == (
+        "argv_accommodated:pytest_import_file_mismatch"
+        ";argv_accommodated:pytest_collection_interrupted"
+    )
+
+
+def test_pytest_continue_on_collection_errors_argv_helpers():
+    from gt_engine.persistent_plan.checks import (
+        argv_runs_pytest,
+        pytest_collection_interrupted,
+        pytest_continue_on_collection_errors_argv,
+    )
+
+    assert pytest_collection_interrupted(_INTERRUPTED_OUTPUT)
+    assert pytest_collection_interrupted(
+        "!!!! Interrupted: 1 error during collection !!!!")
+    assert not pytest_collection_interrupted(
+        "370 passed, 1 failed, 4 errors in 8.10s")
+    assert not pytest_collection_interrupted("")
+    assert pytest_continue_on_collection_errors_argv(["pytest", "-v"]) == [
+        "pytest", "--continue-on-collection-errors", "-v"]
+    assert pytest_continue_on_collection_errors_argv(
+        ["python", "-m", "pytest", "tests/"]) == [
+        "python", "-m", "pytest", "--continue-on-collection-errors", "tests/"]
+    already = ["pytest", "--continue-on-collection-errors", "x.py"]
+    assert pytest_continue_on_collection_errors_argv(already) == already
+    assert argv_runs_pytest(["python", "-m", "pytest"])
+    assert argv_runs_pytest(["/usr/bin/pytest", "-v"])
+    assert not argv_runs_pytest(["cargo", "test"])

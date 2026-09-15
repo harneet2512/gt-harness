@@ -26,7 +26,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .checks import pytest_collection_mismatch, pytest_importlib_argv
+from .checks import (
+    argv_runs_pytest,
+    pytest_collection_interrupted,
+    pytest_collection_mismatch,
+    pytest_continue_on_collection_errors_argv,
+    pytest_importlib_argv,
+)
 
 # The capture is a fraction of the run, never a phase of it. Measured runtimes
 # were 16-72 minutes against an 85-minute budget, so a few minutes buys the
@@ -463,20 +469,60 @@ def run_baseline(
         # instrument defect, not a tree state. Retry once inside the same
         # capture window under importlib import mode, which names modules
         # by path so duplicate basenames coexist.
-        first_output = (proc.stdout or "") + "\n" + (proc.stderr or "")
-        accommodated = ""
-        if pytest_collection_mismatch(first_output):
+        # `executed` tracks the argv that actually produced `proc`, so a
+        # second accommodation is layered onto the first rather than onto
+        # the declared command. The reported `command` stays the declared
+        # one; `detail` is where what was spent becomes visible.
+        executed = list(command)
+        observed = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        accommodations: list[str] = []
+        if pytest_collection_mismatch(observed):
             remaining = float(budget_seconds) - (time.monotonic() - started)
             if remaining > 0:
+                candidate = pytest_importlib_argv(executed)
                 try:
                     retry = _execute_baseline(
-                        tuple(pytest_importlib_argv(command)),
-                        repo_root, remaining, child_env)
+                        tuple(candidate), repo_root, remaining, child_env)
                 except Exception:  # noqa: BLE001 - keep the first observation
                     retry = None
                 if retry is not None:
                     proc = retry
-                    accommodated = "argv_accommodated:pytest_import_file_mismatch"
+                    executed = candidate
+                    observed = (proc.stdout or "") + "\n" + (proc.stderr or "")
+                    accommodations.append(
+                        "argv_accommodated:pytest_import_file_mismatch")
+        # Pytest is all-or-nothing about collection: one module that raises
+        # on import ends the WHOLE session before a single assertion runs.
+        # Run 34996816912 (dynaconf__dynaconf-1241) paid for it - the
+        # discovered `pytest -v` (basis config:pytest_ini) exited 2 in 4.4s
+        # with errored=4, passed=0, failed=0 and ZERO names, so the capture
+        # was `no_test_verdicts` and both consumers keyed on
+        # `baseline.captured` (the baseline-vs-suite classifier and the
+        # submit-window advisory) stayed silent on exactly the run that
+        # motivated them. `--collect-only` on the same tree says "743 tests
+        # collected, 10 errors": the 743 are a fact about the repository,
+        # the abort is a property of the invocation. So this is an
+        # instrument fix, not a tree claim - the errors are still counted
+        # and still reported, the retry only stops them from suppressing
+        # the verdicts that were there all along. Bounded the same way as
+        # the mismatch retry above: once, inside the same capture window,
+        # and the first observation survives a retry that throws.
+        if (pytest_collection_interrupted(observed) and argv_runs_pytest(executed)
+                and pytest_continue_on_collection_errors_argv(executed) != executed):
+            remaining = float(budget_seconds) - (time.monotonic() - started)
+            if remaining > 0:
+                candidate = pytest_continue_on_collection_errors_argv(executed)
+                try:
+                    retry = _execute_baseline(
+                        tuple(candidate), repo_root, remaining, child_env)
+                except Exception:  # noqa: BLE001 - keep the first observation
+                    retry = None
+                if retry is not None:
+                    proc = retry
+                    executed = candidate
+                    accommodations.append(
+                        "argv_accommodated:pytest_collection_interrupted")
+        accommodated = ";".join(accommodations)
         after = capture_workspace(repo_root)
         if not after.complete:
             raise RuntimeError("baseline final source capture incomplete")

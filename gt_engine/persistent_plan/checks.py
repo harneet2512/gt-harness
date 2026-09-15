@@ -527,6 +527,58 @@ def pytest_importlib_argv(argv) -> list[str]:
     return [args[0], "--import-mode=importlib", *args[1:]]
 
 
+_PYTEST_INTERRUPTED_RE = re.compile(
+    r"Interrupted: \d+ errors? during collection",
+)
+
+
+def argv_runs_pytest(argv) -> bool:
+    """True when some token in ``argv`` is the pytest runner itself.
+
+    Both ``pytest`` and ``python -m pytest`` name it; ``cargo test`` does
+    not. Pytest-only accommodations are gated on this, because handing a
+    pytest flag to another runner converts a readable observation into a
+    spawn failure - a worse answer than the one being repaired.
+    """
+    return any(Path(arg).name.lower().removesuffix(".exe") == "pytest"
+               for arg in argv)
+
+
+def pytest_collection_interrupted(output: str) -> bool:
+    """True when pytest aborted the session because collection errored.
+
+    Pytest's default is all-or-nothing: one module that raises on import
+    ends the WHOLE session before a single assertion runs. Run 34996816912
+    (dynaconf__dynaconf-1241) measured it - discovered command ``pytest -v``
+    (basis config:pytest_ini) exited 2 in 4.4s with errored=4, passed=0,
+    failed=0 and zero names - while ``pytest --collect-only`` on the same
+    checkout printed "743 tests collected, 10 errors" then "Interrupted: 10
+    errors during collection". The 743 collectable tests are a fact about
+    the tree; the abort is a property of the invocation.
+    """
+    return bool(_PYTEST_INTERRUPTED_RE.search(output or ""))
+
+
+def pytest_continue_on_collection_errors_argv(argv) -> list[str]:
+    """Argv with ``--continue-on-collection-errors`` after the pytest token.
+
+    The flag keeps the uncollectable modules as errors and runs everything
+    that did collect, so the capture records the names that were already
+    green instead of nothing at all. Inserting after the ``pytest`` token
+    keeps ``python -m pytest ...`` well-formed; the transform is idempotent,
+    so an argv that already carries the flag comes back unchanged and the
+    caller can tell there is no second run worth spending.
+    """
+    args = list(argv)
+    if "--continue-on-collection-errors" in args:
+        return args
+    for index, arg in enumerate(args):
+        if Path(arg).name.lower().removesuffix(".exe") == "pytest":
+            return [*args[: index + 1], "--continue-on-collection-errors",
+                    *args[index + 1:]]
+    return [args[0], "--continue-on-collection-errors", *args[1:]]
+
+
 def classify_bound_check(spec: CheckSpec, execution, *, before_revision: str,
                          after_revision: str, capture_complete: bool,
                          test_ids: tuple[str, ...] = (),
