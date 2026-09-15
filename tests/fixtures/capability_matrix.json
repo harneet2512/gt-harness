@@ -181,6 +181,14 @@
       "tests/test_plan_verification_boundary.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "uncollectable_check_argv",
+     "observed": "run 34919574013 dynaconf-1241 solved (reward=1) but verified=False: 3 of 5 seal-rechecked bound checks failed at EVERY revision with pytest 'import file mismatch' - same-basename tests_functional/**/app_test.py modules cannot collect in one invocation and bare pytest over a duplicate-basename tree errors before running; the declared argv was physically uncollectable so no assertion ever ran and no tree could verify. Fixed by a journaled one-shot --import-mode=importlib accommodation retry inside the same capture window in drain_plan_checks and run_baseline",
+     "covering_tests": [
+      "tests/test_plan_verification_boundary.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

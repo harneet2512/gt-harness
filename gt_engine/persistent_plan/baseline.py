@@ -26,6 +26,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from .checks import pytest_collection_mismatch, pytest_importlib_argv
+
 # The capture is a fraction of the run, never a phase of it. Measured runtimes
 # were 16-72 minutes against an 85-minute budget, so a few minutes buys the
 # regression signal the run has never had -- but a suite that wants longer than
@@ -414,6 +416,25 @@ def run_baseline(
         if remaining <= 0:
             raise subprocess.TimeoutExpired(list(command), budget_seconds)
         proc = _execute_baseline(tuple(command), repo_root, remaining, child_env)
+        # A suite whose argv cannot collect (same-basename test modules in
+        # one pytest invocation) measures nothing: the error storm is an
+        # instrument defect, not a tree state. Retry once inside the same
+        # capture window under importlib import mode, which names modules
+        # by path so duplicate basenames coexist.
+        first_output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        accommodated = ""
+        if pytest_collection_mismatch(first_output):
+            remaining = float(budget_seconds) - (time.monotonic() - started)
+            if remaining > 0:
+                try:
+                    retry = _execute_baseline(
+                        tuple(pytest_importlib_argv(command)),
+                        repo_root, remaining, child_env)
+                except Exception:  # noqa: BLE001 - keep the first observation
+                    retry = None
+                if retry is not None:
+                    proc = retry
+                    accommodated = "argv_accommodated:pytest_import_file_mismatch"
         after = capture_workspace(repo_root)
         if not after.complete:
             raise RuntimeError("baseline final source capture incomplete")
@@ -472,7 +493,8 @@ def run_baseline(
             confidence=confidence, duration_seconds=elapsed,
             exit_code=proc.returncode,
             output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
-            detail="runner produced no parseable result",
+            detail=";".join(x for x in ("runner produced no parseable result",
+                                        accommodated) if x),
         )
     return BaselineResult(
         status="captured" if before.revision == after.revision else "source_changed_during_baseline",
@@ -482,6 +504,7 @@ def run_baseline(
         command=tuple(command),
         basis=basis,
         confidence=confidence,
+        detail=accommodated,
         passed=int(counts["passed"]),
         failed=int(counts["failed"]),
         errored=int(counts["errored"]),

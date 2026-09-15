@@ -535,3 +535,89 @@ def test_current_red_receipt_still_blocks_a_later_check_pass(
     assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
     assert adapter.predicate_status("p") is PredicateStatus.RED
     assert "p" in adapter.unmet_predicates
+
+
+_MISMATCH_OUTPUT = """\
+_ ERROR collecting tests_functional/issues/658_nested_envvar_override/app_test.py _
+import file mismatch:
+imported module 'app_test' has this __file__ attribute:
+  /testbed/tests_functional/issues/1005-key-type-error/app_test.py
+which is not the same as the test file we want to collect:
+  /testbed/tests_functional/issues/658_nested_envvar_override/app_test.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+"""
+
+
+def _mismatch_then_env(calls, retry_returncode, retry_output):
+    """First execute returns the dynaconf collection-mismatch signature; the
+    retry result is supplied by the caller."""
+    class Env:
+        def execution_env(self):
+            return lambda *a, **k: None
+
+        def execute(self, payload, **kwargs):
+            calls.append(payload)
+            if len(calls) == 1:
+                return {"returncode": 2, "output": _MISMATCH_OUTPUT,
+                        "extra": {"capture_complete": True,
+                                  "environment_sha256": "env-1"}}
+            return {"returncode": retry_returncode, "output": retry_output,
+                    "extra": {"capture_complete": True,
+                              "environment_sha256": "env-1"}}
+    return Env()
+
+
+def test_pytest_collection_mismatch_retries_under_importlib(tmp_path, monkeypatch):
+    """Run 34919574013 (dynaconf-1241): three bound checks failed on EVERY
+    revision because their argv - several tests_functional/**/app_test.py in
+    one invocation, or bare pytest over a tree full of same-named
+    app_test.py - dies at collection with 'import file mismatch'. No
+    assertion ever ran, so no tree could verify. The drain must retry the
+    declared check under --import-mode=importlib and classify that verdict."""
+    repo, adapter, row_id, _check_id, _cw = _seal_session(tmp_path, monkeypatch)
+    calls = []
+    adapter.drain_plan_checks(_mismatch_then_env(calls, 0, "1 passed"))
+    assert len(calls) == 2
+    assert calls[0]["argv"] == ["pytest", "-v", "test_widget.py"]
+    assert "--import-mode=importlib" in calls[1]["argv"]
+    assert adapter.plan_row_state(row_id) == "CHECK_PASSED"
+    events = [json.loads(line) for line in
+              adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    acc = [row for row in events if row["event"] == "plan_check_argv_accommodated"]
+    assert len(acc) == 1
+    assert acc[0]["reason"] == "pytest_import_file_mismatch"
+    assert acc[0]["declared_argv"] == ["pytest", "-v", "test_widget.py"]
+    assert "--import-mode=importlib" in acc[0]["executed_argv"]
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_pytest_collection_mismatch_retry_failure_stays_failed(
+        tmp_path, monkeypatch):
+    """The accommodation is bounded and honest: if the importlib retry also
+    fails, the observation is the retry's real verdict (a genuinely failing
+    test stays CHECK_FAILED) and the retry fires once, never in a loop."""
+    repo, adapter, row_id, _check_id, _cw = _seal_session(tmp_path, monkeypatch)
+    calls = []
+    adapter.drain_plan_checks(
+        _mismatch_then_env(calls, 1, "1 failed in 0.10s"))
+    assert len(calls) == 2
+    assert adapter.plan_row_state(row_id) == "CHECK_FAILED"
+    adapter.drain_plan_checks(
+        _mismatch_then_env(calls, 1, "1 failed in 0.10s"))
+    assert verify_event_journal(adapter.store.path).valid
+
+
+def test_pytest_importlib_argv_helpers():
+    from gt_engine.persistent_plan.checks import (
+        pytest_collection_mismatch,
+        pytest_importlib_argv,
+    )
+    assert pytest_collection_mismatch(_MISMATCH_OUTPUT)
+    assert not pytest_collection_mismatch("1 passed in 0.10s")
+    assert pytest_importlib_argv(["pytest", "a/x.py", "b/x.py"]) == [
+        "pytest", "--import-mode=importlib", "a/x.py", "b/x.py"]
+    assert pytest_importlib_argv(
+        ["python", "-m", "pytest", "tests/"]) == [
+        "python", "-m", "pytest", "--import-mode=importlib", "tests/"]
+    already = ["pytest", "--import-mode=importlib", "x.py"]
+    assert pytest_importlib_argv(already) == already

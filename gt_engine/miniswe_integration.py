@@ -1704,7 +1704,12 @@ class MiniSweAdapter(GroundtruthController):
         if os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
             return
         from .persistent_plan.baseline import _parse
-        from .persistent_plan.checks import classify_bound_check, validation_source_digest
+        from .persistent_plan.checks import (
+            classify_bound_check,
+            pytest_collection_mismatch,
+            pytest_importlib_argv,
+            validation_source_digest,
+        )
         from .runtime_observation import (
             capture_workspace,
             compile_execution_evidence,
@@ -1765,6 +1770,40 @@ class MiniSweAdapter(GroundtruthController):
                     cwd=str(Path(self.repo_root) / spec.cwd),
                     timeout=max(1, int(min(remaining, self.REVERIFY_COMMAND_TIMEOUT_SECONDS))),
                 )
+                # The declared argv may be physically uncollectable: pytest
+                # refuses same-basename test modules in one invocation
+                # ("import file mismatch"). That is an instrument defect,
+                # not tree evidence - every dynaconf-style check failed every
+                # revision because no assertion ever ran. Retry once inside
+                # the same capture window under importlib import mode, which
+                # names modules by path, and let that verdict classify. The
+                # spec identity (and command_sha256) stays the declared
+                # command; the accommodation is journaled with both argvs.
+                preview_extra = result.get("extra") or {}
+                preview_ref = preview_extra.get("output_artifact")
+                preview_output = (environment.evidence_store.bytes(
+                    preview_ref["sha256"]).decode("utf-8", "replace")
+                    if preview_ref else str(result.get("output", "")))
+                if (spec.protocol == "pytest"
+                        and pytest_collection_mismatch(preview_output)
+                        and deadline - time.monotonic() >= 1):
+                    accommodated = pytest_importlib_argv(spec.argv)
+                    retry = environment.execute(
+                        {"command": shlex.join(accommodated),
+                         "argv": list(accommodated)},
+                        cwd=str(Path(self.repo_root) / spec.cwd),
+                        timeout=max(1, int(min(
+                            deadline - time.monotonic(),
+                            self.REVERIFY_COMMAND_TIMEOUT_SECONDS))),
+                    )
+                    self.store.append(
+                        "plan_check_argv_accommodated",
+                        check_id=spec.check_id,
+                        reason="pytest_import_file_mismatch",
+                        declared_argv=list(spec.argv),
+                        executed_argv=list(accommodated),
+                    )
+                    result = retry
             except Exception as exc:  # an automatic check cannot submit the task
                 self.store.append("plan_check_execution_failed", check_id=check_id,
                                   error_type=type(exc).__name__)

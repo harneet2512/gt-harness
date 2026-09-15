@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shlex
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -489,6 +490,41 @@ def validation_source_digest(spec: CheckSpec, snapshot) -> str:
     selected.extend((f.path, f.sha256) for f in snapshot.files
                     if Path(f.path).suffix.lower() in {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".lock"})
     return hashlib.sha256(json.dumps(sorted(set(selected)), separators=(",", ":")).encode()).hexdigest()
+
+
+_PYTEST_MISMATCH_RE = re.compile(
+    r"import file mismatch|has this __file__ attribute"
+    r"|not the same as the test file",
+    re.IGNORECASE,
+)
+
+
+def pytest_collection_mismatch(output: str) -> bool:
+    """True when pytest could not collect the declared targets at all.
+
+    ``pytest a/app_test.py b/app_test.py`` (or a bare suite run on a tree
+    with duplicate test basenames) dies in collection: two same-named
+    modules cannot coexist under one rootdir import. That is an instrument
+    defect in the invocation, not evidence about the tree - the check never
+    ran a single assertion.
+    """
+    return bool(_PYTEST_MISMATCH_RE.search(output or ""))
+
+
+def pytest_importlib_argv(argv) -> list[str]:
+    """Argv with ``--import-mode=importlib`` after the pytest token.
+
+    Importlib mode names each test module by its rootdir-relative path, so
+    duplicate basenames collect cleanly. Inserting after the ``pytest``
+    token keeps ``python -m pytest ...`` well-formed.
+    """
+    args = list(argv)
+    if any(arg.startswith("--import-mode") for arg in args):
+        return args
+    for index, arg in enumerate(args):
+        if Path(arg).name.lower().removesuffix(".exe") == "pytest":
+            return [*args[: index + 1], "--import-mode=importlib", *args[index + 1:]]
+    return [args[0], "--import-mode=importlib", *args[1:]]
 
 
 def classify_bound_check(spec: CheckSpec, execution, *, before_revision: str,
