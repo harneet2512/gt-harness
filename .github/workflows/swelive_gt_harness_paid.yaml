@@ -505,6 +505,7 @@ jobs:
       MODEL: ${{ needs.plan.outputs.model }}
       GT_RETRIEVAL_MODE: hybrid_required
       GT_TREATMENT: groundtruth
+      GT_JOURNAL_TEE: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

@@ -165,6 +165,14 @@
       "tests/test_program_check_channel.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "stale_evidence_at_seal",
+     "observed": "run 34907273607 solved the task but verified=false: 4 bound checks last passed at an earlier revision and the lenient submit gate accepted on no_blocking_evidence with insufficient reserve to re-run them; fixed by bounded seal_plan_recheck inside completion_state (1af406b0)",
+     "covering_tests": [
+      "tests/test_plan_verification_boundary.py"
+     ],
+     "status": "fixed"
     }
    ]
   },
@@ -273,6 +281,14 @@
       "tests/test_gt_session.py"
      ],
      "status": "covered"
+    },
+    {
+     "id": "seal_freeze_on_churn",
+     "observed": "gate-one 34904339448 + fleet scan: final adopted graph sealed while a churn defer was armed or never received a leg - 616/1819 legs obsolete (34%), 34 partial-salvage events, 11 task-runs sealed on a leg-less final graph; fixed by bounded seal-time convergence on the quiescent tree (66cf2ecb) plus convergence-leg scheduling on salvage adoption (b1367f85)",
+     "covering_tests": [
+      "tests/test_workload_simulation.py"
+     ],
+     "status": "fixed"
     }
    ]
   },
