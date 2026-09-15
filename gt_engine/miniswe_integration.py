@@ -21,6 +21,7 @@ from typing import Any
 from .delivery_budget import (
     MAX_BOUNDARY_CLAIMS,
     MAX_LOCALIZATION_DELIVERIES,
+    MAX_LOCALIZATION_HARD_DELIVERIES,
     TOTAL_DELIVERY_BYTE_LIMIT,
     compact_localization,
     delivery_byte_limit,
@@ -407,6 +408,7 @@ class MiniSweAdapter(GroundtruthController):
         self._localization_head = ""
         self._localization_delivered = False
         self._delivered_localization_identities: set[str] = set()
+        self._delivered_localization_targets: set[str] = set()
         self._pending_verification_candidate = ""
         self._pending_verification_metadata: dict[str, str] = {}
         self._pending_verification_recipe: dict[str, Any] = {}
@@ -4712,6 +4714,8 @@ class MiniSweAdapter(GroundtruthController):
             if item.kind == "localization":
                 self._localization_delivered = True
                 self._delivered_localization_identities.add(item.identity)
+                if item.target:
+                    self._delivered_localization_targets.add(item.target)
             if (item.kind == "recovery" and self._pending_recovery is not None
                     and item.rendered == self.pending_transient):
                 fingerprint, epoch = self._pending_recovery
@@ -5296,12 +5300,21 @@ class MiniSweAdapter(GroundtruthController):
             )
         ):
             reason = "localization_fire_once"
-        elif kind == "localization" and len(
-            self._delivered_localization_identities
-        ) >= MAX_LOCALIZATION_DELIVERIES:
-            # Re-localization is allowed when the ranked content changed (the
-            # agent's own searches reveal a shifted information need) but is
-            # still capped per task so a drifting ranking cannot spam.
+        elif kind == "localization" and (
+            len(self._delivered_localization_identities)
+            >= MAX_LOCALIZATION_HARD_DELIVERIES
+            or (
+                len(self._delivered_localization_identities)
+                >= MAX_LOCALIZATION_DELIVERIES
+                and (
+                    not target
+                    or target in self._delivered_localization_targets
+                )
+            )
+        ):
+            # The soft cap refuses same-top churn once the task allowance is
+            # spent; a novel top-ranked target is a shifted information need
+            # and still admits. The hard bound caps even novel-top rotation.
             reason = "localization_task_ceiling"
         elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
@@ -5318,6 +5331,7 @@ class MiniSweAdapter(GroundtruthController):
                 kind=kind,
                 dedup_key=effective_dedup_key,
                 reason=reason,
+                target=target,
                 candidate_ordinal=candidate_ordinal,
                 rendered_bytes=rendered_bytes,
                 payload_sha256=payload_sha256,

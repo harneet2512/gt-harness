@@ -39,11 +39,11 @@
     },
     {
      "id": "ceiling_frontload_starve",
-     "observed": "smoke20 bandit-taint: localization_task_ceiling refused 113 deliveries; evidence front-loaded then starved; run 34932393298 dynaconf: MAX_LOCALIZATION_DELIVERIES=3 consumed by seq 209, then 43 distinct semantic-localization units refused localization_task_ceiling and never re-admitted (refusals through iter 66, only 4 deliveries after). Cap is by-design anti-spam but cannot displace stale deliveries with better-ranked later evidence. Task still solved+verified - starvation impact unproven in this cohort.",
+     "observed": "smoke20 bandit-taint: localization_task_ceiling refused 113 deliveries; evidence front-loaded then starved; run 34932393298 dynaconf: MAX_LOCALIZATION_DELIVERIES=3 consumed by seq 209, then 43 distinct semantic-localization units refused localization_task_ceiling and never re-admitted (refusals through iter 66, only 4 deliveries after). Root cause: delivery_identity is the payload hash, so fire-once already dedups identical content and the flat cap only ever fired on NOVEL payloads - blocking exactly the shifted-information-need re-localization the design comment permits. Fixed: soft cap of 3 now refuses only same-top churn (delivered top-ranked targets tracked); a novel top-ranked target admits as a genuine information-need shift; MAX_LOCALIZATION_HARD_DELIVERIES=6 bounds even novel-top rotation. Refusal rows now carry target for post-hoc audit. Run 34932393298 solved+verified regardless - starvation impact on solve rate remains unproven.",
      "covering_tests": [
       "tests/test_delivery_payload.py"
      ],
-     "status": "known-issue - mechanism confirmed live 34932393298; design decision pending"
+     "status": "fixed"
     },
     {
      "id": "byte_budget_exceeded",

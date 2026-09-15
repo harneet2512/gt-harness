@@ -355,6 +355,64 @@ def test_pending_localization_still_serialized_per_decision(tmp_path: Path) -> N
     assert not _offer_localization(adapter, 0, "v2")
 
 
+def _offer_localization_targeted(
+    adapter: MiniSweAdapter, iteration: int, text: str, target: str
+) -> bool:
+    return adapter.admit_model_visible_delivery(
+        lane="sealed", kind="localization", rendered=text,
+        action_index=iteration, iteration=iteration, dedup_key=text,
+        target=target,
+    )
+
+
+def test_novel_top_target_bypasses_soft_ceiling_until_hard_cap(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    tops = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]
+    for iteration, top in enumerate(tops):
+        assert _offer_localization_targeted(
+            adapter, iteration, f"ranked rows for {top}", top
+        )
+        _bind(adapter, f"ranked rows for {top}")
+    # Past the soft cap, a re-rank under an already-delivered top is churn and
+    # is refused - the anti-spam property the ceiling exists for.
+    assert not _offer_localization_targeted(
+        adapter, len(tops), "re-ranked rows for a.py", "a.py"
+    )
+    # Even a novel top is refused once the hard bound is spent.
+    assert not _offer_localization_targeted(
+        adapter, len(tops) + 1, "ranked rows for g.py", "g.py"
+    )
+    refusals = [
+        row for row in _events(adapter)
+        if row.get("event") == "delivery_refused"
+        and row.get("reason") == "localization_task_ceiling"
+    ]
+    assert len(refusals) == 2
+    assert {row.get("target") for row in refusals} == {"a.py", "g.py"}
+    delivered = [
+        row for row in _events(adapter)
+        if row.get("event") == "evidence_delivery"
+        and row.get("evidence_type") == "localization"
+    ]
+    assert len(delivered) == len(tops)
+
+
+def test_same_top_churn_refused_at_soft_ceiling_while_novel_top_admits(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    for iteration, top in enumerate(["a.py", "b.py", "c.py"]):
+        assert _offer_localization_targeted(
+            adapter, iteration, f"ranked rows for {top}", top
+        )
+        _bind(adapter, f"ranked rows for {top}")
+    # Soft cap spent: same-top churn refused, novel top admitted.
+    assert not _offer_localization_targeted(
+        adapter, 3, "re-ranked rows for a.py", "a.py"
+    )
+    assert _offer_localization_targeted(adapter, 3, "ranked rows for d.py", "d.py")
+
+
 # ---------------------------------------------------------------------------
 # Check observation -> obligation predicate evidence (the smoke-20 gap:
 # commands_run=0 everywhere, nothing ever proved, submitted_unverified always)

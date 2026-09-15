@@ -43,8 +43,16 @@ MAX_TASK_DELIVERIES = 24
 MAX_BOUNDARY_CLAIMS = 4
 # Re-localization is permitted when the ranked content changed (the agent's
 # searches move the information need), but distinct localizations stay capped
-# per task so a drifting ranking cannot become a delivery loop.
+# per task so a drifting ranking cannot become a delivery loop. Because the
+# delivery identity is the payload hash, the fire-once rule already dedups
+# identical content and this cap only ever sees NOVEL payloads; the pathology
+# it must stop is same-top churn - a jittering ranking re-emitting a slightly
+# different tail under the same top-ranked file each iteration. A localization
+# whose top-ranked target was never delivered before is a genuine information-
+# need shift, so it bypasses the soft cap; the hard bound below keeps a
+# pathological rotating-top ranking from becoming an unbounded delivery loop.
 MAX_LOCALIZATION_DELIVERIES = 3
+MAX_LOCALIZATION_HARD_DELIVERIES = 6
 
 # Every reason the runtime can write to a delivery_refused row. The authority
 # is here, beside the ceilings the reasons name, and the harness imports it
