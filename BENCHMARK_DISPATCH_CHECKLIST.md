@@ -69,6 +69,22 @@ context receipts, provider admission/route, official verifier result, and final
 attestation. Report DeepSeek results as absolute/exploratory; do not claim
 causal uplift against the retained Muse GT-off cohort.
 
+## P1 — fleet LSP health gate
+
+Every paid run ships `GT_JOURNAL_TEE=1`; tail live per-task LSP health with
+`python scripts/lsp_watch.py --run <run_id>` while the matrix runs. After the
+run's artifacts land, the cohort must pass the strict fleet gate before any
+result is cited or the next stage dispatches:
+
+    python scripts/lsp_watch.py --artifacts <cohort artifact dir> --strict
+
+The gate exits nonzero when any sealed task froze a partial LSP tier
+(TIER_PARTIAL), dropped a scheduled leg (SCHEDULED_NO_TERMINAL), recorded
+producer amend failures, or sealed on a leg-demanding graph the seal-time
+convergence never answered (NO_LEG_ON_FINAL). Those are the signatures that
+produced the 34904339448 lsp_promotion DEGRADED verdict; the gate exists so a
+cohort cannot quietly re-freeze the same class.
+
 ## P2 — remaining nineteen
 
 Dispatch `cohort_stage=remaining-19` only after the one-task run completes and

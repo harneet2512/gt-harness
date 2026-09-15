@@ -156,6 +156,28 @@ class TaskHealth:
             flags.append("SEALED")
         return flags
 
+    def fail_flags(self) -> list[str]:
+        """Hard-fail flags for a sealed task journal.
+
+        Used by ``--strict`` fleet gates: a cohort scan exits nonzero when
+        any sealed task froze a partial tier, lost a scheduled leg, broke
+        the producer pipeline, or sealed on a graph that demanded a leg but
+        never completed one (post seal-convergence, that means the bounded
+        seal window lapsed or the machinery never ran).
+        """
+        out: list[str] = []
+        for flag in self.flags():
+            if flag.startswith(("TIER_PARTIAL", "SCHEDULED_NO_TERMINAL", "AMEND_FAILURES")):
+                out.append(flag)
+        seal_outcome = str(self.seal_rows[-1].get("outcome") or "") if self.seal_rows else ""
+        if (
+            "NO_LEG_ON_FINAL" in self.flags()
+            and self.legs_scheduled
+            and seal_outcome not in {"terminated"}
+        ):
+            out.append(f"NO_LEG_ON_FINAL(seal={seal_outcome or 'absent'})")
+        return out
+
     def render(self) -> str:
         d = self._dispositions()
         disp = ",".join(f"{k}={v}" for k, v in sorted(d.items())) or "-"
@@ -227,6 +249,10 @@ def main() -> int:
                         help="tail the journal file (local/container use)")
     parser.add_argument("--interval", type=float, default=60.0,
                         help="poll seconds for --run/--follow")
+    parser.add_argument("--strict", action="store_true",
+                        help="fleet gate: exit 1 if any sealed task carries a "
+                             "hard-fail flag (TIER_PARTIAL / SCHEDULED_NO_TERMINAL / "
+                             "AMEND_FAILURES / unconverged NO_LEG_ON_FINAL)")
     args = parser.parse_args()
 
     if args.artifacts:
@@ -234,8 +260,19 @@ def main() -> int:
         if not healths:
             print(f"no events.jsonl under {args.artifacts}", file=sys.stderr)
             return 1
+        failures: list[tuple[str, list[str]]] = []
         for health in healths:
             print(health.render())
+            hard = health.fail_flags()
+            if hard:
+                failures.append((health.name, hard))
+        if args.strict:
+            if failures:
+                print("\nFLEET GATE: FAIL")
+                for name, hard in failures:
+                    print(f"  {name}: {', '.join(hard)}")
+                return 1
+            print("\nFLEET GATE: PASS")
         return 0
 
     if args.stdin:
