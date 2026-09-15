@@ -47,6 +47,31 @@ EDIT = (
     "if values else 0.0\\n\" > src/mod.py"
 )
 
+# The producer's location env is preserved for the reason recorded in
+# test_gt_engine (a missing producer looked environmental for several
+# rounds; its value is identical for every test, so it cannot leak state).
+_PRODUCER_LOCATION_ENV = ("GT_INDEX_BINARY",)
+
+
+@pytest.fixture(autouse=True)
+def _gt_env_isolation():
+    """Strip GT_* env before each test and undo anything apply_profile_env's
+    direct os.environ writes added - no cross-module leak. The serial suite
+    runs the wheel-surface tests after this module; a leaked Profile-2 flag
+    set (GT_BRIEF_MINIMAL/GT_LOC_RESLOT/...) silently changes what the
+    installed wheel renders (run 34985500743: entries=4, files==[],
+    delivered=None - a vacuous pass, not a delivery defect)."""
+    import os
+    saved = {k: v for k, v in os.environ.items()
+             if k.startswith("GT_") and k not in _PRODUCER_LOCATION_ENV}
+    for k in saved:
+        del os.environ[k]
+    yield
+    for k in [k for k in os.environ
+              if k.startswith("GT_") and k not in _PRODUCER_LOCATION_ENV]:
+        del os.environ[k]
+    os.environ.update(saved)
+
 
 class ScriptedEnv:
     def __init__(self, script, writes=None):

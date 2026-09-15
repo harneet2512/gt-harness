@@ -92,6 +92,14 @@ def test_installed_wheel_brief_order_is_hashseed_invariant():
         # The certified container has no sentence-transformers; force the shared
         # ONNX surface so the witness path engages identically to production.
         env.setdefault("GT_FORCE_ONNX_EMBEDDER", "1")
+        # The serial suite leaks the Profile-2 brief-posture flags into
+        # os.environ via ``import gt_engine`` -> ``apply_profile_env()``; the
+        # child inherits them and the wheel then honestly ships the minimal
+        # brief (files == [] on EVERY seed -> a vacuous "deterministic" pass,
+        # exactly what run 34985500743 recorded). Pin the delivery posture so
+        # the sweep exercises the render-join it claims to cover.
+        for flag in ("GT_BRIEF_MINIMAL", "GT_LOC_RESLOT", "GT_BRIEF_NATIVE"):
+            env.pop(flag, None)
         proc = subprocess.run(
             [sys.executable, "-c", _CHILD],
             capture_output=True,
@@ -102,14 +110,22 @@ def test_installed_wheel_brief_order_is_hashseed_invariant():
         assert proc.returncode == 0, f"seed={seed}: {proc.stderr[-2000:]}"
         order = json.loads(proc.stdout.strip().splitlines()[-1])
         orders[seed] = order
-        if "beets/importer.py" in order:
-            imp = order.index("beets/importer.py")
-            for wl in ("beets/library.py", "beets/util/pipeline.py"):
-                if wl in order:
-                    assert imp < order.index(wl), (
-                        f"seed={seed}: witness-less {wl} outranks witnessed "
-                        f"importer.py: {order}"
-                    )
+        assert order, (
+            f"seed={seed}: wheel delivered zero file candidates under the "
+            "delivery posture - an empty order makes every assertion below "
+            f"vacuous. stderr: {proc.stderr[-1500:]}"
+        )
+        assert "beets/importer.py" in order, (
+            f"seed={seed}: witnessed importer.py absent from delivered "
+            f"files: {order}"
+        )
+        imp = order.index("beets/importer.py")
+        for wl in ("beets/library.py", "beets/util/pipeline.py"):
+            if wl in order:
+                assert imp < order.index(wl), (
+                    f"seed={seed}: witness-less {wl} outranks witnessed "
+                    f"importer.py: {order}"
+                )
     unique = {tuple(o) for o in orders.values()}
     assert len(unique) == 1, (
         "PYTHONHASHSEED-dependent brief order on the installed wheel: "
