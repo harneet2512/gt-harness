@@ -797,6 +797,129 @@ readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
   on `1af406b0`; a paid dispatch then needs a fresh explicit approval +
   dispatch tag on that SHA citing the matching `readiness_run_id`.
 
+## SWE-Live re-smoke — run `35016130850` (2026-09-15): attestation **FAIL**, lever proven online
+
+`cohort_stage=all` on `c645976a`, readiness `35014638533`. Both Lite tasks ran:
+
+- `dynaconf__dynaconf-1241`: agent **submitted before the deadline**
+  (`submitted_unverified`, exit 0) — versus the prior run's timeout-kill.
+  Official verifier **SOLVED, reward 1**. `baseline_classification` fired 5×
+  on `basis: baseline` and the model visibly consumed the verdicts
+  (trajectory reasoning quotes GT classifications while triaging
+  `test_get_item`). 112 provider calls / 74 deliveries. Killed instead by
+  `receipt_issuance_failed:
+  semantic_localization_graph_integrity_failed:derivation_base_manifest_unreadable`
+  — a revision cited only by enrichment manifests was pruned
+  while load-bearing (8 of 11 cited bases absent from the sealed tree).
+- `cyclotruc__gitingest-94`: `gt_degraded_fail_open` at action 22 —
+  `FileNotFoundError` on `/tmp/gt-history-v10qbbkl`, the provider-history
+  evidence spool living in shared system `/tmp`. An external sweep deleted
+  it in the create→publish gap; the unguarded raise disabled the engine,
+  the supervisor exited `internal_error`, the verifier never ran.
+
+## Defect fix wave — `7f62b891`, `100de171`, `9f5f57b7` (2026-09-15)
+
+All defects from the re-smoke plus the audit-side closures, each with
+regression coverage and a capability-matrix entry:
+
+- **`enrichment_cited_base_pruned`** (fixed): `_referenced_revisions` now
+  walks every `graph.manifest.json` under the graph root and resolves each
+  derivation ref against the citing manifest's directory; only refs whose
+  ancestor's parent is the `revisions/` root protect revisions; an
+  unreadable manifest freezes pruning outright (revisions-root sentinel).
+- **`shared_tmp_spool_external_delete`** (fixed): the history spool now
+  lives inside the task-owned evidence namespace
+  (`NamedTemporaryFile(dir=store.root)`).
+- **`compound_test_unknown_outcome`** (fixed): `_classify_test` uses the
+  unguarded textual `_classify_test_output` parse, so compound/piped
+  commands (`pytest … | tail`) emit `test_result` — feeding semantic
+  events, covering attribution (`observed=` kwarg), and fingerprint
+  tracking. The evidence row keeps the guarded `outcome` — "cannot
+  attribute the exit code" and "a test observation occurred" stay separate
+  facts.
+- **`suite_equivalent_scoped_undercredit`** (fixed):
+  `SuiteVerdictLedger.covers_known_suite` promotes a scoped run to
+  unrestricted when directory prefixes cover every known test with no
+  exclusions; `record_suite_run` and the adapter's `suite_scope` consult it.
+- **`gtbridge_owned_features_unwired`** (fixed audit-side): `_run_evidence`
+  emits `feature_evaluated` rows (`gt.feature_evaluation.v1`) for the
+  covering_red and recovery local lanes; `feature_accounting` reads them
+  before the ordering proxy. `def_partition` proved wired all along —
+  `_produce_def_ref_partition` dispatches unconditionally on
+  AMBIGUOUS_HIT/FLOOD, so a missing invocation row on witnessed search
+  boundaries IS the eligibility fact; the run re-audits DECLINED_CORRECTLY.
+- **`submit_refusal_delivery_invisible`** (fixed): `account()` counts
+  `action_suppressed reason=submit_refused` as the refusal delivery — the
+  enforced refusals in run 35016130850 now read DELIVERED, not STARVED.
+- **`verifier_solved_with_receipt_error_split`** (regression-pinned): a
+  same-task GRADED+solved official verdict joined to a product ERROR keeps
+  both facts — the attestation fails on product integrity while the solve
+  is preserved.
+
+Journal integrity: `feature_evaluated` rides as `layout_schema` payload on
+the `gt.event.v1` envelope; `verify_event_journal` stays green (asserted in
+`test_miniswe_runtime.py`).
+
+**Re-audit of run 35016130850's journal under the new rules:** 7 DELIVERED,
+6 DECLINED_CORRECTLY, covering_red STARVED (honest — lane predates
+feature_evaluated rows), recovery/GT_HYPOTHESIS NO_DELIVERY naming the
+missing row, def_partition DECLINED_CORRECTLY.
+
+**Gates:** canonical provider-free acceptance `35028936016` **GREEN** and
+installed full-flow rehearsal `35028940514` **GREEN**, both on `100de171`
+(`9f5f57b7` adds a test-only assertion). 526 tests pass locally, 1
+Linux-only skip.
+
+## Plan to benchmark readiness — current sequence
+
+The standing sequence from the owner: fix the two-task smoke's failures,
+prove the full 21-identity capability surface, then the 20-task DeepSWE
+matched cohort against the frozen GT-off anchors. Current position:
+
+**Done this wave:** all four smoke-exposed failure modes repaired with
+regression tests; audit-side observability closed for every previously
+unverifiable identity; provider-free pyramid green on the dispatch tip.
+
+**Next, in order:**
+
+0. **Offline ability audit (in flight)** — owner spec at
+   `docs/AUDIT-ABILITY-SPEC.md`: all 21 identities reviewed by ability,
+   exercised offline against unfamiliar-task variations (command shapes,
+   scope, timing/persistence, cross-ability sequences), with Layer-4
+   mutation checks proving the tests detect breakage. Four parallel audit
+   workers own disjoint slices (runtime lanes, gateway producers,
+   plan/submit, graph/index lifecycle); confirmed defects are fixed at the
+   existing owner with regression tests; slice reports land under
+   `artifacts/audit/` and consolidate into
+   `docs/AUDIT-21-capability-readiness-<date>.md`. Any BROKEN defect from
+   this audit must land its fix + provider-free re-gate before step 1
+   dispatches.
+1. **Paid 2-task SWE-Live re-smoke** on the gate-green SHA — needs a fresh
+   explicit owner approval + dispatch tag citing `readiness_run_id`
+   `35028936016`. Success shape: both tasks attested — verifier GRADED
+   joined to clean product receipts (no `receipt_issuance_failed`, no
+   engine-disable), `feature_evaluated` rows present for the local lanes,
+   `submit_window` advisory fires when a green suite-equivalent run exists.
+2. **Cohort comparison** — 20-task DeepSWE matched cohort against the
+   frozen GT-off control
+   (`D:\tmp\opencode\gt-off-31824834187\DEEPSWE_EVALUATION_RESULTS.json`,
+   SHA-256 `707d7eb7…`), comparing solve rate AND uncached-token
+   efficiency on identical tasks. The smoke20 matched accounting
+   (`artifacts/matched_cohort_smoke20_34801009507.json`) already shows
+   uncached tokens +956% vs GT-off — the open question the cohort must
+   answer is whether that is a provider-route confound (GT-off ran
+   native `api.deepseek.com`, GT-on runs OpenRouter→relace) or real.
+   GT-off is never re-run; frozen anchors only.
+3. **Strict fleet gate** — the capability matrix carries every identity at
+   DELIVERED / DECLINED_CORRECTLY / NOT_REACHED / named-unknown; a STARVED
+   or unexplained NO_DELIVERY keeps the readiness claim closed.
+4. **TB2** — `exec_transport_failure` + `no_incontainer_journal` remain a
+   separate-repo track; no TB2 readiness claim until they land.
+
+**Not benchmark ready until:** a clean two-task attestation on this SHA
+class proves the run-killers are gone, the cohort completes with honest
+receipts, and the token/solve comparison is computed — not asserted.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
