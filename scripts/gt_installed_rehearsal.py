@@ -448,6 +448,55 @@ def shape_mismatch(kind: str, predicate: str, **observed_expected: Any) -> dict[
     return {"predicate": predicate, "reason": kind, **fields}
 
 
+def expected_execution_evidence_block(payload: dict, command: str) -> str:
+    """Rebuild the delivered ``[GT_EXECUTION_EVIDENCE]`` block from the journal.
+
+    The single place the auditor reconstructs the model-facing block, so it
+    cannot drift from the delivery. It drifted once: the delivery began
+    appending the baseline-classification clause (``; baseline: ...``) and the
+    submit-window advisory, while the auditor still rebuilt only the five
+    original fields, so the rebuilt block never appeared verbatim in the
+    request - ``admitted`` False, ``execution_evidence_verified`` False on
+    every run that classified a failure or carried an advisory. The journal
+    stores the classification as its ``as_dict`` form and the advisory nested
+    under ``submit_window``; the shared renderer accepts both.
+    """
+    return "[GT_EXECUTION_EVIDENCE]\n" + execution_evidence_model_line(
+        command=command,
+        kind=str(payload.get("kind") or ""),
+        outcome=str(payload.get("outcome") or ""),
+        returncode=payload.get("returncode"),
+        observed_test_outcome=str(payload.get("observed_test_outcome") or ""),
+        baseline_classification=payload.get("baseline_classification") or None,
+        submit_window=str((payload.get("submit_window") or {}).get("advisory") or ""),
+    )
+
+
+# Keys the delivery renders from but ``ExecutionEvidence.canonical_bytes`` does
+# not carry: the producer appends them to the journal ROW after hashing the
+# blob, so the hashed artifact can never hold them.
+_ROW_ONLY_EVIDENCE_KEYS = ("baseline_classification", "submit_window")
+
+
+def expected_block_for_row(row: dict, blob_payload: dict, command: str) -> str:
+    """Rebuild the delivered block from the journal row over the hashed blob.
+
+    The clauses do not live where the rest of the line lives. The producer
+    hashes ``canonical_bytes`` - a fixed 15-key artifact - stores THAT as the
+    blob, and only then adds ``baseline_classification`` and ``submit_window``
+    to the appended row. An auditor that rebuilds from the blob alone therefore
+    drops both clauses on every classified run and the verbatim bind fails,
+    exactly as it did when the auditor rebuilt only the five original fields.
+    The blob stays authoritative for everything it covers - it is the digest
+    the chain verifies - and only the two row-only keys come from the row.
+    """
+    return expected_execution_evidence_block(
+        {**blob_payload,
+         **{key: row[key] for key in _ROW_ONLY_EVIDENCE_KEYS if key in row}},
+        command,
+    )
+
+
 def accepts_synthetic_repair(
     receipt: dict[str, Any],
     *,
@@ -702,15 +751,9 @@ async def run(args) -> dict:
                 # The model-facing delivery carries the prose line rendered
                 # from the same payload fields - not the canonical JSON, which
                 # the model could not act on. Rebuild the exact line through
-                # the shared renderer and bind it into the request.
-                expected_line = execution_evidence_model_line(
-                    command=command,
-                    kind=str(payload.get("kind") or ""),
-                    outcome=str(payload.get("outcome") or ""),
-                    returncode=payload.get("returncode"),
-                    observed_test_outcome=str(payload.get("observed_test_outcome") or ""),
-                )
-                expected_block = "[GT_EXECUTION_EVIDENCE]\n" + expected_line
+                # the shared renderer and bind it into the request. The row
+                # supplies the two clause fields the hashed blob cannot hold.
+                expected_block = expected_block_for_row(row, payload, command)
                 admitted = any(
                     expected_block in str(message.get("content") or "")
                     for message in agent_request_list[request_index].get("messages", [])
