@@ -275,11 +275,12 @@
     },
     {
      "id": "l1_brief_witnessless_outranks_witnessed",
-     "observed": "generate_v1r_brief result.files order is HASHSEED-NONDETERMINISTIC: identical fixture+graph ranks beets/library.py (WARNING, no witness) above beets/importer.py (VERIFIED, witnessed) under some PYTHONHASHSEED values and correctly under others (PYTHONHASHSEED=1 passes, confirmed). A set/dict iteration leak survives upstream of the final ordering - the B5-4 sorted(_ein_n) determinism patch did not close the last hole. Brief order varies run-to-run on identical input, violating GT's deterministic-context contract. Pre-existing wheel-side defect in pretask ranking; independent of the runtime-patterns wave",
+     "observed": "RESOLVED-NOT-REPRODUCING on pinned wheel 1e893f63: 30+ PYTHONHASHSEED sweep on the synthetic beets fixture AND the real beets-5495 graph.db produces byte-identical result.files order with importer.py (VERIFIED, witnessed) above all witness-less candidates every run. Closed by the verified-witness ranking repair + B5-3/B5-4/DET-CAP/Fable-L9 determinism patches; entry likely recorded against a pre-rebuild wheel. Audit surfaced+fixed the adjacent silent-kill class instead: foreign-model embedder masquerading as the configured identity in the shared passage cache (dim collision -> localize() raise -> `_loc=None` swallow -> witness path dead, zero trace). Wheel commit 835c680f: model_identity truthful foreign identity, np.dot wrong-width guard, [GT_WARN] marker on the localize swallow, sorted() on the _stem_files set. Regression-locked by wheel test tests/pretask/test_brief_determinism.py (4-seed subprocess order sweep).",
      "covering_tests": [
-      "tests/test_wheel_l1_localizer_ranking.py"
+      "tests/test_wheel_l1_localizer_ranking.py",
+      "tests/test_wheel_l1_brief_determinism.py"
      ],
-     "status": "known-issue"
+     "status": "fixed"
     }
    ]
   },

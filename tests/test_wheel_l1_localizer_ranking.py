@@ -11,16 +11,22 @@ B5-4 ``sorted(_ein_n)`` determinism patch did not close the last hole.
 GT's contract is deterministic context: brief order must not vary
 run-to-run on identical input.
 
-xfail(strict=False) - the defect is nondeterministic, so this test
-documents it without flaking the suite; tighten to strict=True once the
-wheel's pretask ranking is repaired upstream.
+Resolution (wheel commit 835c680f, D:\\gt-product-source): the defect does not
+reproduce on the pinned wheel across a 30+ PYTHONHASHSEED sweep on both this
+synthetic fixture and the real beets-5495 graph — the verified-witness ranking
+repair plus the B5-3/B5-4/DET-CAP determinism patches closed the ordering leak.
+The audit DID surface and fix the adjacent silent-kill class: a foreign-model
+embedder masquerading as the configured identity in the shared passage cache
+(dim-collision -> localize() raise -> `_loc = None` swallow -> witness path dead
+with zero trace). Wheel-side regression-locked by
+tests/pretask/test_brief_determinism.py (model_identity truth table,
+wrong-width-cache resilience, 4-seed subprocess order sweep). This test is now
+strict: any seed-ordering regression fails the suite.
 """
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-
-import pytest
 
 _BEETS_ISSUE = (
     "set_fields does not parse values correctly. When calling set_fields on an "
@@ -94,14 +100,6 @@ def _make_beets_db(tmp_path):
     return str(repo), db
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "installed wheel pretask ranking is hashseed-nondeterministic "
-        "(matrix: l1_brief_witnessless_outranks_witnessed): witness-less "
-        "library.py can outrank witnessed importer.py in result.files"
-    ),
-)
 def test_installed_wheel_ranks_witnessed_file_above_witnessless(tmp_path):
     from groundtruth.pretask.v1r_brief import generate_v1r_brief
 
