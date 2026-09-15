@@ -3210,6 +3210,14 @@ class MiniSweAdapter(GroundtruthController):
         promote = (
             effective_failed == 0 and affirmative and not coverage.narrowed
         )
+        # `pytest tests/` reads `scoped` (positional path) but IS the suite
+        # when the covered directories hold every test name we know. Run
+        # 35016130850: dynaconf's agent ran exactly that, no suite verdict
+        # was ever recorded, and the submit-window advisory stayed silent.
+        suite_scope = coverage.scope == "suite" or (
+            not coverage.narrowed
+            and ledger.covers_known_suite(coverage.paths, coverage.excluded)
+        )
         ledger.record_suite_run(
             passing=passing,
             failing=failing,
@@ -3218,9 +3226,9 @@ class MiniSweAdapter(GroundtruthController):
             passed_count=counts["passed"],
             covered_prefixes=coverage.paths,
             excluded_prefixes=coverage.excluded,
-            suite_scope=coverage.scope == "suite",
+            suite_scope=suite_scope,
         )
-        return promote and coverage.scope == "suite"
+        return promote and suite_scope
 
     def _poll_startup_index(self) -> None:
         """Adopt the asynchronously-built initial index once it lands.

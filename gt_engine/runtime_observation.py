@@ -686,6 +686,36 @@ class SuiteVerdictLedger:
         last edit. The advisory may not describe a run that never happened."""
         return self._whole_suite_green
 
+    def covers_known_suite(
+        self, prefixes: Iterable[str], excluded: Iterable[str] = ()
+    ) -> bool:
+        """Whether a scoped run's positional paths cover the known suite.
+
+        `pytest tests/` IS the full suite when every test file ever observed
+        - baseline capture, pristine probe, or an earlier run - sits under a
+        covered directory. Run 35016130850 ran exactly that on dynaconf and
+        the scope classifier still read `scoped`, so no suite verdict was
+        recorded and the submit-window advisory never fired. Directory
+        prefixes only: a file or ::nodeid path is narrower than a suite by
+        construction, exclusions (--ignore/--deselect) defeat completeness,
+        and an empty known universe proves nothing about the suite's extent.
+        """
+        directories = tuple(
+            p for p in prefixes if "::" not in p and not p.endswith(".py")
+        )
+        if not directories or tuple(excluded):
+            return False
+        known = (
+            set(self._observed)
+            | set(self.baseline_passing)
+            | set(self.baseline_failing)
+            | set(self._probe_passing)
+            | set(self._probe_failing)
+        )
+        if not known:
+            return False
+        return all(_name_covered(name, directories) for name in known)
+
     def _passed_before(self, name: str) -> bool:
         return name in self.baseline_passing or name in self._probe_passing
 
@@ -773,9 +803,13 @@ class SuiteVerdictLedger:
         )
         if named_all:
             return
+        # "Unrestricted" covers two shapes: the bare `pytest` run and a
+        # scoped-looking command whose directory args cover every known test
+        # (`pytest tests/` on a tests/-rooted layout).
+        unrestricted = not prefixes or self.covers_known_suite(prefixes, excluded)
         candidates = set(self._observed)
         if (
-            not prefixes
+            unrestricted
             and passed_count is not None
             and passed_count >= len(self.baseline_passing)
         ):
@@ -783,7 +817,7 @@ class SuiteVerdictLedger:
         for name in candidates:
             if _name_covered(name, prefixes, excluded):
                 self._write(name, "pass")
-        if not prefixes and not excluded and suite_scope:
+        if unrestricted and not excluded and suite_scope:
             # A green whole-suite run supersedes every verdict taken before the
             # last edit, including the ones it did not name.
             self._stale.clear()

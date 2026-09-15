@@ -301,6 +301,109 @@ def test_covering_red_does_not_count_a_test_only_edit_as_a_source_edit():
     assert row_for("covering_red", account(events))["state"] == "DECLINED_CORRECTLY"
 
 
+# --------------------------------------------------------------------------
+# (a.2) feature_evaluated rows - the local lanes' own census outranks proxies
+# --------------------------------------------------------------------------
+
+def test_feature_evaluated_outranks_the_covering_ordering_proxy():
+    # The journal shows the proxy's eligible ordering (edit -> failing test)
+    # but the lane's own row says the failure never named an edited file.
+    # The lane verdict wins: this is a correct abstention, not starvation.
+    events = [
+        TASK_START,
+        {"event": "edit_transaction", "changed_paths": ["pkg/mod.py"]},
+        {"event": "execution_evidence", "kind": "test", "observed_test_outcome": "fail"},
+        {
+            "event": "feature_evaluated", "feature_id": "covering_red",
+            "boundary": "test_result", "eligible": True,
+            "outcome": "no_edited_file_link",
+        },
+    ]
+
+    row = row_for("covering_red", account(events))
+
+    assert row["state"] == "DECLINED_CORRECTLY"
+    assert row["worked"] == "yes"
+    assert "naming an edited file" in row["evidence"]
+
+
+def test_feature_evaluated_covering_attributed_but_undelivered_is_starved():
+    events = [
+        TASK_START,
+        {"event": "edit_transaction", "changed_paths": ["pkg/mod.py"]},
+        {"event": "execution_evidence", "kind": "test", "observed_test_outcome": "fail"},
+        {
+            "event": "feature_evaluated", "feature_id": "covering_red",
+            "boundary": "test_result", "eligible": True,
+            "outcome": "attributed",
+        },
+    ]
+
+    row = row_for("covering_red", account(events))
+
+    assert row["state"] == "STARVED"
+    assert "outcome=attributed" in row["evidence"]
+
+
+def test_feature_evaluated_covering_without_prior_edit_declines():
+    # The lane ran on a failing test and correctly saw nothing to attribute.
+    # covering_red's declared boundaries are edit_result+submit; with no edit
+    # at all, a submit witness (terminal row) is what makes the state
+    # decidable - exactly the honest shape a no-edit run produces.
+    events = [
+        TASK_START,
+        {"event": "execution_evidence", "kind": "test", "observed_test_outcome": "fail"},
+        {"event": "session_closed", "terminal": "submitted_unverified"},
+        {
+            "event": "feature_evaluated", "feature_id": "covering_red",
+            "boundary": "test_result", "eligible": False,
+            "outcome": "no_prior_edit",
+        },
+    ]
+
+    assert row_for("covering_red", account(events))["state"] == "DECLINED_CORRECTLY"
+
+
+def test_feature_evaluated_recovery_tracked_no_steer_declines_correctly():
+    events = [
+        TASK_START,
+        {"event": "execution_evidence", "kind": "test", "observed_test_outcome": "fail"},
+        {
+            "event": "feature_evaluated", "feature_id": "recovery",
+            "boundary": "test_result", "eligible": True,
+            "outcome": "tracked_no_steer",
+        },
+        {
+            "event": "feature_evaluated", "feature_id": "recovery",
+            "boundary": "test_result", "eligible": True,
+            "outcome": "tracked_no_steer",
+        },
+    ]
+
+    row = row_for("recovery", account(events))
+
+    assert row["state"] == "DECLINED_CORRECTLY"
+    assert row["worked"] == "yes"
+    assert "fingerprints tracked" in row["evidence"]
+
+
+def test_feature_evaluated_recovery_steer_due_but_undelivered_is_starved():
+    events = [
+        TASK_START,
+        {"event": "execution_evidence", "kind": "test", "observed_test_outcome": "fail"},
+        {
+            "event": "feature_evaluated", "feature_id": "recovery",
+            "boundary": "test_result", "eligible": True,
+            "outcome": "steer_due",
+        },
+    ]
+
+    row = row_for("recovery", account(events))
+
+    assert row["state"] == "STARVED"
+    assert "steer_due" in row["evidence"]
+
+
 def test_newfile_precedent_is_eligible_when_a_change_operation_is_create():
     # runtime_observation.py:594 - operation is one of create/delete/modify.
     events = [TASK_START, {"event": "edit_transaction", "changed_paths": ["pkg/new.py"]}]

@@ -189,6 +189,117 @@ def test_discard_revision_refuses_paths_outside_the_scheme(tmp_path):
     assert stray.is_dir()
 
 
+def _enrichment(graph_root: Path, name: str, base_revision: Path) -> Path:
+    """An lsp-*/merge-* derivative manifest citing a revision base through
+    the portable manifest-relative reference the writers actually emit."""
+    path = graph_root / "enrichments" / name
+    path.mkdir(parents=True)
+    (path / "graph.manifest.json").write_text(
+        json.dumps({
+            "graph_root": "../..",
+            "derivation": {
+                "base_manifest": (
+                    f"../../revisions/{base_revision.name}/graph.manifest.json"
+                ),
+                "base_graph": f"../../revisions/{base_revision.name}/graph.db",
+            },
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_enrichment_manifest_keeps_its_revision_base_alive(tmp_path):
+    """Run 35016130850: a revision cited ONLY by an enrichment manifest was
+    invisible to the reference scan, got pruned, and seal-time certification
+    then failed derivation_base_manifest_unreadable on a verifier-solved
+    task. The scan must read enrichments/, not only revisions/."""
+    graph_root = tmp_path / "graph"
+    revisions = graph_root / "revisions"
+    base = _revision(revisions, "base")
+    expendable = [_revision(revisions, f"x{i}") for i in range(2)]
+    live = _revision(revisions, "live")
+    _enrichment(graph_root, "lsp-a1b2c3", base)
+    # Deterministic age order: the cited base is the OLDEST sibling, exactly
+    # the slot retention evicts when the scan cannot see the citation.
+    _graph_mtime(base, 1000)
+    _graph_mtime(expendable[0], 2000)
+    _graph_mtime(expendable[1], 3000)
+    _graph_mtime(live, 4000)
+
+    _prune_superseded_revisions(live)
+
+    assert base.is_dir(), "a revision cited by an enrichment manifest is load-bearing"
+    assert live.is_dir()
+    assert sum(p.is_dir() for p in expendable) <= 1, (
+        "retention still bounds what nothing cites"
+    )
+
+
+def test_merge_manifest_keeps_its_revision_base_alive(tmp_path):
+    """The merge derivatives cite revision bases the same way lsp-* does."""
+    graph_root = tmp_path / "graph"
+    revisions = graph_root / "revisions"
+    base = _revision(revisions, "base")
+    for i in range(2):
+        _revision(revisions, f"x{i}")
+    live = _revision(revisions, "live")
+    _enrichment(graph_root, "merge-q9z8", base)
+    _graph_mtime(base, 1000)
+    _graph_mtime(live, 4000)
+
+    _prune_superseded_revisions(live)
+
+    assert base.is_dir()
+
+
+def test_enrichment_to_enrichment_derivation_protects_no_revision(tmp_path):
+    """An enrichment basing on ANOTHER enrichment must not mark revisions -
+    precision matters as much as recall here."""
+    graph_root = tmp_path / "graph"
+    revisions = graph_root / "revisions"
+    stale = [_revision(revisions, f"r{i}") for i in range(3)]
+    live = _revision(revisions, "live")
+    parent_enrichment = graph_root / "enrichments" / "lsp-parent"
+    parent_enrichment.mkdir(parents=True)
+    (parent_enrichment / "graph.manifest.json").write_text("{}")
+    child = graph_root / "enrichments" / "lsp-child"
+    child.mkdir(parents=True)
+    (child / "graph.manifest.json").write_text(
+        json.dumps({
+            "derivation": {
+                "base_manifest": "../lsp-parent/graph.manifest.json",
+                "base_graph": "../lsp-parent/graph.db",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    _prune_superseded_revisions(live)
+
+    assert sum(p.is_dir() for p in stale) <= 1, (
+        "enrichment-internal derivations must not freeze revision pruning"
+    )
+
+
+def test_an_unreadable_manifest_freezes_revision_pruning(tmp_path):
+    """A corrupt manifest's citations are unknowable; deleting anything that
+    round is how run 35016130850 happened. Prune nothing."""
+    graph_root = tmp_path / "graph"
+    revisions = graph_root / "revisions"
+    stale = [_revision(revisions, f"r{i}") for i in range(3)]
+    live = _revision(revisions, "live")
+    corrupt = graph_root / "enrichments" / "lsp-bad"
+    corrupt.mkdir(parents=True)
+    (corrupt / "graph.manifest.json").write_bytes(b"\xff\xfe not json")
+
+    _prune_superseded_revisions(live)
+
+    assert all(p.is_dir() for p in stale), (
+        "an unreadable manifest must not authorise any delete"
+    )
+
+
 def test_ensure_index_reclaims_only_for_synchronous_callers(monkeypatch, tmp_path):
     """reclaim=True keys the prune on the caller's own graph -- a synchronous
     caller's product IS its adoption. The coordinator path passes False: its

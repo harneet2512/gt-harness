@@ -86,15 +86,25 @@ def _failing_test_files(output: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_TEST_FAILURE_FILE_RE.findall(output or "")))
 
 
-def attribute_test_failure(adapter, command: str, output: str, *, returncode):
+def attribute_test_failure(
+    adapter, command: str, output: str, *, returncode, observed: str = ""
+):
     """Attribute the model's OWN failing test to the edited surface.
 
     covering_red fires when a covering test fails BECAUSE of an edited file.
     Rather than requiring a separate covering run, a failing test whose output
     references an edited file (traceback frame / test path) IS the covering RED
     for that surface. Correct-or-quiet: no edit, no failing test, no file link.
+
+    ``observed`` is the textual outcome the certified classifier read from the
+    output. A piped `pytest … | tail` exits with TAIL's status - the failure
+    evidence is the FAILED rows in the stream, not the pipeline's returncode,
+    so an observed ``fail``/``env_fail`` satisfies the failing-test half on
+    its own (run 35016130850: 10 observed failures, zero covering entries).
     """
-    if not returncode or not adapter._edited_files:
+    if not (returncode or observed in ("fail", "env_fail")):
+        return None
+    if not adapter._edited_files:
         return None
     if not command or not output:
         return None

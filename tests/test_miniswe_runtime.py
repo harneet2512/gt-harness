@@ -1844,6 +1844,63 @@ def test_runtime_augments_test_result_but_keeps_raw_output_byte_for_byte(
     assert blob.read_bytes() == raw.encode("utf-8")
 
 
+def test_piped_test_command_emits_test_result_and_feature_evaluations(
+    monkeypatch, tmp_path
+):
+    """Run 35016130850 regression: `cd /testbed && pytest … 2>&1 | tail`
+    produced ZERO test_result events because _execution_outcome_guard reads
+    'unknown' for compound commands, so the covering lane, failure
+    fingerprinting and the gateway's test_result dispatch never entered.
+    The observed-outcome parse now feeds all three; the evaluation rows let
+    feature accounting distinguish 'lane ran and abstained' from 'never
+    entered'."""
+    raw = "tests/test_x.py::test_x FAILED\n1 failed, 4 passed in 2.1s\n"
+    captured: list = []
+
+    class TestEnv(FakeEnv):
+        def execute(self, action):
+            self.executed.append(action.get("command", ""))
+            return {"output": raw, "returncode": 0, "exception_info": ""}
+
+    def spy(_gateway_state, event, *args, **kwargs):
+        captured.append(event)
+        return EvidenceResult(rendered="", sealed=False)
+
+    monkeypatch.setattr(rt, "run_evidence_pipeline", spy)
+    agent = FakeAgent()
+    agent.env = TestEnv()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(tmp_path),
+        contract=extract_task_contract("Fix the parser."),
+    )
+    adapter._edited_files.add("src/a.py")
+    install_runtime_hooks(agent, _session(adapter))
+    agent.execute_actions({"extra": {"actions": [{
+        "command": (
+            "cd " + str(tmp_path)
+            + " && python -m pytest tests/ -q 2>&1 | tail -20"
+        ),
+        "tool_call_id": "c1",
+    }]}})
+
+    assert captured, "the evidence pipeline was never entered"
+    assert "test_result" in captured[0].semantic_events
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    evaluated = [r for r in rows if r["event"] == "feature_evaluated"]
+    covering = next(r for r in evaluated if r["feature_id"] == "covering_red")
+    assert covering["boundary"] == "test_result"
+    assert covering["eligible"] is True
+    assert covering["outcome"] in ("attributed", "no_edited_file_link")
+    recovery = next(r for r in evaluated if r["feature_id"] == "recovery")
+    assert recovery["boundary"] == "test_result"
+    assert recovery["eligible"] is True
+    assert recovery["outcome"] in ("steer_due", "tracked_no_steer")
+
+
 def test_disabled_typed_capability_never_reaches_shell(tmp_path):
     agent = FakeAgent()
     adapter = MiniSweAdapter(

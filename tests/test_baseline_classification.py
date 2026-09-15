@@ -1109,3 +1109,132 @@ def test_real_baseline_outranks_the_probe(tmp_path):
     assert verdict.verdicts == (
         ("tests/test_base.py::test_get_item", "unverified_scope"),
     )
+
+
+# --- suite-equivalent scope: `pytest tests/` IS the suite -----------------
+#
+# Run 35016130850: dynaconf's agent ran `pytest tests/` - every test the repo
+# has - and the scope classifier still read `scoped` because the path was
+# positional. No suite verdict was ever recorded, so the submit-window
+# advisory stayed silent on a run the model was entitled to hear about.
+
+
+def test_directory_run_covering_the_known_suite_writes_suite_truth(tmp_path):
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/ -q",
+                  "378 passed, 2 skipped in 40.0s\n", returncode=0),
+        command="pytest tests/ -q",
+    )
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/test_base.py -q",
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=2),
+        command="pytest tests/test_base.py -q",
+    )
+    assert _last_row(adapter)["baseline_classification"]["verdicts"] == [
+        ["tests/test_base.py::test_get_item", "scope_artifact"]
+    ]
+
+
+def test_directory_run_covering_the_known_suite_opens_the_window(tmp_path):
+    """The advisory's whole-suite-green gate must credit `pytest tests/`."""
+    adapter = _adapter_with_baseline(tmp_path)
+    line = adapter.record_execution_evidence(
+        _evidence("pytest tests/ -q",
+                  "378 passed, 2 skipped in 40.0s\n", returncode=0),
+        command="pytest tests/ -q",
+    )
+    assert _last_row(adapter)["submit_window"]["layout_schema"] == (
+        "gt.submit_window.v1"
+    )
+    assert "suite green vs baseline" in line
+
+
+def test_directory_run_covering_the_known_suite_records_suite_failures(tmp_path):
+    """The other half of suite truth: a failure inside a covering run is a
+    SUITE failure, not a scoped observation."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/ -q",
+                  _failing_output("tests/test_base.py::test_get_item")
+                  + "377 passed, 1 failed in 40.0s\n"),
+        command="pytest tests/ -q",
+    )
+    ledger = adapter._suite_ledger()
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") == "fail"
+    assert ledger.regression_count() == 1
+
+
+def test_a_subdirectory_run_does_not_claim_suite(tmp_path):
+    """Baseline names under tests/ AND integration/; `pytest tests/` misses
+    half the known suite - it must stay scoped."""
+    adapter = _adapter_with_baseline(tmp_path)
+    ledger = adapter._suite_ledger()
+    ledger.baseline_passing = ledger.baseline_passing | {
+        "integration/test_api.py::test_roundtrip"
+    }
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/ -q",
+                  "378 passed in 40.0s\n", returncode=0),
+        command="pytest tests/ -q",
+    )
+    assert not ledger.has_whole_suite_green()
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") is None
+    assert adapter._submit_window_advisory() == ""
+
+
+def test_a_narrowed_run_does_not_claim_suite(tmp_path):
+    """`pytest tests/ -k get_item` selects a subset of its covered dir."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/ -q -k get_item",
+                  "1 passed, 377 deselected in 4.0s\n", returncode=0),
+        command="pytest tests/ -q -k get_item",
+    )
+    ledger = adapter._suite_ledger()
+    assert not ledger.has_whole_suite_green()
+    assert adapter._submit_window_advisory() == ""
+
+
+def test_an_excluding_run_does_not_claim_suite(tmp_path):
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("pytest tests/ --ignore tests/test_utils.py -q",
+                  "300 passed in 30.0s\n", returncode=0),
+        command="pytest tests/ --ignore tests/test_utils.py -q",
+    )
+    ledger = adapter._suite_ledger()
+    assert not ledger.has_whole_suite_green()
+
+
+def test_a_file_scoped_run_never_claims_suite(tmp_path):
+    """Even when every known name lives in that one file, a file path is a
+    file path - the suite could have grown siblings baseline never named."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing={"tests/test_base.py::test_a"}, baseline_failing=()
+    )
+    assert not ledger.covers_known_suite(("tests/test_base.py",), ())
+
+
+def test_an_empty_known_universe_never_claims_suite(tmp_path):
+    """suite_observed basis with zero names: `pytest tests/` proves coverage
+    of nothing we can name, so it cannot be credited as the suite."""
+    ledger = SuiteVerdictLedger(baseline_passing=(), baseline_failing=())
+    assert not ledger.covers_known_suite(("tests",), ())
+
+
+def test_covers_known_suite_unit_table():
+    ledger = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
+    )
+    assert ledger.covers_known_suite(("tests",), ())
+    assert ledger.covers_known_suite(("tests/",), ())
+    assert not ledger.covers_known_suite(("tests/test_base.py",), ())
+    assert not ledger.covers_known_suite((), ())
+    assert not ledger.covers_known_suite(
+        ("tests",), ("tests/test_utils.py",)
+    )
+    # A name outside the covered root defeats the claim.
+    ledger.note_failing({"elsewhere/test_x.py::test_z"})
+    assert not ledger.covers_known_suite(("tests",), ())

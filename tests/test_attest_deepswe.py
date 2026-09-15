@@ -445,6 +445,63 @@ def test_error_product_receipt_fails_attestation_closed(tmp_path: Path) -> None:
     assert f"product_receipt:{TASK}:product_not_completed" in receipt["errors"]
 
 
+def test_verifier_solved_with_error_product_receipt_preserves_both(
+    tmp_path: Path,
+) -> None:
+    """Run 35016130850 dynaconf: the official verifier SOLVED the task
+    (reward=1, GRADED) while the product receipt was a typed ERROR -
+    receipt issuance crashed on a pruned derivation base. The official
+    verdict must survive as solved=True on the same task AND the product
+    failure must still fail the attestation. Neither may erase the other."""
+    _adapter, product = _fixture(tmp_path)
+    # Official side: the verifier genuinely ran and the task is solved.
+    passing = next(
+        (tmp_path / "tasks").rglob("agent/official-verifier-result.json")
+    )
+    passing_row = json.loads(passing.read_text(encoding="utf-8"))
+    passing_row["reward"] = 1
+    passing_row["solved"] = True
+    _write(passing, passing_row)
+    trial_result = next(
+        path for path in (tmp_path / "tasks").rglob("result.json")
+        if path.parent.name == "trial"
+    )
+    trial_row = json.loads(trial_result.read_text(encoding="utf-8"))
+    trial_row["verifier_result"]["rewards"]["reward"] = 1
+    _write(trial_result, trial_row)
+    aggregate = trial_result.parent.parent / "result.json"
+    aggregate_row = json.loads(aggregate.read_text(encoding="utf-8"))
+    aggregate_row["stats"]["evals"]["task"]["metrics"][0]["reward"] = 1
+    _write(aggregate, aggregate_row)
+    passing_row["runner_result_sha256"] = hashlib.sha256(
+        aggregate.read_bytes()
+    ).hexdigest()
+    _write(passing, passing_row)
+    # Product side: receipt issuance failed - solved does not paper over it.
+    product_row = json.loads(product.read_text(encoding="utf-8"))
+    product_row["status"] = "ERROR"
+    product_row["research_valid"] = False
+    product_row["treatment_receipt"]["verified"] = False
+    product_row["receipt_issuance"] = {
+        "code": "runtime_receipt_issuance_failed",
+        "type": "ValueError",
+        "message": (
+            "semantic_localization_graph_integrity_failed:"
+            "derivation_base_manifest_unreadable"
+        ),
+    }
+    _write(product, product_row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["outcomes"][TASK]["status"] == "GRADED"
+    assert receipt["outcomes"][TASK]["solved"] is True
+    assert receipt["outcomes"][TASK]["reward"] == 1
+    assert f"product_receipt:{TASK}:product_not_completed" in receipt["errors"]
+    assert f"product_completion_unverified:{TASK}" in receipt["errors"]
+
+
 def test_partial_run_preserves_graded_pass_and_explicit_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

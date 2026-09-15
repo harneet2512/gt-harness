@@ -56,8 +56,12 @@
     },
     {
      "id": "gtbridge_owned_features_unwired",
-     "observed": "swelive remaining run 34996816912 feature accounting: covering_red STARVED (eligible 1x on source-edit -> failing-test ordering, delivered nothing); recovery, def_partition, GT_HYPOTHESIS NO_DELIVERY (boundaries reached test_result x10 / tool_result x46 / search_result x20, zero producer_invocation rows for those feature_ids). Eligibility rows (feature.evaluated) are emitted only by GTBridge._trace_record; GTBridge is constructed solely by create_bridge (gt_engine/__init__.py), whose only caller is the nano dev CLI - never the Mini-SWE shipping path. On every Mini-SWE run these four features are either dead or unverifiable; the audit cannot distinguish 'never eligible' from 'never dispatched'.",
-     "status": "open - covering_red confirmed starved on a real eligible boundary; recovery/def_partition/GT_HYPOTHESIS need either Mini-SWE-path wiring or an honest not-on-this-path classification; eligibility observability (feature.evaluated outside GTBridge) is a prerequisite"
+     "observed": "swelive remaining run 34996816912 feature accounting: covering_red STARVED (eligible 1x on source-edit -> failing-test ordering, delivered nothing); recovery, def_partition, GT_HYPOTHESIS NO_DELIVERY (boundaries reached test_result x10 / tool_result x46 / search_result x20, zero producer_invocation rows for those feature_ids). Eligibility rows (feature.evaluated) are emitted only by GTBridge._trace_record; GTBridge is constructed solely by create_bridge (gt_engine/__init__.py), whose only caller is the nano dev CLI - never the Mini-SWE shipping path. On every Mini-SWE run these four features are either dead or unverifiable; the audit cannot distinguish 'never eligible' from 'never dispatched'. PARTIALLY RESOLVED: _run_evidence now emits feature_evaluated (layout gt.feature_evaluation.v1) for the covering_red and recovery local lanes on every failing-test boundary - eligible flag + attributed/no_edited_file_link/no_prior_edit or steer_due/tracked_no_steer - and feature_accounting reads those rows before the ordering proxy, so abstained-vs-never-entered is now distinguishable. STILL OPEN: def_partition has no Mini-SWE lane at all (zero dispatches by construction) - needs wiring or an honest not-on-this-path classification.",
+     "covering_tests": [
+      "tests/test_miniswe_runtime.py",
+      "tests/test_feature_accounting.py"
+     ],
+     "status": "open - observability fixed for covering_red/recovery local lanes; def_partition remains unwired with no local lane"
     }
    ]
   },
@@ -348,6 +352,14 @@
       "tests/test_workload_simulation.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "enrichment_cited_base_pruned",
+     "observed": "swelive run 35016130850 dynaconf-1241: verifier-SOLVED submission sealed as typed ERROR - receipt_issuance_failed: semantic_localization_graph_integrity_failed:derivation_base_manifest_unreadable. _referenced_revisions scanned only revisions/*/graph.manifest.json, so a revision cited ONLY by an enrichment manifest (enrichments/lsp-*/merge-* derivations use ../../revisions/<rev>/graph.manifest.json refs) was invisible to the pruner and deleted while load-bearing - 8 of 11 cited bases missing in the sealed tree, including nested lsp-on-lsp derivations. Fixed: the scan now walks every graph.manifest.json under the graph root and resolves each derivation ref against the citing manifest's own directory; only refs whose ancestor's parent is the revisions/ root protect revisions (enrichment-to-enrichment cites do not pin revisions); an UNREADABLE manifest conservatively freezes pruning entirely (revisions-root sentinel) rather than guessing which bases are load-bearing",
+     "covering_tests": [
+      "tests/test_revision_pinning.py"
+     ],
+     "status": "fixed"
     }
    ]
   },
@@ -435,6 +447,22 @@
      "observed": "run 34925475946 gitingest-94 submitted_verified in-journal (seal recheck converged) but receipt issuance raised refused_then_delivered -> status ERROR -> product_not_completed + treatment_delivery_refusal_invalid on a solved task: a cochange unit refused at candidate_ordinal 5 for boundary_claim_ceiling was legitimately re-admitted at delivery_ordinal 4 when a sibling candidate dropped between boundary scans; the receipt's identity arm ignored ordinals and treated refusal as binding within the window. The identity arm is now ordinal-aware only for window-positional reasons (boundary_claim_ceiling, request_delivery_byte_ceiling); payload-intrinsic and task-scoped refusals still flag at any ordinal, and _validate_delivery_boundaries proves the committed window's invariants independently",
      "covering_tests": [
       "tests/test_runtime_receipts.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "shared_tmp_spool_external_delete",
+     "observed": "swelive run 35016130850 gitingest-94: gt_degraded_fail_open at action 22 - FileNotFoundError /tmp/gt-history-v10qbbkl. store_history_evidence spooled provider request-history payloads via NamedTemporaryFile in shared system /tmp; an external sweeper (task image or the gitingest workload itself, which demonstrates temp cleanup) deleted the spool in the microsecond window between create and EvidenceStore.publish's open; the unguarded raise disabled the engine mid-run -> supervisor internal_error -> typed ERROR, verifier never ran. Fixed: the spool now lives inside the task-owned evidence namespace (NamedTemporaryFile(dir=store.root)), matching publish()'s own frozen-copy convention - an external /tmp policy can no longer reach it",
+     "covering_tests": [
+      "tests/test_gt_session.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "verifier_solved_with_receipt_error_split",
+     "observed": "run 35016130850 dynaconf-1241 joined an official GRADED solved=True reward=1 verdict to a same-task product ERROR (receipt_issuance crash) - the attester must keep both facts: FAIL the product attestation AND preserve the official solve. Verified the split already holds and regression-locked it",
+     "covering_tests": [
+      "tests/test_attest_deepswe.py"
      ],
      "status": "fixed"
     }
@@ -548,6 +576,22 @@
      "covering_tests": [
       "tests/test_wheel_language_matrix.py",
       "tests/test_persistent_plan_baseline.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "compound_test_unknown_outcome",
+     "observed": "swelive run 35016130850 dynaconf-1241: 23 observed pass/fail outcomes produced ZERO test_result semantic events. _classify_test went through classify_execution_outcome, whose _execution_outcome_guard returns 'unknown' for EVERY compound/piped command - and `cd /testbed && python -m pytest ... 2>&1 | tail -20` is the shape benchmark agents actually write. Consequence cascade: no test_result events -> _produce_covering never dispatched, failure fingerprints never tracked, the covering/fingerprint local lanes' returncode gate rejected tail's exit-0. Fixed: _classify_test now runs the unguarded textual _classify_test_output parse (the same parse observed_test_outcome stores) and the single computed outcome feeds semantic-event derivation, attribute_test_failure (observed= kwarg), fingerprint tracking and feature_evaluated rows. The evidence row's `outcome` field keeps the guarded value - 'cannot attribute the exit code' and 'a test observation occurred' are different facts and stay separate",
+     "covering_tests": [
+      "tests/test_miniswe_runtime.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "suite_equivalent_scoped_undercredit",
+     "observed": "swelive run 35016130850 dynaconf-1241: the agent ran `pytest tests/` - the entire suite for that layout - but test_command_coverage reads positional paths as `scoped`, so no suite verdicts were ever recorded and the submit-window advisory stayed silent for the whole run. Fixed: SuiteVerdictLedger.covers_known_suite promotes a scoped run to unrestricted when it has directory prefixes, no exclusions, a nonempty known test universe, and every known test lies under the covered prefixes; file and ::nodeid selections never qualify. record_suite_run and the Mini-SWE adapter's suite_scope both consult it",
+     "covering_tests": [
+      "tests/test_baseline_classification.py"
      ],
      "status": "fixed"
     }

@@ -1161,22 +1161,40 @@ def _referenced_revisions(parent: Path) -> set[Path]:
     guessing a depth.
     """
     referenced: set[Path] = set()
-    for manifest in parent.glob("*/graph.manifest.json"):
+    # Derivation-citing manifests live in TWO namespaces: revisions/*/ for
+    # revision-to-revision derivations and enrichments/*/ (lsp-*, merge-*)
+    # for LSP/merge derivatives. Both cite bases through portable references
+    # relative to the manifest's own directory (../../revisions/<h>/...).
+    # Scanning only revisions/*/ left enrichment-cited bases invisible to the
+    # pruner; run 35016130850 then deleted a load-bearing base and sealed
+    # derivation_base_manifest_unreadable on a verifier-solved task.
+    for manifest in parent.parent.rglob("graph.manifest.json"):
         try:
             derivation = json.loads(manifest.read_text(encoding="utf-8")).get("derivation")
         except (OSError, ValueError):
-            # Unreadable means unknown, and unknown must not authorise a delete.
-            referenced.add(manifest.parent.resolve())
+            # Unreadable means unknown, and unknown must not authorise a
+            # delete. A corrupt manifest's citations are unknowable, so
+            # nothing under the revisions root is provably unreferenced.
+            try:
+                referenced.update(
+                    entry.resolve()
+                    for entry in parent.iterdir()
+                    if entry.is_dir() and not entry.is_symlink()
+                )
+            except OSError:
+                # Cannot even enumerate the root: ``parent`` itself is the
+                # sentinel the pruner reads as "protect everything".
+                referenced.add(parent.resolve())
             continue
         if not isinstance(derivation, dict):
             continue
         for key in ("base_graph", "base_manifest", "base_resource", "terminal_receipt"):
             reference = str(derivation.get(key) or "")
-            if not reference:
+            if not reference or "/" not in reference:
                 continue
-            candidate = (parent / reference).resolve() if "/" in reference else None
-            if candidate is None:
-                continue
+            # Portable references resolve against the citing manifest's own
+            # directory, not the revisions root.
+            candidate = (manifest.parent / reference).resolve()
             for ancestor in (candidate, *candidate.parents):
                 if ancestor.parent == parent.resolve():
                     referenced.add(ancestor)
@@ -1230,6 +1248,8 @@ def _prune_superseded_revisions(live: Path, extra_protected: Iterable[Path] = ()
     protected = _referenced_revisions(parent) | _pinned_revisions(parent) | {
         path.resolve() for path in extra_protected
     }
+    if parent.resolve() in protected:
+        return  # a scan hit something unreadable: unknown never authorises a delete
     siblings = [path for path in siblings if path.resolve() not in protected]
     # Order by the GRAPH's mtime, not the directory's. A directory's mtime moves
     # whenever an entry is added or removed - lsp-promotion.json is written into

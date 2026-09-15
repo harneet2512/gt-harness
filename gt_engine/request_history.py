@@ -38,7 +38,13 @@ def store_history_evidence(
     evidence_kind = str(kind or "").strip()
     if not evidence_kind:
         raise ValueError("history evidence kind is required")
-    with tempfile.NamedTemporaryFile(prefix="gt-history-", delete=False) as handle:
+    # The spool must live inside the task-owned evidence root: a shared /tmp
+    # spool can be deleted by anything else in the container between creation
+    # and publish() - run 35016130850 lost the whole gitingest leg to
+    # FileNotFoundError on exactly that window.
+    with tempfile.NamedTemporaryFile(
+        prefix="gt-history-", dir=store.root, delete=False
+    ) as handle:
         spool = Path(handle.name)
         handle.write(payload)
         handle.flush()

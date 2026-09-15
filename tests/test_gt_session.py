@@ -599,6 +599,34 @@ def test_same_revision_claim_cannot_be_replaced_implicitly(tmp_path):
     ).context_additions == []
 
 
+def test_history_spool_lives_inside_the_evidence_root(tmp_path, monkeypatch):
+    """Run 35016130850: the gt-history-* spool was created in the SHARED /tmp
+    and an external sweeper deleted it between creation and publish() - the
+    FileNotFoundError disabled the engine mid-run and killed the gitingest
+    leg. The spool must live in the task-owned evidence root."""
+    import gt_engine.request_history as request_history
+
+    seen: dict = {}
+    real = request_history.tempfile.NamedTemporaryFile
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(
+        request_history.tempfile, "NamedTemporaryFile", spy
+    )
+    store = EvidenceStore(tmp_path / "evidence")
+    reference = store_history_evidence(
+        store, b"payload", kind="decision_evidence"
+    )
+    assert seen.get("dir") == store.root
+    assert store.path(reference["sha256"]).is_file()
+    assert not list(store.root.glob("gt-history-*")), (
+        "publish consumes the spool; nothing may linger"
+    )
+
+
 def test_admitted_unit_retains_its_retrieval_reference(tmp_path):
     a = _adapter(tmp_path)
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)

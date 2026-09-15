@@ -283,43 +283,105 @@ def journal_eligibility(
     """
     eligible: dict[str, dict] = {}
 
-    # covering_red - an executed covering test fails because of an edited
-    # source file. The attribution half (which source broke which test) is the
-    # covering runner's own job and is not in the journal; what IS in the
-    # journal is the ordering that has to hold before it can have one. Edits
-    # confined to test files are excluded: a test that fails after only tests
-    # changed is not a regression in a source file.
-    source_edits = 0
-    failure_followed = 0
-    pending = 0
+    # feature_evaluated rows - the Mini-SWE local lanes' own census. Lanes
+    # like attribute_test_failure and note_failure_fingerprint never pass
+    # through the gateway's producer_invocation vocabulary, so without this
+    # the audit cannot tell "evaluated and abstained" from "never entered" -
+    # the exact gap behind gtbridge_owned_features_unwired. Where these rows
+    # exist they outrank every derived proxy: the lane records the deciding
+    # boolean itself.
+    lane_evals: dict[str, list[dict]] = collections.defaultdict(list)
     for event in events:
-        name = str(event.get("event") or "")
-        if name == "edit_transaction":
-            paths = [str(p) for p in event.get("changed_paths") or ()]
-            if any(not _is_test_path(path) for path in paths):
-                source_edits += 1
-                pending += 1
-        elif (
-            name == "execution_evidence"
-            and str(event.get("kind") or "") == "test"
-            and str(event.get("observed_test_outcome") or "") == "fail"
-            and pending
-        ):
-            failure_followed += pending
-            pending = 0
-    eligible["covering_red"] = {
-        "eligible": failure_followed,
-        "of": source_edits,
-        "declined_because": (
-            "no execution_evidence kind=test observed_test_outcome=fail followed "
-            f"any of the {source_edits} source-file edit transactions"
-        ),
-        "starved_because": (
-            f"{failure_followed} of {source_edits} source-file edit transactions "
-            "were followed by an execution_evidence kind=test "
-            "observed_test_outcome=fail and no covering verdict was delivered"
-        ),
-    }
+        if str(event.get("event") or "") == "feature_evaluated":
+            lane_evals[str(event.get("feature_id") or "")].append(event)
+
+    if lane_evals.get("covering_red"):
+        # The lane's own verdict: eligible means edited files existed when a
+        # failing test arrived; `attributed` means the failure output named
+        # an edited file and a candidate was produced. Eligible-but-unlinked
+        # is a correct abstention - the output never tied the failure to the
+        # edit - not starvation.
+        rows_ev = lane_evals["covering_red"]
+        attributed = sum(
+            1 for r in rows_ev if str(r.get("outcome") or "") == "attributed"
+        )
+        # `eligible` on the row is the lane's precondition (edited files
+        # existed when a failing test arrived), not a produced candidate.
+        # Only `attributed` means the lane built a candidate that delivery
+        # could have dropped - the STARVED trigger. Eligible-but-unlinked
+        # means the output never tied the failure to the edit: abstention.
+        eligible["covering_red"] = {
+            "eligible": attributed,
+            "of": len(rows_ev),
+            "declined_because": (
+                f"of {len(rows_ev)} feature_evaluated rows at test_result, "
+                "none found the failing output naming an edited file"
+            ),
+            "starved_because": (
+                f"{attributed} of {len(rows_ev)} covering evaluations produced "
+                "a candidate (outcome=attributed) and nothing was delivered"
+            ),
+        }
+    else:
+        # covering_red - an executed covering test fails because of an edited
+        # source file. The attribution half (which source broke which test) is the
+        # covering runner's own job and is not in the journal; what IS in the
+        # journal is the ordering that has to hold before it can have one. Edits
+        # confined to test files are excluded: a test that fails after only tests
+        # changed is not a regression in a source file.
+        source_edits = 0
+        failure_followed = 0
+        pending = 0
+        for event in events:
+            name = str(event.get("event") or "")
+            if name == "edit_transaction":
+                paths = [str(p) for p in event.get("changed_paths") or ()]
+                if any(not _is_test_path(path) for path in paths):
+                    source_edits += 1
+                    pending += 1
+            elif (
+                name == "execution_evidence"
+                and str(event.get("kind") or "") == "test"
+                and str(event.get("observed_test_outcome") or "") == "fail"
+                and pending
+            ):
+                failure_followed += pending
+                pending = 0
+        eligible["covering_red"] = {
+            "eligible": failure_followed,
+            "of": source_edits,
+            "declined_because": (
+                "no execution_evidence kind=test observed_test_outcome=fail followed "
+                f"any of the {source_edits} source-file edit transactions"
+            ),
+            "starved_because": (
+                f"{failure_followed} of {source_edits} source-file edit transactions "
+                "were followed by an execution_evidence kind=test "
+                "observed_test_outcome=fail and no covering verdict was delivered"
+            ),
+        }
+
+    if lane_evals.get("recovery"):
+        # GT_HYPOTHESIS's owning lane: a fingerprint tracked = evaluated;
+        # steer_due = the recurrence precondition held and a steer candidate
+        # exists. tracked_no_steer is the honest abstention (first sighting,
+        # no post-edit recurrence, or the two-steer budget spent).
+        rows_ev = lane_evals["recovery"]
+        steer_due = sum(
+            1 for r in rows_ev if str(r.get("outcome") or "") == "steer_due"
+        )
+        eligible["recovery"] = {
+            "eligible": steer_due,
+            "of": len(rows_ev),
+            "declined_because": (
+                f"{len(rows_ev)} failure fingerprints tracked; none recurred "
+                "after an intervening edit within the two-steer budget"
+            ),
+            "starved_because": (
+                f"{steer_due} of {len(rows_ev)} evaluations reached steer_due "
+                "and no recovery_steer delivery followed"
+            ),
+        }
 
     # newfile_precedent - a created file exposes a sibling/registry precedent.
     # runtime_observation.py:594 writes one of create/delete/modify per change,

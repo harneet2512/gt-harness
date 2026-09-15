@@ -441,11 +441,42 @@ def _viewed_files(command: str, repo_root: str = "") -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def _classify_test(command: str, output: str, returncode: int | None) -> str:
-    from .runtime_observation import classify_execution_outcome
+def _classify_test(
+    command: str,
+    output: str,
+    returncode: int | None,
+    *,
+    output_artifact: dict | None = None,
+) -> str:
+    """The OBSERVED test outcome, parsed from the output itself.
 
-    outcome = classify_execution_outcome(command or "", output or "", returncode)
-    return outcome if outcome in {"pass", "fail", "env_fail", "executed_no_tests"} else ""
+    ``classify_execution_outcome`` applies ``_execution_outcome_guard``, which
+    reads ``unknown`` for every compound or piped command - and `cd /testbed
+    && python -m pytest … 2>&1 | tail` is the shape benchmark agents actually
+    write. Run 35016130850: 23 observed pass/fail test outcomes produced ZERO
+    ``test_result`` semantic events, so the covering lane, failure
+    fingerprinting and the gateway's covering producer were never entered.
+    The guard exists for exit-code attribution; the boundary question "did a
+    test observation occur" is answered by the output text, so this feeds the
+    unguarded textual parse (the same parse ``observed_test_outcome`` stores).
+    """
+    from .runtime_observation import _classify_test_output
+
+    try:
+        outcome, _protocol = _classify_test_output(
+            command or "", output or "", returncode,
+            output_artifact=output_artifact,
+        )
+    except (RuntimeError, ValueError, OSError):
+        try:
+            outcome, _protocol = _classify_test_output(
+                command or "", output or "", returncode
+            )
+        except (RuntimeError, ValueError, OSError):
+            return ""
+    return outcome if outcome in {
+        "pass", "fail", "env_fail", "executed_no_tests",
+    } else ""
 
 
 def _workspace_fingerprint(repo_root: str) -> dict[str, tuple[int, int] | str]:
@@ -636,17 +667,25 @@ def _run_evidence(
         ).context_additions)
     covering = None
     candidates: list[_EvidenceCandidate] = []
+    test_outcome = _classify_test(
+        command, output, returncode, output_artifact=output_artifact
+    )
     if changed_files and allow_live_probes:
         from .miniswe_covering import run_covering_lane
 
         covering = run_covering_lane(adapter, changed_files)
-    elif returncode and _classify_test(command, output, returncode) in ("fail", "env_fail"):
+    elif test_outcome in ("fail", "env_fail"):
         # Attribute the model's OWN failing test to the edited surface without
         # executing any additional command. This is advisory provenance, not
         # independent proof and therefore never creates execution authority.
+        # The observed outcome, not the shell's returncode: a piped
+        # `pytest … | tail` exits with tail's status on a failing suite.
         from .miniswe_covering import attribute_test_failure
 
-        covering = attribute_test_failure(adapter, command, output, returncode=returncode)
+        covering = attribute_test_failure(
+            adapter, command, output,
+            returncode=returncode, observed=test_outcome,
+        )
         # A4/GT_HYPOTHESIS: track the failure fingerprint; a recurrence after
         # an edit schedules a bounded, transient recovery steer.
         try:
@@ -660,16 +699,40 @@ def _run_evidence(
                 cwd=adapter.repo_root or os.getcwd(),
                 changed_files=changed_files,
                 viewed_files=_viewed_files(command, adapter.repo_root or ""),
-                test_outcome="fail",
+                test_outcome=test_outcome,
                 output_artifact=output_artifact,
             )
             fingerprint = canonical_test_failure_fingerprint(event_pre)
             if fingerprint:
-                adapter.note_failure_fingerprint(
+                due = adapter.note_failure_fingerprint(
                     fingerprint, epoch=adapter.workspace_epoch
+                )
+                # The evaluation decision itself is part of the record:
+                # without this row a run that tracked fingerprints and
+                # correctly never steered is indistinguishable from a lane
+                # that never ran (the gtbridge_owned_features_unwired gap).
+                adapter.store.append(
+                    "feature_evaluated",
+                    layout_schema="gt.feature_evaluation.v1",
+                    feature_id="recovery",
+                    boundary="test_result",
+                    eligible=True,
+                    outcome="steer_due" if due else "tracked_no_steer",
                 )
         except Exception:  # noqa: BLE001 - recovery tracking is correct-or-quiet
             pass
+        adapter.store.append(
+            "feature_evaluated",
+            layout_schema="gt.feature_evaluation.v1",
+            feature_id="covering_red",
+            boundary="test_result",
+            eligible=bool(adapter._edited_files),
+            outcome=(
+                "attributed" if covering is not None
+                else "no_edited_file_link" if adapter._edited_files
+                else "no_prior_edit"
+            ),
+        )
     event = classify_event(
         command,
         output,
@@ -679,7 +742,7 @@ def _run_evidence(
         changed_files=changed_files,
         viewed_files=_viewed_files(command, adapter.repo_root or ""),
         covering=covering,
-        test_outcome=_classify_test(command, output, returncode),
+        test_outcome=test_outcome,
         output_artifact=output_artifact,
     )
     if changed_files and allow_live_probes:
