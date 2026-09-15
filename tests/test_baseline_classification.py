@@ -208,12 +208,34 @@ def test_no_names_means_no_classification():
 
 
 def test_no_ledger_means_no_classification():
-    """No baseline was captured (baseline.captured False) - never invent one."""
+    """D2: `ledger=None` is the ONE remaining no-op, and it now means "no plan
+    inputs at all" rather than "no baseline" - a missing baseline still yields
+    a ledger whose basis is the agent's own suite runs."""
     assert classify_failures_vs_baseline(
         command="pytest tests/test_base.py -q",
         output=_failing_output("tests/test_base.py::test_get_item"),
         ledger=None,
     ) is None
+
+
+def test_suite_observed_ledger_classifies_without_any_baseline():
+    """D2: run 34996816912 captured `status=no_test_verdicts` (collection
+    interrupted, 4 errors, 0 names), so `baseline.captured` was False and the
+    classifier was a no-op for the whole 3061 s run. Absent a baseline the
+    agent's own full-suite runs are still evidence."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing=(), baseline_failing=(), basis="suite_observed"
+    )
+    verdict = classify_failures_vs_baseline(
+        command="pytest tests/test_base.py -q",
+        output=_failing_output("tests/test_base.py::test_get_item"),
+        ledger=ledger,
+    )
+    assert verdict is not None
+    assert verdict.basis == "suite_observed"
+    payload = verdict.as_dict()
+    assert payload["basis"] == "suite_observed"
+    assert payload["layout_schema"] == "gt.baseline_classification.v1"
 
 
 @pytest.mark.parametrize(("command", "expected"), [
@@ -224,9 +246,59 @@ def test_no_ledger_means_no_classification():
     ("pytest tests/test_base.py::test_get_item -q", "scoped"),
     ("pytest -k merge", "scoped"),
     ("pytest --deselect tests/test_x.py", "scoped"),
-    ("pytest -q | tee out.log", "unknown"),
     ("cargo test", "unknown"),
     ("git status", "unknown"),
+    # D3: run 34996816912 issued ten test commands and the parser read
+    # `unknown` for every one of them, so the classifier never ran once in
+    # 3061 s. Each shape below is drawn from that run or its family.
+    # Shell redirection words are not positional paths.
+    ("pytest -q 2>&1 | tail -5", "suite"),
+    ("pytest -q > out.log 2>&1", "suite"),
+    ("pytest -q >out.log", "suite"),
+    ("pytest -q >> out.log", "suite"),
+    ("pytest -q | tee out.log", "suite"),
+    ("pytest -q 2>&1 | sed -n 1,5p", "suite"),
+    ("pytest -q | grep -c PASSED", "suite"),
+    ("pytest -q | tail -20 | head -3", "suite"),
+    # The value of a value-taking option is not a positional path.
+    ("pytest -p no:cacheprovider -q", "suite"),
+    ("pytest -o addopts= -q", "suite"),
+    ("pytest -n 4 -q", "suite"),
+    ("pytest --tb short -q", "suite"),
+    ("pytest --tb=short -q", "suite"),
+    ("pytest --maxfail 1 -q", "suite"),
+    ("pytest -W ignore::DeprecationWarning", "suite"),
+    ("pytest --junitxml report.xml", "suite"),
+    ("pytest --basetemp /tmp/pt -q", "suite"),
+    ("pytest --import-mode importlib -q", "suite"),
+    ("pytest --rootdir /testbed -q", "suite"),
+    ("pytest -c setup.cfg -q", "suite"),
+    ("pytest --durations 10 -q", "suite"),
+    ("pytest --timeout 60 -q", "suite"),
+    # A leading `cd <dir> &&` prefix is not a compound command. Nine of the
+    # ten commands in the incident carried exactly this prefix.
+    ("cd /testbed && pytest -q", "suite"),
+    ("cd /testbed && python -m pytest -q 2>&1 | tail -20", "suite"),
+    ("cd /testbed && python -m pytest tests/test_base.py -q 2>&1 | tail -20",
+     "scoped"),
+    # Positional selection still reads scoped.
+    ("pytest tests/ -q", "scoped"),
+    ("pytest -q tests/test_base.py", "scoped"),
+    ("pytest --ignore=tests/test_base.py -q", "scoped"),
+    ("pytest -m not-slow -q", "scoped"),
+    ("pytest -m slow", "scoped"),
+    # `python -m pytest` is the interpreter form: that -m is not a marker.
+    ("python -m pytest", "suite"),
+    ("python3 -m pytest -q 2>&1 | tail -5", "suite"),
+    ("/usr/local/bin/pytest -q", "suite"),
+    ("py.test -q", "suite"),
+    # Genuinely compound or unparseable stays unknown.
+    ("pytest -q && echo done", "unknown"),
+    ("pytest -q; make lint", "unknown"),
+    ("pytest -q | python analyze.py", "unknown"),
+    ("make test && pytest -q", "unknown"),
+    ("grep pytest out.log", "unknown"),
+    ("echo pytest", "unknown"),
 ])
 def test_command_scope_shape(command, expected):
     assert command_scope(command) == expected
@@ -297,12 +369,28 @@ def test_evidence_row_and_line_carry_classification(tmp_path):
     assert classification["verdicts"] == [
         ["tests/test_base.py::test_get_item", "unverified_scope"]
     ]
-    assert "baseline: 1 unverified-scope" in line
+    assert "run the full suite before investigating" in line
     assert "tests/test_base.py::test_get_item" in line
 
 
-def test_evidence_without_baseline_carries_no_classification(tmp_path):
+def test_evidence_without_baseline_classifies_on_suite_observed_basis(tmp_path):
+    """D2: an uncaptured baseline returned None from `_suite_ledger`, which is
+    precisely why the dynaconf run received no classification at all."""
     adapter = _adapter_with_baseline(tmp_path, captured=False)
+    line = adapter.record_execution_evidence(
+        _scoped_failure_evidence(), command="pytest tests/test_base.py -q"
+    )
+    row = json.loads(adapter.store.path.read_text().splitlines()[-1])
+    assert row["baseline_classification"]["basis"] == "suite_observed"
+    assert "baseline:" in line
+
+
+def test_evidence_without_plan_inputs_carries_no_classification(tmp_path):
+    """No plan inputs at all is the only remaining no-op."""
+    from gt_engine.miniswe_integration import MiniSweAdapter
+
+    adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    assert adapter.plan_inputs is None
     line = adapter.record_execution_evidence(
         _scoped_failure_evidence(), command="pytest tests/test_base.py -q"
     )
@@ -339,7 +427,7 @@ def test_clean_suite_run_then_scoped_failure_is_artifact(tmp_path):
     assert row["baseline_classification"]["verdicts"] == [
         ["tests/test_base.py::test_get_item", "scope_artifact"]
     ]
-    assert "scope-artifact" in line
+    assert "isolation artifact, not a regression" in line
 
 
 def test_collection_error_suite_does_not_promote(tmp_path):
@@ -386,7 +474,8 @@ def test_suite_regression_reads_regression_new(tmp_path):
     assert row["baseline_classification"]["verdicts"] == [
         ["tests/test_utils.py::test_meta_values", "regression_new"]
     ]
-    assert "regression" in line
+    assert "passed before your edits and fails in the full suite" in line
+    assert "this one is yours" in line
 
 
 def test_green_suite_advisory_without_plan(tmp_path):
@@ -459,7 +548,7 @@ def test_no_advisory_when_regression_present(tmp_path):
     )
     line = adapter.record_execution_evidence(suite, command="pytest -q")
     assert "submit window" not in line
-    assert "regression" in line
+    assert "this one is yours" in line
 
 
 def test_model_line_rebuilds_from_stored_dict():
@@ -476,5 +565,547 @@ def test_model_line_rebuilds_from_stored_dict():
         command="pytest tests/test_base.py -q", kind="test", outcome="fail",
         returncode=1, baseline_classification=payload,
     )
-    assert "baseline: 1 unverified-scope" in line
+    assert "passed at baseline" in line
+    assert "run the full suite before investigating" in line
     assert "tests/test_base.py::test_get_item" in line
+
+
+# --- C1/H4/H5/H3/H6/M7/M8/M9/M10 and the pristine-tree probe -------------
+#
+# Every case below is anchored in run 34996816912 / dynaconf-1241, replayed
+# provider-free: 10 execution_evidence rows, all of the form
+# `cd /testbed && python -m pytest <paths> ... 2>&1 | tail`, zero
+# plan_gate_decision rows, and a baseline whose capture ended
+# `no_test_verdicts`. The agent chased tests/test_base.py::test_get_item from
+# +1055 s to +2859 s of a 3061 s budget.
+
+ACTION_45 = (
+    "cd /testbed && python -m pytest tests/ -q -x "
+    "--ignore=tests/test_base.py --ignore=tests/test_cli.py "
+    "--ignore=tests/test_vault.py --ignore=tests/test_redis.py 2>&1 | tail -5"
+)
+ACTION_26 = (
+    "cd /testbed && git stash && python -m pytest "
+    "tests/test_base.py::test_get_item -q 2>&1 | tail -10; git stash pop"
+)
+
+
+def _evidence(command, output, returncode=1, action_id=1):
+    from gt_engine.runtime_observation import compile_execution_evidence
+
+    return compile_execution_evidence(
+        command=command, output=output, returncode=returncode,
+        action_id=action_id, repository_revision="source",
+    )
+
+
+def _last_row(adapter):
+    return json.loads(adapter.store.path.read_text().splitlines()[-1])
+
+
+# --- D3 coverage extraction ---------------------------------------------
+
+
+def test_coverage_paths_exclude_ignored_targets():
+    """M10/addendum: covered prefixes are the positional args MINUS every
+    --ignore/--deselect target. Action 45 ran `tests/` while excluding four
+    files; it proves nothing about the names inside them."""
+    from gt_engine.runtime_observation import test_command_coverage
+
+    coverage = test_command_coverage(ACTION_45)
+    assert coverage.scope == "scoped"
+    assert coverage.paths == ("tests/",)
+    assert set(coverage.excluded) == {
+        "tests/test_base.py", "tests/test_cli.py",
+        "tests/test_vault.py", "tests/test_redis.py",
+    }
+    assert coverage.narrowed is False
+
+
+def test_coverage_marks_nodeid_and_keyword_runs_as_narrowed():
+    """A -k/-m/::nodeid run may fold names but must never promote: it did not
+    attempt the rest of its own coverage."""
+    from gt_engine.runtime_observation import test_command_coverage
+
+    assert test_command_coverage(
+        "pytest tests/test_base.py::test_get_item -q").narrowed is True
+    assert test_command_coverage("pytest tests/ -k merge").narrowed is True
+    assert test_command_coverage("pytest tests/ -m slow").narrowed is True
+    assert test_command_coverage("pytest tests/ -q").narrowed is False
+
+
+# --- C1 truncated output must not promote --------------------------------
+
+
+def test_truncated_verbose_tail_does_not_promote_or_open_window(tmp_path):
+    """C1: `| tail -20` of a verbose run cuts the summary line off. Three
+    parsed PASSED rows are not an aggregate, and the old guard
+    (`failed == 0 and passed == 0 and not passing`) let them promote the
+    entire baseline and open the submit window."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _scoped_failure_evidence(), command="pytest tests/test_base.py -q"
+    )
+    truncated = (
+        "tests/test_utils.py::test_alpha PASSED                     [ 33%]\n"
+        "tests/test_utils.py::test_beta PASSED                      [ 66%]\n"
+        "tests/test_utils.py::test_gamma PASSED                     [100%]\n"
+    )
+    line = adapter.record_execution_evidence(
+        _evidence("pytest -v 2>&1 | tail -20", truncated, returncode=0,
+                  action_id=2),
+        command="pytest -v 2>&1 | tail -20",
+    )
+    assert "submit window" not in line
+    assert "suite green" not in line
+    after = adapter.record_execution_evidence(
+        _evidence("pytest tests/test_base.py -q",
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=3),
+        command="pytest tests/test_base.py -q",
+    )
+    assert "isolation artifact" not in after
+    assert _last_row(adapter)["baseline_classification"]["verdicts"] == [
+        ["tests/test_base.py::test_get_item", "unverified_scope"]
+    ]
+
+
+def test_summary_marker_required_but_quiet_summary_counts(tmp_path):
+    """The bare `-q` summary line IS a terminal marker; only its absence
+    blocks promotion."""
+    from gt_engine.runtime_observation import has_terminal_summary
+
+    assert has_terminal_summary("375 passed, 2 skipped in 42.0s\n")
+    assert has_terminal_summary("===== 375 passed in 42.0s =====\n")
+    assert has_terminal_summary("Ran 12 tests in 0.4s\n\nOK\n")
+    assert not has_terminal_summary(
+        "tests/t.py::test_a PASSED   [100%]\n")
+
+
+# --- H4 fail wins over pass for the same identity ------------------------
+
+
+def test_unittest_identity_failing_and_passing_reads_fail():
+    """H4: the unittest FAIL pattern captures the CLASS, so the same identity
+    lands in both parsed lists. Writing failing-then-passing let the pass win
+    and a real failure read green."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing={"tests.test_base.BaseTest"}, baseline_failing=()
+    )
+    identity = "tests.test_base.BaseTest"
+    ledger.record_suite_run(
+        passing=[identity], failing=[identity],
+        observed_names=[identity], failed_count=0, passed_count=11,
+    )
+    assert ledger.suite_verdict(identity) == "fail"
+
+
+def test_conflicting_identity_blocks_promotion():
+    """A run that both passed and failed one identity has not established
+    suite truth for anything: skip its promotion entirely."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing={"tests/test_base.py::test_get_item"},
+        baseline_failing=(),
+    )
+    ledger.note_failing(["tests/test_base.py::test_get_item"])
+    ledger.record_suite_run(
+        passing=["tests.test_base.BaseTest"],
+        failing=["tests.test_base.BaseTest"],
+        observed_names=["tests.test_base.BaseTest"],
+        failed_count=0, passed_count=11,
+    )
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") is None
+
+
+# --- H5 only test commands with a known scope are classified -------------
+
+
+def test_non_test_commands_are_never_classified(tmp_path):
+    """H5: `cat ci_failures.txt` and `grep FAILED out.log` echo `FAILED x::y`
+    rows. Classifying them gave those names verdicts and, worse, entered them
+    into the ledger's observed set for a later promotion."""
+    adapter = _adapter_with_baseline(tmp_path)
+    ledger = adapter._suite_ledger()
+    payload = _failing_output("tests/test_base.py::test_get_item").encode()
+    for command in ("cat ci_failures.txt", "grep -rn FAILED out.log",
+                    "sed -n 1,5p out.log"):
+        artifact = SimpleNamespace(
+            kind="test", protocol="pytest", raw_output=payload,
+            output_artifact_path="",
+        )
+        assert adapter._classify_execution_vs_baseline(
+            artifact, command) == (None, False)
+    assert ledger._observed == set()
+
+
+def test_build_kind_with_test_rows_in_log_is_not_classified(tmp_path):
+    """A build log that echoes a test summary is not a test observation."""
+    adapter = _adapter_with_baseline(tmp_path)
+    evidence = _evidence(
+        "make lint",
+        _failing_output("tests/test_base.py::test_get_item"),
+        returncode=1, action_id=1,
+    )
+    assert evidence.kind == "build"
+    line = adapter.record_execution_evidence(evidence, command="make lint")
+    assert "baseline_classification" not in _last_row(adapter)
+    assert "baseline:" not in line
+    assert adapter._suite_ledger()._observed == set()
+
+
+# --- H6 the clause is an instruction, not a histogram --------------------
+
+
+def test_model_clause_renders_one_instruction_per_class():
+    from gt_engine.runtime_observation import execution_evidence_model_line
+
+    payload = {
+        "layout_schema": "gt.baseline_classification.v1",
+        "scope": "scoped", "basis": "baseline",
+        "verdicts": [
+            ["tests/test_a.py::test_one", "regression_new"],
+            ["tests/test_b.py::test_two", "baseline_noise"],
+        ],
+        "summary": {"regression_new": 1, "baseline_noise": 1},
+        "hints": {},
+    }
+    line = execution_evidence_model_line(
+        command="pytest -q", kind="test", outcome="fail", returncode=1,
+        baseline_classification=payload,
+    )
+    assert "tests/test_a.py::test_one passed before your edits and fails in "
+    assert "this one is yours" in line
+    assert "already failed at baseline - not your change" in line
+    assert "unverified-scope" not in line
+
+
+def test_model_clause_is_bounded_and_carries_no_internal_ids():
+    from gt_engine.runtime_observation import _baseline_model_clause
+
+    verdicts = [[f"tests/test_{i}.py::test_{i}", "regression_new"]
+                for i in range(12)]
+    verdicts += [[f"tests/test_s{i}.py::test_s{i}", "suite_failing"]
+                 for i in range(12)]
+    clause = _baseline_model_clause({
+        "verdicts": verdicts, "basis": "baseline",
+        "summary": {"regression_new": 12, "suite_failing": 12}, "hints": {},
+    })
+    assert len(clause) <= 240
+    assert "sha256" not in clause and "layout_schema" not in clause
+
+
+def test_model_clause_suite_observed_wording_without_baseline():
+    from gt_engine.runtime_observation import _baseline_model_clause
+
+    clause = _baseline_model_clause({
+        "verdicts": [["tests/test_base.py::test_get_item", "unverified_scope"]],
+        "summary": {"unverified_scope": 1},
+        "basis": "suite_observed", "hints": {},
+    })
+    assert "not yet observed in a full-suite run" in clause
+    assert "run the full suite first" in clause
+    assert "passed at baseline" not in clause
+
+
+def test_model_clause_covers_every_verdict_class():
+    from gt_engine.runtime_observation import _baseline_model_clause
+
+    expected = {
+        "regression_new": "this one is yours",
+        "unverified_scope": "run the full suite before investigating",
+        "scope_artifact": "isolation artifact, not a regression",
+        "baseline_noise": "already failed at baseline - not your change",
+        "suite_failing": "fails in the full suite and was not in the baseline",
+        "untracked": "is not in the baseline or any suite run",
+    }
+    for verdict, fragment in expected.items():
+        clause = _baseline_model_clause({
+            "verdicts": [["tests/t.py::t", verdict]],
+            "summary": {verdict: 1}, "basis": "baseline", "hints": {},
+        })
+        assert fragment in clause, verdict
+        assert clause.startswith("tests/t.py::t ")
+
+
+# --- H3 the advisory may not overclaim -----------------------------------
+
+
+def test_advisory_refuses_window_while_plan_rows_are_unverified(tmp_path):
+    """H3: gate-one submitted with all 28 rows UNVERIFIED while the run's own
+    `verified` flag read True. `unmet_plan_rows()` empty is not verified."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.persistent_plan = SimpleNamespace(
+        rows=[SimpleNamespace(row_id="r1", text="merge tokens compose",
+                              verification_command="pytest tests/test_base.py")]
+    )
+    adapter.unmet_plan_rows = lambda: ()
+    adapter.plan_row_state = lambda row_id: "UNVERIFIED"
+    line = adapter.record_execution_evidence(
+        _evidence("pytest -q", "375 passed in 42.0s\n", returncode=0),
+        command="pytest -q",
+    )
+    assert "submit window is open" not in line
+    assert "1 plan row(s) have no current-tree evidence" in line
+
+
+def test_advisory_wording_on_suite_observed_basis(tmp_path):
+    """Without a baseline the claim is about the agent's OWN suite run."""
+    adapter = _adapter_with_baseline(tmp_path, captured=False)
+    line = adapter.record_execution_evidence(
+        _evidence("pytest -q", "375 passed in 42.0s\n", returncode=0),
+        command="pytest -q",
+    )
+    assert "no regression observed in your own full-suite run" in line
+    assert "green vs baseline" not in line
+
+
+def test_advisory_consults_latest_run_failing_set(tmp_path):
+    """M9: after a green promotion every name reads pass, so
+    `regression_count()` could never be positive again. The advisory must also
+    look at the failing set of the most recent suite run."""
+    adapter = _adapter_with_baseline(tmp_path)
+    ledger = adapter._suite_ledger()
+    ledger.record_suite_run(
+        passing=(), failing={"tests/test_base.py::test_get_item"},
+        observed_names={"tests/test_base.py::test_get_item"},
+        failed_count=1, passed_count=374,
+    )
+    assert ledger.regression_count() == 1
+    assert ledger.last_run_regressions() == (
+        "tests/test_base.py::test_get_item",)
+    assert adapter._submit_window_advisory() == ""
+
+
+# --- M8/M9 promotion only promotes what the run actually covered ---------
+
+
+def test_promotion_is_limited_to_names_the_run_named(tmp_path):
+    """M8: a run whose summary count equals the number of names it printed
+    observed nothing else - skipped, deselected and uncollected names must not
+    ride along."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
+    )
+    ledger.note_failing(["tests/test_base.py::test_get_item"])
+    ledger.record_suite_run(
+        passing=["tests/test_utils.py::test_meta_values"], failing=(),
+        observed_names=["tests/test_utils.py::test_meta_values"],
+        failed_count=0, passed_count=1,
+    )
+    assert ledger.suite_verdict("tests/test_utils.py::test_meta_values") == "pass"
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") is None
+
+
+def test_dot_output_promotion_requires_conservation(tmp_path):
+    """M8: `-q` prints no names at all (action 45: 375 passed, 0 names), so
+    promoting the observed set is the whole mechanism - but promoting the
+    BASELINE set needs the conservation guard from
+    persistent_plan/baseline.py:718."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
+    )
+    ledger.note_failing(["tests/test_base.py::test_get_item"])
+    ledger.record_suite_run(
+        passing=(), failing=(), observed_names=(),
+        failed_count=0, passed_count=1,
+    )
+    # observed names promote; the three baseline names do not (1 < 3).
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") == "pass"
+    assert ledger.suite_verdict(
+        "tests/test_base.py::test_set_explicit_merge_token") is None
+    ledger.record_suite_run(
+        passing=(), failing=(), observed_names=(),
+        failed_count=0, passed_count=375,
+    )
+    assert ledger.suite_verdict(
+        "tests/test_base.py::test_set_explicit_merge_token") == "pass"
+
+
+# --- M10 covered prefixes threaded from the real command -----------------
+
+
+def test_action_45_promotes_under_coverage_but_not_ignored_files(tmp_path):
+    """The exact action-45 command: 375 passed under `tests/` with four files
+    ignored. It must promote observed names under `tests/` and must NOT mark
+    tests/test_base.py::test_get_item passing - that run excluded it."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("cd /testbed && python -m pytest tests/test_base.py -q "
+                  "2>&1 | tail -20",
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=1),
+        command=("cd /testbed && python -m pytest tests/test_base.py -q "
+                 "2>&1 | tail -20"),
+    )
+    adapter.record_execution_evidence(
+        _evidence("cd /testbed && python -m pytest tests/test_utils.py -q "
+                  "2>&1 | tail -20",
+                  _failing_output("tests/test_utils.py::test_meta_values"),
+                  action_id=2),
+        command=("cd /testbed && python -m pytest tests/test_utils.py -q "
+                 "2>&1 | tail -20"),
+    )
+    adapter.record_execution_evidence(
+        _evidence(ACTION_45, "375 passed in 42.0s\n", returncode=0,
+                  action_id=3),
+        command=ACTION_45,
+    )
+    ledger = adapter._suite_ledger()
+    assert ledger.suite_verdict("tests/test_utils.py::test_meta_values") == "pass"
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") is None
+    line = adapter.record_execution_evidence(
+        _evidence("cd /testbed && python -m pytest tests/test_base.py -q "
+                  "2>&1 | tail -20",
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=4),
+        command=("cd /testbed && python -m pytest tests/test_base.py -q "
+                 "2>&1 | tail -20"),
+    )
+    assert "isolation artifact" not in line
+
+
+def test_scoped_green_run_does_not_open_the_submit_window(tmp_path):
+    """A scoped run promotes inside its coverage but is not a full suite."""
+    adapter = _adapter_with_baseline(tmp_path)
+    line = adapter.record_execution_evidence(
+        _evidence(ACTION_45, "375 passed in 42.0s\n", returncode=0),
+        command=ACTION_45,
+    )
+    assert "submit window" not in line
+    assert "suite green" not in line
+
+
+def test_scoped_failure_never_becomes_suite_truth(tmp_path):
+    """The core invariant: an isolated failure is not a suite failure, however
+    wide its coverage. This is the whole incident."""
+    adapter = _adapter_with_baseline(tmp_path)
+    command = "cd /testbed && python -m pytest tests/test_base.py -q 2>&1 | tail -20"
+    adapter.record_execution_evidence(
+        _evidence(command,
+                  _failing_output("tests/test_base.py::test_get_item")
+                  + "1 failed, 83 passed in 3.0s\n"),
+        command=command,
+    )
+    assert adapter._suite_ledger().suite_verdict(
+        "tests/test_base.py::test_get_item") is None
+    assert _last_row(adapter)["baseline_classification"]["verdicts"] == [
+        ["tests/test_base.py::test_get_item", "unverified_scope"]
+    ]
+
+
+# --- M7 an edit invalidates suite verdicts -------------------------------
+
+
+def test_edit_makes_a_suite_pass_stale(tmp_path):
+    """M7: a green full-suite run before the latest edit says nothing about
+    the tree the agent just changed."""
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _scoped_failure_evidence(), command="pytest tests/test_base.py -q"
+    )
+    adapter.record_execution_evidence(
+        _evidence("pytest -q", "375 passed in 42.0s\n", returncode=0,
+                  action_id=2),
+        command="pytest -q",
+    )
+    ledger = adapter._suite_ledger()
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") == "pass"
+    adapter.begin_implement()
+    adapter.note_edit(["src/dynaconf/base.py"])
+    line = adapter.record_execution_evidence(
+        _evidence("pytest tests/test_base.py -q",
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=3),
+        command="pytest tests/test_base.py -q",
+    )
+    row = _last_row(adapter)
+    assert row["baseline_classification"]["verdicts"] == [
+        ["tests/test_base.py::test_get_item", "unverified_scope"]
+    ]
+    assert "before your latest edit" in line
+    assert "re-run the full suite" in line
+
+
+def test_advisory_does_not_fire_from_stale_verdicts(tmp_path):
+    adapter = _adapter_with_baseline(tmp_path)
+    adapter.record_execution_evidence(
+        _evidence("pytest -q", "375 passed in 42.0s\n", returncode=0),
+        command="pytest -q",
+    )
+    assert adapter._submit_window_advisory() != ""
+    adapter.begin_implement()
+    adapter.note_edit(["src/dynaconf/base.py"])
+    assert adapter._submit_window_advisory() == ""
+
+
+# --- the pristine-tree probe (action 26, +216 s) -------------------------
+
+
+def test_git_stash_probe_is_recognised():
+    from gt_engine.runtime_observation import (
+        is_pristine_tree_probe,
+        test_command_coverage,
+    )
+
+    assert is_pristine_tree_probe(ACTION_26) is True
+    assert test_command_coverage(ACTION_26).scope == "scoped"
+    assert is_pristine_tree_probe("pytest tests/test_base.py -q") is False
+    assert is_pristine_tree_probe(
+        "cd /testbed && git stash && pytest -q") is False
+
+
+def test_pristine_probe_makes_later_failures_read_baseline_noise(tmp_path):
+    """The evidence that would have ended the chase existed at +216 s: the
+    agent's own `git stash` probe showed test_get_item failing on the pristine
+    tree. It then chased the test for another 2643 s."""
+    adapter = _adapter_with_baseline(tmp_path, captured=False)
+    line = adapter.record_execution_evidence(
+        _evidence(ACTION_26,
+                  _failing_output("tests/test_base.py::test_get_item")),
+        command=ACTION_26,
+    )
+    assert "already failed on the pristine tree" in line
+    assert "git-stash probe" in line
+    later = "cd /testbed && python -m pytest tests/test_base.py -q 2>&1 | tail -20"
+    line2 = adapter.record_execution_evidence(
+        _evidence(later,
+                  _failing_output("tests/test_base.py::test_get_item"),
+                  action_id=2),
+        command=later,
+    )
+    assert _last_row(adapter)["baseline_classification"]["verdicts"] == [
+        ["tests/test_base.py::test_get_item", "baseline_noise"]
+    ]
+    assert "not your change" in line2
+
+
+def test_pristine_probe_is_not_folded_into_suite_truth(tmp_path):
+    """The probe ran against a tree the agent is not submitting."""
+    adapter = _adapter_with_baseline(tmp_path, captured=False)
+    probe = ("cd /testbed && git stash && python -m pytest tests/ -q 2>&1 "
+             "| tail -5; git stash pop")
+    adapter.record_execution_evidence(
+        _evidence(probe, "375 passed in 42.0s\n", returncode=0),
+        command=probe,
+    )
+    ledger = adapter._suite_ledger()
+    assert ledger.suite_verdict("tests/test_base.py::test_get_item") is None
+    assert adapter._submit_window_advisory() == ""
+
+
+def test_real_baseline_outranks_the_probe(tmp_path):
+    """A captured baseline is a clean capture; the probe only governs where
+    the baseline has no opinion."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
+    )
+    ledger.note_baseline_probe(
+        failing=["tests/test_base.py::test_get_item"], passing=())
+    verdict = classify_failures_vs_baseline(
+        command="pytest tests/test_base.py -q",
+        output=_failing_output("tests/test_base.py::test_get_item"),
+        ledger=ledger,
+    )
+    assert verdict.verdicts == (
+        ("tests/test_base.py::test_get_item", "unverified_scope"),
+    )

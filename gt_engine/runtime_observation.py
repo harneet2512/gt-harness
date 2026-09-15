@@ -20,7 +20,7 @@ import sqlite3
 import stat
 import subprocess
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .repository_identity import (
@@ -202,46 +202,89 @@ def _is_utf8(payload: bytes) -> bool:
         return False
 
 
-def _baseline_model_clause(classification: object) -> str:
-    """Render verdicts for the model line, e.g.
-    ``1 unverified-scope (tests/t.py::t_x), 1 baseline-noise``.
+def _imperative(name: str, verdict: str, hint: str, basis: str) -> str:
+    """One actionable sentence for one failing test name.
 
-    Accepts the dataclass or its ``as_dict`` form - auditors rebuild the line
-    from the stored journal payload, which carries the dict.
+    H6: run 34996816912 shipped `baseline: 1 unverified-scope
+    (tests/test_base.py::test_get_item)` and the agent kept chasing the test
+    for another 1800 s. A count and a bucket label name the finding but never
+    say what to DO with it; every string below is an instruction whose subject
+    is the test and whose object is the agent's next action.
+    """
+    if hint == "stale_suite_pass":
+        return (f"{name} passed in a full-suite run before your latest edit"
+                " - re-run the full suite")
+    if verdict == "regression_new":
+        return (f"{name} passed before your edits and fails in the full suite"
+                " - this one is yours")
+    if verdict == "unverified_scope":
+        if basis == "suite_observed":
+            return (f"{name} failed here in a scoped run - not yet observed in"
+                    " a full-suite run; run the full suite first")
+        return (f"{name} passed at baseline; it failed here in a scoped run"
+                " - run the full suite before investigating")
+    if verdict == "scope_artifact":
+        return (f"{name} passes in the full suite - this scoped failure is an"
+                " isolation artifact, not a regression")
+    if verdict == "baseline_noise":
+        if hint == "pristine_probe":
+            return (f"{name} already failed on the pristine tree (your own"
+                    " git-stash probe) - not your change")
+        return f"{name} already failed at baseline - not your change"
+    if verdict == "suite_failing":
+        return f"{name} fails in the full suite and was not in the baseline"
+    return f"{name} is not in the baseline or any suite run"
+
+
+# The clause rides in EVERY execution-evidence delivery, so it is bounded:
+# 77 of smoke-20's 690 model tokens went to sha256s nobody could act on.
+_CLAUSE_BUDGET = 200
+_NAMES_PER_CLASS = 2
+_VERDICT_ORDER = (
+    "regression_new", "unverified_scope", "suite_failing",
+    "scope_artifact", "baseline_noise", "untracked",
+)
+
+
+def _baseline_model_clause(classification: object) -> str:
+    """Render the verdicts as instructions rather than as a labelled histogram.
+
+    Accepts the dataclass or its ``as_dict`` form - the rehearsal auditor
+    rebuilds the line from the stored journal payload, which carries the dict
+    (now also carrying ``basis`` and ``hints``). Both sides must render through
+    this one function or the delivered line and the audited line diverge.
     """
     if hasattr(classification, "verdicts"):
-        verdicts = classification.verdicts
-        summary = classification.summary
+        verdicts = [(name, verdict) for name, verdict in classification.verdicts]
+        basis = getattr(classification, "basis", "baseline")
+        hints = dict(getattr(classification, "hints", {}) or {})
     else:
         verdicts = [
             (entry[0], entry[1])
             for entry in (classification.get("verdicts") or [])
         ]
-        summary = classification.get("summary") or {}
-    order = (
-        "regression_new", "unverified_scope", "suite_failing",
-        "scope_artifact", "baseline_noise", "untracked",
-    )
-    labels = {
-        "regression_new": "regression",
-        "unverified_scope": "unverified-scope",
-        "suite_failing": "suite-failing",
-        "scope_artifact": "scope-artifact",
-        "baseline_noise": "baseline-noise",
-        "untracked": "untracked",
-    }
-    parts = []
-    for key in order:
-        count = summary.get(key, 0)
-        if not count:
-            continue
-        clause = f"{count} {labels[key]}"
-        if key in ("regression_new", "unverified_scope", "suite_failing"):
-            examples = [n for n, v in verdicts if v == key][:2]
-            if examples:
-                clause += " (" + ", ".join(examples) + ")"
-        parts.append(clause)
-    return ", ".join(parts)
+        basis = str(classification.get("basis") or "baseline")
+        hints = dict(classification.get("hints") or {})
+    grouped: dict[str, list[str]] = {}
+    for name, verdict in verdicts:
+        grouped.setdefault(verdict, []).append(name)
+    parts: list[str] = []
+    dropped = 0
+    used = 0
+    for key in _VERDICT_ORDER:
+        names = grouped.get(key) or []
+        shown = names[:_NAMES_PER_CLASS]
+        dropped += len(names) - len(shown)
+        for name in shown:
+            clause = _imperative(name, key, hints.get(name, ""), basis)
+            if parts and used + len(clause) + 2 > _CLAUSE_BUDGET:
+                dropped += 1
+                continue
+            parts.append(clause)
+            used += len(clause) + 2
+    if dropped:
+        parts.append(f"+{dropped} more")
+    return "; ".join(parts)
 
 
 def execution_evidence_model_line(
@@ -284,52 +327,295 @@ def execution_evidence_model_line(
 
 
 _BASELINE_CLASSIFICATION_LAYOUT = "gt.baseline_classification.v1"
-_BASELINE_FILTER_RE = re.compile(
-    r"^(?:-k|-m|--deselect|--ignore|--lf|--ff|--last-failed|--failed-first)"
-)
+
+# --- command shape ------------------------------------------------------
+#
+# D3: run 34996816912 issued ten test commands and the old parser read
+# `unknown` for all ten, so nothing downstream ever ran. Every one of them was
+# `cd /testbed && python -m pytest <paths> ... 2>&1 | tail -N`: the `cd`
+# prefix, the `2>&1` word and the trailing pipe each defeated it on their own.
+
+_REDIRECT_RE = re.compile(r"^(?:\d*|&)(?:>>?|<)")
+_BARE_REDIRECT = frozenset({">", ">>", "<", "2>", "2>>", "&>", "&>>", ">&"})
+# A trailing segment that only reshapes bytes already produced cannot change
+# what the run covered, so it does not make the command compound.
+_OUTPUT_FILTERS = frozenset({
+    "tail", "head", "sed", "grep", "egrep", "fgrep", "rg", "ag", "tee", "cat",
+    "wc", "less", "more", "sort", "uniq", "cut", "tr", "awk", "column",
+    "strings", "nl", "fold", "rev", "expand",
+})
+# Wrappers that may precede the pytest token inside its own segment. Without
+# this allowlist `grep pytest out.log` reads as a pytest invocation.
+_RUNNER_WRAPPERS = frozenset({
+    "python", "python2", "python3", "py", "uv", "uvx", "poetry", "pdm",
+    "hatch", "pipenv", "timeout", "env", "nice", "stdbuf", "xvfb-run",
+    "coverage", "nohup", "tox",
+})
+# Options that consume the following word. `-p no:cacheprovider` read that
+# plugin name as a positional path and turned a whole-suite run into `scoped`.
+_VALUE_OPTIONS = frozenset({
+    "-p", "-c", "-o", "-W", "-n", "-k", "-m", "-P", "--rootdir", "--tb",
+    "--maxfail", "--timeout", "--durations", "--junitxml", "--import-mode",
+    "--basetemp", "--deselect", "--ignore", "--ignore-glob", "--override-ini",
+    "--log-level", "--log-cli-level", "--color", "--capture", "--dist",
+    "--numprocesses", "--confcutdir", "--assert",
+})
+# Options that narrow the run WITHIN its positional coverage: the run did not
+# attempt everything it named, so it may fold names but never promote them.
+_NARROWING_OPTIONS = frozenset({
+    "-k", "-m", "--lf", "--ff", "--last-failed", "--failed-first", "--sw",
+    "--stepwise",
+})
+# Options that subtract from coverage; their targets are recorded so a name
+# inside an ignored file is never promoted by the run that skipped it.
+_EXCLUDE_OPTIONS = frozenset({"--ignore", "--ignore-glob", "--deselect"})
+_SHELL_OPERATORS = frozenset({"|", "||", "&&", ";", "&"})
 
 
-def test_command_scope(command: str) -> str:
-    """Classify a pytest invocation's coverage shape.
+def _shell_words(command: str) -> list[str] | None:
+    """Split a command into words, with `;` separated out.
 
-    ``suite``   - no positional selection; coverage is the whole collection
-    ``scoped``  - positional path/nodeid args or name filters narrow coverage
-    ``unknown`` - anything else (compound, piped, non-pytest, unparseable)
-
-    Conservative direction: an ambiguous suite reads ``scoped`` and loses only
-    a ledger-promotion opportunity; a scoped run must never read ``suite``.
+    ``shlex`` does not treat `;` as a delimiter, so action 26's
+    `... | tail -10; git stash pop` arrives as the word `-10;`.
     """
     try:
         words = shlex.split(command or "", posix=True)
     except ValueError:
-        return "unknown"
-    idx = None
+        return None
+    out: list[str] = []
+    for word in words:
+        if ";" in word:
+            out.extend(part for part in re.split(r"(;)", word) if part)
+        else:
+            out.append(word)
+    return out
+
+
+def _shell_segments(words: list[str]) -> list[tuple[str, list[str]]]:
+    """Split words into ``(preceding_operator, segment)`` pairs."""
+    segments: list[tuple[str, list[str]]] = []
+    current: list[str] = []
+    operator = ""
+    for word in words:
+        if word in _SHELL_OPERATORS:
+            if current:
+                segments.append((operator, current))
+            current = []
+            operator = word
+        else:
+            current.append(word)
+    if current:
+        segments.append((operator, current))
+    return segments
+
+
+def _pytest_index(words: list[str]) -> int | None:
+    """Index of the pytest token in a segment, or None.
+
+    ``python -m pytest`` is the interpreter form: the `-m` sits BEFORE the
+    token and must never be read as a marker expression.
+    """
     for i, word in enumerate(words):
-        if word in ("|", "||", "&&", ";"):
-            return "unknown"
-        if word == "pytest" or word.endswith("/pytest"):
-            idx = i
-            break
-        if word == "-m" and i + 1 < len(words) and words[i + 1].startswith("pytest"):
-            idx = i + 1
-            break
-    if idx is None:
-        return "unknown"
-    for arg in words[idx + 1:]:
-        if arg in ("|", "||", "&&", ";"):
-            return "unknown"
-        if arg.startswith("-"):
-            if _BASELINE_FILTER_RE.match(arg):
-                return "scoped"
+        base = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if base not in ("pytest", "py.test"):
             continue
-        return "scoped"
-    return "suite"
+        if i == 0 or words[i - 1] == "-m":
+            return i
+        first = words[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if first in _RUNNER_WRAPPERS or first.startswith("python"):
+            return i
+        return None
+    return None
 
 
-def _name_covered(name: str, prefixes: tuple[str, ...]) -> bool:
+def _is_setup_prefix(words: list[str]) -> bool:
+    """`cd <dir>` and `git stash` may precede the runner without hiding it."""
+    return (len(words) == 2 and words[0] == "cd") or words == ["git", "stash"]
+
+
+def _is_stash_pop(words: list[str]) -> bool:
+    return words[:3] == ["git", "stash", "pop"]
+
+
+def _is_output_filter(words: list[str]) -> bool:
+    if not words:
+        return False
+    base = words[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return base in _OUTPUT_FILTERS
+
+
+@dataclass(frozen=True)
+class CommandCoverage:
+    """What one test command actually attempted.
+
+    ``paths``    - positional path/nodeid arguments (the run's coverage)
+    ``excluded`` - --ignore / --ignore-glob / --deselect targets, subtracted
+    ``narrowed`` - -k / -m / a ::nodeid: the run skipped part of its own
+                   coverage, so it may fold names but never promote them
+    """
+
+    scope: str
+    paths: tuple[str, ...] = ()
+    excluded: tuple[str, ...] = ()
+    narrowed: bool = False
+
+
+def _parse_pytest_segment(words: list[str]) -> CommandCoverage:
+    index = _pytest_index(words)
+    if index is None:
+        return CommandCoverage("unknown")
+    args = words[index + 1:]
+    paths: list[str] = []
+    excluded: list[str] = []
+    narrowed = False
+    skip_next = False
+    for i, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _BARE_REDIRECT:
+            skip_next = True
+            continue
+        if _REDIRECT_RE.match(arg):
+            continue
+        if arg == "--":
+            continue
+        if arg.startswith("-") and arg != "-":
+            option, equals, inline = arg.partition("=")
+            if option in _EXCLUDE_OPTIONS:
+                if equals:
+                    excluded.append(inline)
+                elif i + 1 < len(args):
+                    excluded.append(args[i + 1])
+                    skip_next = True
+                continue
+            if option in _NARROWING_OPTIONS:
+                narrowed = True
+            if option in _VALUE_OPTIONS and not equals:
+                skip_next = True
+            continue
+        paths.append(arg)
+    if any("::" in path for path in paths):
+        narrowed = True
+    scope = "scoped" if (paths or excluded or narrowed) else "suite"
+    return CommandCoverage(scope, tuple(paths), tuple(excluded), narrowed)
+
+
+def test_command_coverage(command: str) -> CommandCoverage:
+    """Classify a pytest invocation's coverage shape and extent.
+
+    ``suite``   - no positional selection; coverage is the whole collection
+    ``scoped``  - positional path/nodeid args or filters narrow coverage
+    ``unknown`` - anything else (compound, non-pytest, unparseable)
+
+    Conservative direction: an ambiguous suite reads ``scoped`` and loses only
+    a ledger-promotion opportunity; a scoped run must never read ``suite``.
+    """
+    words = _shell_words(command)
+    if not words:
+        return CommandCoverage("unknown")
+    segments = _shell_segments(words)
+    if not segments:
+        return CommandCoverage("unknown")
+    runner_at = None
+    for i, (_operator, segment) in enumerate(segments):
+        if _pytest_index(segment) is None:
+            continue
+        if runner_at is not None:
+            return CommandCoverage("unknown")
+        runner_at = i
+    if runner_at is None:
+        return CommandCoverage("unknown")
+    for i, (operator, segment) in enumerate(segments):
+        if i == runner_at:
+            continue
+        if i < runner_at:
+            # Prefix segments must be setup joined by `&&`; anything else can
+            # change what the runner sees.
+            if not _is_setup_prefix(segment):
+                return CommandCoverage("unknown")
+            if segments[i + 1][0] != "&&":
+                return CommandCoverage("unknown")
+            continue
+        if operator == "|" and _is_output_filter(segment):
+            continue
+        if operator in (";", "&&") and _is_stash_pop(segment):
+            continue
+        return CommandCoverage("unknown")
+    return _parse_pytest_segment(segments[runner_at][1])
+
+
+def test_command_scope(command: str) -> str:
+    """The coverage shape alone - ``suite`` | ``scoped`` | ``unknown``."""
+    return test_command_coverage(command).scope
+
+
+def is_pristine_tree_probe(command: str) -> bool:
+    """A `git stash` / run / `git stash pop` sandwich around a test command.
+
+    Action 26 of run 34996816912, at +216 s:
+    ``cd /testbed && git stash && python -m pytest
+    tests/test_base.py::test_get_item -q 2>&1 | tail -10; git stash pop``
+    - the test failed on the PRISTINE tree, which settled the question the
+    agent then spent another 2643 s on. Deliberately narrow: both the stash
+    and the pop must be present and the runner must sit between them, because
+    a run whose stash never popped is not a probe, it is a lost workspace.
+    """
+    words = _shell_words(command)
+    if not words:
+        return False
+    stash_at = pop_at = runner_at = None
+    for i, (_operator, segment) in enumerate(_shell_segments(words)):
+        if _is_stash_pop(segment):
+            if pop_at is None:
+                pop_at = i
+        elif segment == ["git", "stash"]:
+            if stash_at is None:
+                stash_at = i
+        elif _pytest_index(segment) is not None and runner_at is None:
+            runner_at = i
+    return (
+        stash_at is not None and pop_at is not None and runner_at is not None
+        and stash_at < runner_at < pop_at
+    )
+
+
+# --- run aggregates -----------------------------------------------------
+
+# C1: a terminal summary line is the only affirmative evidence that a run
+# finished. `| tail -20` of a verbose run shows PASSED rows with the summary
+# cut off; without this marker a single parsed PASSED row promoted the entire
+# baseline and opened the submit window.
+_PYTEST_SUMMARY_RE = re.compile(
+    r"(?m)^.*\b\d+\s+(?:passed|failed|errors?)\b.*\bin\s+[\d.]+\s*s"
+)
+_UNITTEST_SUMMARY_RE = re.compile(
+    r"(?m)^Ran\s+\d+\s+tests?\b[\s\S]*?^(?:OK|FAILED)\b"
+)
+
+
+def has_terminal_summary(output: str) -> bool:
+    """Whether the output carries a runner's own end-of-run aggregate."""
+    text = output or ""
+    return bool(
+        _PYTEST_SUMMARY_RE.search(text) or _UNITTEST_SUMMARY_RE.search(text)
+    )
+
+
+def _name_covered(
+    name: str,
+    prefixes: tuple[str, ...],
+    excluded: tuple[str, ...] = (),
+) -> bool:
     """Whether a ``file::test`` name sits inside a run's declared coverage."""
+    if excluded and _matches_any(name, excluded):
+        return False
     if not prefixes:
         return True
+    return _matches_any(name, prefixes)
+
+
+def _matches_any(name: str, prefixes: tuple[str, ...]) -> bool:
     file_part = name.split("::", 1)[0]
     for prefix in prefixes:
         if "::" in prefix:
@@ -345,20 +631,31 @@ class SuiteVerdictLedger:
     """Current-tree suite truth joined against the task baseline.
 
     The baseline name sets are attribution only: a name passed at baseline is
-    NOT suite-pass evidence under the agent's tree. Scoped runs only track
-    observed names for later promotion; they never write suite verdicts,
-    because fixture ordering differs under isolation (run 34996816912:
-    test_get_item passed baseline and full suite, failed standalone).
+    NOT suite-pass evidence under the agent's tree. Scoped runs never write
+    suite FAILURES, because fixture ordering differs under isolation (run
+    34996816912: test_get_item passed baseline and full suite, failed
+    standalone) - they only fold names and, when green, promote inside their
+    own coverage.
+
+    ``basis`` records what the attribution rests on: ``baseline`` for a
+    captured baseline, ``suite_observed`` when capture failed and the agent's
+    own suite runs are the only evidence available (D2).
     """
 
     baseline_passing: tuple[str, ...] = ()
     baseline_failing: tuple[str, ...] = ()
+    basis: str = "baseline"
 
     def __post_init__(self) -> None:
         self.baseline_passing = frozenset(self.baseline_passing)
         self.baseline_failing = frozenset(self.baseline_failing)
         self._suite: dict[str, str] = {}
         self._observed: set[str] = set()
+        self._stale: set[str] = set()
+        self._probe_passing: set[str] = set()
+        self._probe_failing: set[str] = set()
+        self._last_run_failing: frozenset[str] = frozenset()
+        self._whole_suite_green = False
 
     def suite_verdict(self, name: str) -> str | None:
         return self._suite.get(name)
@@ -367,11 +664,58 @@ class SuiteVerdictLedger:
         """Baseline-passing names currently failing at suite scope."""
         return sum(
             1 for name, verdict in self._suite.items()
-            if verdict == "fail" and name in self.baseline_passing
+            if verdict == "fail" and self._passed_before(name)
         )
+
+    def last_run_regressions(self) -> tuple[str, ...]:
+        """Baseline-passing names failing in the MOST RECENT suite run.
+
+        M9: a green run promotes every covered name to ``pass``, after which
+        ``regression_count()`` can never be positive again. The latest run's
+        own failing set is the reachable signal.
+        """
+        return tuple(sorted(
+            name for name in self._last_run_failing if self._passed_before(name)
+        ))
+
+    def has_stale_verdicts(self) -> bool:
+        return bool(self._stale)
+
+    def has_whole_suite_green(self) -> bool:
+        """Whether an unrestricted suite run has come back green since the
+        last edit. The advisory may not describe a run that never happened."""
+        return self._whole_suite_green
+
+    def _passed_before(self, name: str) -> bool:
+        return name in self.baseline_passing or name in self._probe_passing
 
     def note_failing(self, names: Iterable[str]) -> None:
         self._observed.update(names)
+
+    def note_edit(self, names: Iterable[str] = ()) -> None:
+        """M7: an edit invalidates every suite verdict taken before it.
+
+        A green full-suite run says nothing about the tree the agent has since
+        changed, and the advisory must not keep quoting it. ``names`` is
+        accepted for symmetry with the adapter's per-path callers; staleness is
+        whole-ledger because a suite run's verdicts are jointly observed.
+        """
+        del names
+        self._stale = set(self._suite)
+        self._whole_suite_green = False
+
+    def note_baseline_probe(
+        self, *, failing: Iterable[str] = (), passing: Iterable[str] = ()
+    ) -> None:
+        """Record the agent's own pristine-tree probe as baseline evidence.
+
+        Action 26 of run 34996816912 stashed the edits, ran the test and
+        popped: the test failed WITHOUT the agent's changes. That is baseline
+        attribution the captured baseline never supplied, and it arrived
+        2643 s before the agent stopped chasing the test.
+        """
+        self._probe_failing.update(failing)
+        self._probe_passing.update(passing)
 
     def record_suite_run(
         self,
@@ -380,43 +724,116 @@ class SuiteVerdictLedger:
         failing: Iterable[str] = (),
         observed_names: Iterable[str] = (),
         failed_count: int | None = None,
+        passed_count: int | None = None,
         covered_prefixes: tuple[str, ...] = (),
+        excluded_prefixes: tuple[str, ...] = (),
+        suite_scope: bool = True,
     ) -> None:
-        """Fold one aggregate run into suite truth; latest run wins.
+        """Fold one run into suite truth; latest run wins.
 
-        A run reporting zero failures promotes every known name inside its
-        coverage - unnamed dot output still means "nothing failed".
+        Promotion rule (M8/M9), in order:
+
+        * a run that both passed and failed one identity established nothing -
+          skip promotion entirely (H4);
+        * a run whose summary count equals the number of names it printed
+          observed exactly those names: promote them and nothing more;
+        * otherwise the run printed dots (``-q`` yields no names at all -
+          action 45 reported 375 passed and zero names), so promote the names
+          already OBSERVED in this task, restricted to this run's coverage;
+        * the BASELINE sets ride along only for a whole-suite run whose own
+          count conserves them (``passed >= len(baseline_passing)``), the
+          guard analogous to persistent_plan/baseline.py:718.
+
+        ``suite_scope`` separates the two directions that are not symmetric: a
+        whole-suite run's failures are suite truth, a scoped run's failures are
+        not (that asymmetry IS the incident), while a green scoped run still
+        promotes inside its own coverage.
         """
-        for name in failing:
-            self._suite[name] = "fail"
+        passing = tuple(passing)
+        failing = tuple(failing)
+        prefixes = tuple(covered_prefixes)
+        excluded = tuple(excluded_prefixes)
+        # H4: the unittest FAIL pattern captures the CLASS, so one identity can
+        # land in both parsed lists. Apply passing first and let fail win.
+        conflicted = set(passing) & set(failing)
+        promoting = failed_count == 0 and not conflicted
         for name in passing:
-            self._suite[name] = "pass"
+            if suite_scope or (promoting and _name_covered(name, prefixes, excluded)):
+                self._write(name, "pass")
+        if suite_scope:
+            for name in failing:
+                self._write(name, "fail")
+            self._last_run_failing = frozenset(failing)
         self._observed.update(observed_names)
-        if failed_count == 0:
-            candidates = (
-                self._observed
-                | set(self.baseline_passing)
-                | set(self.baseline_failing)
-            )
-            for name in candidates:
-                if _name_covered(name, tuple(covered_prefixes)):
-                    self._suite[name] = "pass"
+        if not promoting:
+            return
+        named_all = (
+            bool(passing) and passed_count is not None
+            and passed_count == len(passing)
+        )
+        if named_all:
+            return
+        candidates = set(self._observed)
+        if (
+            not prefixes
+            and passed_count is not None
+            and passed_count >= len(self.baseline_passing)
+        ):
+            candidates |= set(self.baseline_passing) | set(self.baseline_failing)
+        for name in candidates:
+            if _name_covered(name, prefixes, excluded):
+                self._write(name, "pass")
+        if not prefixes and not excluded and suite_scope:
+            # A green whole-suite run supersedes every verdict taken before the
+            # last edit, including the ones it did not name.
+            self._stale.clear()
+            self._whole_suite_green = True
+
+    def _write(self, name: str, verdict: str) -> None:
+        self._suite[name] = verdict
+        self._stale.discard(name)
 
     def _verdict_for(self, name: str) -> str:
         suite = self._suite.get(name)
         if suite == "fail":
-            if name in self.baseline_passing:
+            if self._passed_before(name):
                 return "regression_new"
-            if name in self.baseline_failing:
+            if name in self.baseline_failing or name in self._probe_failing:
                 return "baseline_noise"
             return "suite_failing"
         if suite == "pass":
-            return "scope_artifact"
+            # M7: a pass observed before the latest edit is not evidence about
+            # the tree the agent just changed. A stale FAIL is left alone -
+            # keeping a warning is the conservative direction.
+            return "unverified_scope" if name in self._stale else "scope_artifact"
         if name in self.baseline_failing:
             return "baseline_noise"
         if name in self.baseline_passing:
             return "unverified_scope"
+        # The captured baseline outranks the probe; the probe only governs
+        # where the baseline has no opinion (which, on a `no_test_verdicts`
+        # capture, is everywhere).
+        if name in self._probe_failing:
+            return "baseline_noise"
+        if name in self._probe_passing:
+            return "unverified_scope"
         return "untracked"
+
+    def _hint_for(self, name: str, verdict: str) -> str:
+        """Which wording variant the clause should use for this name."""
+        if (
+            verdict == "unverified_scope"
+            and name in self._stale
+            and self._suite.get(name) == "pass"
+        ):
+            return "stale_suite_pass"
+        if (
+            verdict == "baseline_noise"
+            and name in self._probe_failing
+            and name not in self.baseline_failing
+        ):
+            return "pristine_probe"
+        return ""
 
 
 @dataclass(frozen=True)
@@ -424,14 +841,18 @@ class BaselineClassification:
     scope: str
     verdicts: tuple[tuple[str, str], ...]
     summary: dict[str, int]
+    basis: str = "baseline"
+    hints: dict[str, str] = field(default_factory=dict)
     layout_schema: str = _BASELINE_CLASSIFICATION_LAYOUT
 
     def as_dict(self) -> dict:
         return {
             "layout_schema": self.layout_schema,
             "scope": self.scope,
+            "basis": self.basis,
             "verdicts": [[name, verdict] for name, verdict in self.verdicts],
             "summary": dict(sorted(self.summary.items())),
+            "hints": dict(sorted(self.hints.items())),
         }
 
 
@@ -443,10 +864,12 @@ def classify_failures_vs_baseline(
 ) -> BaselineClassification | None:
     """Classify observed failing test names against baseline + suite truth.
 
-    Returns ``None`` when there is no ledger (baseline never captured) or the
-    output parses to no failing names - absent evidence, never an error. The
-    canonical producer's extractors are the only supported name source; both
-    baseline and observation sides must parse identically.
+    Returns ``None`` when there is no ledger at all (no plan inputs) or the
+    output parses to no failing names - absent evidence, never an error. An
+    uncaptured baseline is NOT a reason to return None: the ledger then runs on
+    a ``suite_observed`` basis (D2). The canonical producer's extractors are
+    the only supported name source; both baseline and observation sides must
+    parse identically.
     """
     if ledger is None:
         return None
@@ -465,12 +888,18 @@ def classify_failures_vs_baseline(
     ledger.note_failing(failing)
     verdicts = tuple((name, ledger._verdict_for(name)) for name in failing)
     summary: dict[str, int] = {}
-    for _name, verdict in verdicts:
+    hints: dict[str, str] = {}
+    for name, verdict in verdicts:
         summary[verdict] = summary.get(verdict, 0) + 1
+        hint = ledger._hint_for(name, verdict)
+        if hint:
+            hints[name] = hint
     return BaselineClassification(
         scope=test_command_scope(command),
         verdicts=verdicts,
         summary=summary,
+        basis=ledger.basis,
+        hints=hints,
     )
 
 

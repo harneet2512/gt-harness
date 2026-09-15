@@ -2383,6 +2383,12 @@ class MiniSweAdapter(GroundtruthController):
             if self._status.get(predicate_id) is PredicateStatus.GREEN
         }
         applied = set(super().note_edit(normalized_paths, invalidate=affected))
+        # M7: a suite verdict taken before this edit does not describe the tree
+        # the agent is now working on, so it must stop opening the submit
+        # window. Placed after the lifecycle call: an edit the controller
+        # refused never landed, and so invalidates nothing.
+        if self._suite_verdict_ledger is not None:
+            self._suite_verdict_ledger.note_edit(normalized_paths)
         # Reported AFTER the reset, against what the reset actually did.
         # Reporting `affected` here was not merely imprecise: with an empty
         # scope match it claimed every proof survived an edit that had already
@@ -2975,23 +2981,38 @@ class MiniSweAdapter(GroundtruthController):
         return "[GT_EXECUTION_EVIDENCE]\n" + line
 
     def _suite_ledger(self) -> Any:
-        """The baseline-vs-current ledger, seeded once baseline capture lands.
+        """The baseline-vs-current ledger.
 
-        ``None`` whenever no baseline exists - the classification layer must
-        never invent baseline evidence.
+        D2: this returned None unless `baseline.captured`, which made the whole
+        classifier a no-op exactly when it was needed most. Run 34996816912's
+        capture ended `status=no_test_verdicts` (pytest collection interrupted,
+        4 errors, 0 names), so for all 3061 s the agent got no verdict on any
+        of its ten test commands. A missing baseline removes ATTRIBUTION, not
+        observation: the agent's own full-suite runs still separate an
+        isolation artifact from a real failure, so the ledger runs on a
+        `suite_observed` basis with empty baseline sets. `None` now means only
+        that there are no plan inputs at all.
         """
         ledger = self._suite_verdict_ledger
         if ledger is not None:
             return ledger
-        baseline = getattr(self.plan_inputs, "baseline", None)
-        if baseline is None or not baseline.captured:
+        plan_inputs = getattr(self, "plan_inputs", None)
+        if plan_inputs is None:
             return None
         from .runtime_observation import SuiteVerdictLedger
 
-        ledger = SuiteVerdictLedger(
-            baseline_passing=tuple(baseline.passing_names),
-            baseline_failing=tuple(baseline.failing_names),
-        )
+        baseline = getattr(plan_inputs, "baseline", None)
+        if baseline is None or not baseline.captured:
+            ledger = SuiteVerdictLedger(
+                baseline_passing=(), baseline_failing=(),
+                basis="suite_observed",
+            )
+        else:
+            ledger = SuiteVerdictLedger(
+                baseline_passing=tuple(baseline.passing_names),
+                baseline_failing=tuple(baseline.failing_names),
+                basis="baseline",
+            )
         self._suite_verdict_ledger = ledger
         return ledger
 
@@ -3000,16 +3021,32 @@ class MiniSweAdapter(GroundtruthController):
     ) -> tuple[Any, bool]:
         """Join this run's failing names against baseline + suite truth.
 
-        A suite-scope observation is folded into the ledger BEFORE the
-        verdict: a baseline-passing name failing in a suite run is a real
-        regression, not an unverified scope question. Scoped observations only
-        track names - fixture ordering under isolation is not suite truth.
+        The observation is folded into the ledger BEFORE the verdict: a
+        baseline-passing name failing in a suite run is a real regression, not
+        an unverified scope question.
+
+        H5: only an actual test run with a readable scope is classified. Every
+        execution row used to be classified, so `cat ci_failures.txt` and
+        `sed -n 1,5p out.log` - which echo `FAILED x::y` rows - handed those
+        names verdicts and, worse, entered them into the ledger's observed set
+        where a later green run promoted them.
 
         Returns ``(classification, suite_green)`` - the second element marks a
-        suite-scope run whose recorded observation had zero effective failures.
+        WHOLE-SUITE run whose recorded observation had zero effective failures.
         """
         ledger = self._suite_ledger()
         if ledger is None:
+            return None, False
+        if str(getattr(artifact, "kind", "") or "") != "test":
+            return None, False
+        from .runtime_observation import (
+            classify_failures_vs_baseline,
+            is_pristine_tree_probe,
+            test_command_coverage,
+        )
+
+        coverage = test_command_coverage(command)
+        if coverage.scope == "unknown":
             return None, False
         output = artifact.raw_output
         if output is None:
@@ -3025,14 +3062,13 @@ class MiniSweAdapter(GroundtruthController):
             if isinstance(output, (bytes, bytearray))
             else output
         )
-        from .runtime_observation import (
-            classify_failures_vs_baseline,
-            test_command_scope,
-        )
-
         suite_green = False
-        if test_command_scope(command) == "suite":
-            suite_green = self._record_suite_observation(ledger, command, text)
+        if is_pristine_tree_probe(command):
+            self._record_pristine_probe(ledger, command, text)
+        else:
+            suite_green = self._record_suite_observation(
+                ledger, command, text, coverage
+            )
         return (
             classify_failures_vs_baseline(
                 command=command, output=text, ledger=ledger
@@ -3045,40 +3081,66 @@ class MiniSweAdapter(GroundtruthController):
         zero current regressions is the moment to say the submit window is
         open, not merely to stop refusing it. Advisory only - the gate's
         authority is unchanged.
+
+        H3: it used to claim "plan requirements verified - submit window is
+        open" on `unmet_plan_rows()` alone, but this run's own definition of
+        verified (see `final_state`) also requires no UNVERIFIED rows - gate
+        one submitted with all 28 rows UNVERIFIED while that flag read True.
+        Stale-revision evidence does not verify the submitted tree, and the
+        gate's own `baseline_regression` refusal comes from a fresh re-run this
+        ledger never sees, so the advisory must not promise more than it saw.
         """
         ledger = self._suite_verdict_ledger
-        if ledger is None or ledger.regression_count() > 0:
+        if ledger is None:
             return ""
+        # M9: after a green promotion every covered name reads pass, so
+        # regression_count() alone could never be positive again.
+        if ledger.regression_count() > 0 or ledger.last_run_regressions():
+            return ""
+        if not ledger.has_whole_suite_green():
+            # Nothing to advise on: no whole-suite run has ever come back
+            # green on this tree, so there is no "window" to report open.
+            return ""
+        if ledger.has_stale_verdicts():
+            # M7: the green run predates the agent's latest edit.
+            return ""
+        green = (
+            "no regression observed in your own full-suite run"
+            if getattr(ledger, "basis", "baseline") == "suite_observed"
+            else "suite green vs baseline"
+        )
         plan = getattr(self, "persistent_plan", None)
         if plan is None or not getattr(plan, "rows", ()):
             # No bound plan - "verified" would be vacuous. The suite fact
             # alone is still worth surfacing; the window claim is not made.
-            return "suite green vs baseline"
+            return green
         unmet = self.unmet_plan_rows()
         if unmet:
             return (
-                "suite green vs baseline; "
+                f"{green}; "
                 f"{len(unmet)} plan requirement(s) still unverified"
             )
+        unverified = self.unverified_plan_rows()
+        if unverified:
+            return (
+                f"{green}; {len(unverified)} plan row(s) have no current-tree"
+                " evidence - re-run their checks before submitting"
+            )
         return (
-            "suite green vs baseline and plan requirements verified - "
-            "submit window is open"
+            f"{green} and plan requirements verified - submit window is open"
         )
 
-    def _record_suite_observation(
-        self, ledger: Any, command: str, output: str
-    ) -> bool:
-        """Fold a suite-scope run into the ledger; True when the run is green.
+    def _parse_run_aggregate(self, command: str, output: str) -> tuple:
+        """``(counts, passing_names, failing_names)`` from one run's output.
 
-        Zero-failure promotion requires the run to have observed at least one
-        pass - an unparseable or collection-broken output proves nothing, so
-        ``passed > 0`` is the gate that keeps "we could not read it" from
-        reading as "nothing failed".
+        The canonical producer's extractors are the only supported name source
+        - the baseline and observation sides must parse identically or the
+        join compares two different name spaces.
         """
         try:
             words = shlex.split(command or "", posix=True)
         except ValueError:
-            return False
+            words = (command or "").split()
         try:
             from groundtruth.runtime.test_runner import (
                 _parse_failing_test_names,
@@ -3087,21 +3149,78 @@ class MiniSweAdapter(GroundtruthController):
             )
         except ImportError as exc:
             raise RuntimeError("canonical_name_extractor_unavailable") from exc
-        counts = _parse_test_output(output or "", words)
-        passing = _parse_passing_test_names(output or "")
-        failing = _parse_failing_test_names(output or "")
+        return (
+            _parse_test_output(output or "", words),
+            _parse_passing_test_names(output or ""),
+            _parse_failing_test_names(output or ""),
+        )
+
+    def _record_pristine_probe(
+        self, ledger: Any, command: str, output: str
+    ) -> None:
+        """Record a `git stash` probe's result as baseline attribution.
+
+        Action 26 of run 34996816912, at +216 s of a 3061 s budget:
+        `git stash && pytest tests/test_base.py::test_get_item -q; git stash
+        pop` - the test failed on the pristine tree. That answers "is this
+        mine?" outright, and the agent went on chasing the test until +2859 s.
+
+        The probe ran against a tree the agent is NOT submitting, so it never
+        touches suite truth. Failing names are taken at face value (a FAILED
+        row is self-evident); passing names need the same affirmative summary
+        the promotion path requires, because a truncated probe that names no
+        failures has not shown the test passing.
+        """
+        from .runtime_observation import has_terminal_summary
+
+        _counts, passing, failing = self._parse_run_aggregate(command, output)
+        ledger.note_baseline_probe(
+            failing=failing,
+            passing=passing if has_terminal_summary(output) else (),
+        )
+
+    def _record_suite_observation(
+        self, ledger: Any, command: str, output: str, coverage: Any
+    ) -> bool:
+        """Fold one run into the ledger; True when a WHOLE-SUITE run was green.
+
+        C1: promotion used to need only `failed == 0`, guarded by
+        `passed == 0 and not passing`. That let ONE parsed PASSED row promote
+        the entire baseline when the summary line had been cut off - which is
+        what `| tail -20` of a verbose run does, and nine of the ten commands
+        in run 34996816912 ended in a `tail`/`sed` pipe. Promotion now needs an
+        affirmative AGGREGATE: a positive pass count AND the runner's own
+        terminal summary line. Without it the names are still folded and the
+        classification is still emitted - we simply do not claim the run
+        proved anything about names it never printed.
+
+        M10: `covered_prefixes` was never passed in production, so any green
+        run promoted everything. The prefixes are this command's positional
+        arguments minus its --ignore/--deselect targets; a narrowed run
+        (-k/-m/::nodeid) never promotes, because it skipped part of its own
+        coverage.
+        """
+        from .runtime_observation import has_terminal_summary
+
+        counts, passing, failing = self._parse_run_aggregate(command, output)
         # A parsed FAILED row outranks a truncated summary count: names the
         # output calls failed must never reach the zero-failure promotion.
         effective_failed = max(counts["failed"] + counts["errored"], len(failing))
-        if effective_failed == 0 and counts["passed"] == 0 and not passing:
-            return False
+        affirmative = counts["passed"] > 0 and has_terminal_summary(output)
+        promote = (
+            effective_failed == 0 and affirmative and not coverage.narrowed
+        )
         ledger.record_suite_run(
             passing=passing,
             failing=failing,
             observed_names=[*passing, *failing],
-            failed_count=effective_failed,
+            failed_count=0 if promote else None,
+            passed_count=counts["passed"],
+            covered_prefixes=coverage.paths,
+            excluded_prefixes=coverage.excluded,
+            suite_scope=coverage.scope == "suite",
         )
-        return effective_failed == 0
+        return promote and coverage.scope == "suite"
 
     def _poll_startup_index(self) -> None:
         """Adopt the asynchronously-built initial index once it lands.
@@ -6680,6 +6799,20 @@ class MiniSweAdapter(GroundtruthController):
         )
         return len(additions)
 
+    def unverified_plan_rows(self) -> tuple[str, ...]:
+        """Plan rows whose bound-check evidence does not cover the current tree.
+
+        `unmet_plan_rows` treats a row whose mapped predicates are all GREEN as
+        met, but a row can still read UNVERIFIED when its check observation
+        predates the last workspace change. Gate one submitted with all 28 rows
+        UNVERIFIED, so both questions have to be asked separately.
+        """
+        plan = getattr(self, "persistent_plan", None)
+        return tuple(
+            row.row_id for row in getattr(plan, "rows", ())
+            if self.plan_row_state(row.row_id) not in {"CHECK_PASSED", "PROVEN"}
+        )
+
     def unmet_plan_rows(self) -> tuple[str, ...]:
         """Plan rows that still have no current evidence.
 
@@ -6756,11 +6889,7 @@ class MiniSweAdapter(GroundtruthController):
             # the last workspace change -- gate-one submitted with all 28 rows
             # UNVERIFIED while this flag read True. Stale-revision evidence
             # does not verify the submitted tree.
-            plan = getattr(self, "persistent_plan", None)
-            unverified_rows = [
-                row.row_id for row in getattr(plan, "rows", ())
-                if self.plan_row_state(row.row_id) not in {"CHECK_PASSED", "PROVEN"}
-            ]
+            unverified_rows = list(self.unverified_plan_rows())
             state["unverified_plan_rows"] = unverified_rows
             state["verified"] = (
                 bool(self.predicates)
