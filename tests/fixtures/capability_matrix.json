@@ -189,6 +189,14 @@
       "tests/test_plan_verification_boundary.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "non_requirement_rows_gate_verified",
+     "observed": "run 34919574013 dynaconf-1241: the ledger minted rows from bare-word section markers ('Expected', 'Result') and harness preamble ('You are working in the ... repository', 'Investigate the issue described above ...') - 3 of 5 plan rows were document fragments; default_check bound the whole suite (uncollectable) or a mismatched multi-file argv to them, and verified requires every authored row proven so a fragment row could block a solved task permanently",
+     "covering_tests": [
+      "tests/test_persistent_plan_ledger.py"
+     ],
+     "status": "fixed"
     }
    ]
   },

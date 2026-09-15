@@ -260,3 +260,82 @@ def test_process_directive_needs_two_markers():
     assert not _is_process_directive(
         "Module::evaluate_with_evaluation must reject with the same reason"
     )
+
+
+_DYNACONF_PROMPT = """\
+Please solve this issue: [bug] using `@merge` with comma separated values, does not infer type
+
+```py
+settings = Dynaconf(
+    data=[1,2,3]
+)
+```
+
+```bash
+APP_DATA="@merge 4,5,6" dynaconf list -k DATA
+```
+
+Result
+
+```
+DATA<list>: [1, 2, 3, "4", "5", "6"]
+```
+
+Expected
+
+```
+DATA<list>: [1, 2, 3, 4, 5, 6]
+```
+
+You are working in the `dynaconf/dynaconf` repository, checked out at `/testbed`. Investigate the issue described above and modify the code under `/testbed` to resolve it.
+"""
+
+
+def test_section_markers_and_harness_preamble_do_not_mint_rows():
+    """Run 34919574013 (dynaconf-1241): bare-word section markers "Result" and
+    "Expected" and the SWE-bench harness preamble all minted plan rows, and
+    default_check bound the whole suite to them - unprovable rows that kept
+    verified=false on a solved task. Markers set the section; preamble is
+    workflow noise; only the real requirement survives."""
+    from gt_engine.persistent_plan.ledger import build_requirement_ledger
+
+    ledger = build_requirement_ledger(_DYNACONF_PROMPT)
+    texts = [row.text for row in ledger.rows]
+    assert len(ledger.rows) == 1
+    assert "@merge" in texts[0]
+    assert all(t not in {"Result", "Expected"} for t in texts)
+    assert not any("working in" in t or "Investigate the issue" in t
+                   for t in texts)
+    # Markers still classify the lines that follow them as their section
+    # (here, fenced blocks - so the only surviving row is in no section or
+    # the opening one); the skipped journal records both markers.
+    reasons = {reason for _line, reason in ledger.skipped}
+    assert "section_marker" in reasons
+
+
+def test_section_marker_updates_section_inside_non_normative():
+    """A marker inside a non-normative section must still flip the section,
+    or every following line is skipped under the wrong gate."""
+    from gt_engine.persistent_plan.ledger import build_requirement_ledger
+
+    ledger = build_requirement_ledger(
+        "Background\nshared history only\n\n"
+        "Expected\nThe parser must infer list types\n"
+    )
+    texts = [row.text for row in ledger.rows]
+    assert texts == ["The parser must infer list types"]
+    assert ledger.rows[0].section == "expected"
+
+
+def test_harness_preamble_lines_are_workflow_noise():
+    from gt_engine.task_contract import _is_workflow_noise
+
+    assert _is_workflow_noise(
+        "You are working in the `dynaconf/dynaconf` repository, "
+        "checked out at `/testbed`.")
+    assert _is_workflow_noise(
+        "Investigate the issue described above and modify the code under "
+        "`/testbed` to resolve it.")
+    # A real requirement that merely mentions a repository must survive.
+    assert not _is_workflow_noise(
+        "The repository loader must keep `settings_file` absolute.")

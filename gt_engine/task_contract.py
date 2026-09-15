@@ -152,6 +152,20 @@ _WORKFLOW_STEP_RE = re.compile(
     r"^\s*\d+[.)]\s*(?:read|learn|recall|identify|fix|create|run|verify|"
     r"check|learn or recall|find|locate|search|use|install|setup)\b"
 )
+# Harness boilerplate: the benchmark wrapper's own instructions about where the
+# checkout lives and what to do in it. These minted plan rows on dynaconf-1241
+# (run 34919574013) - "You are working in the `dynaconf/dynaconf` repository,
+# checked out at `/testbed`." and "Investigate the issue described above and
+# modify the code under `/testbed` to resolve it." both became requirements
+# bound to checks, and a process instruction can never be proven by a test.
+_HARNESS_PREAMBLE_RE = re.compile(
+    r"(?i)(?:^you are working (?:in|on|inside)\b.*\brepositor|"
+    r"^investigate the issue\b|"
+    r"^please investigate\b|"
+    r"\bchecked out at\b|"
+    r"^modify the code under\b|"
+    r"^resolve the issue\b)"
+)
 # Markers of an agent-process directive: instructions about the working and
 # submission workflow (where to work, when to commit, what to open) rather than
 # behaviour the code must have. One marker inside a longer technical sentence is
@@ -193,6 +207,8 @@ def _is_workflow_noise(text: str) -> bool:
     if _WORKFLOW_NOISE_RE.search(low):
         return True
     if _CATALOG_NOISE_RE.search(low):
+        return True
+    if _HARNESS_PREAMBLE_RE.search(low):
         return True
     return bool(_WORKFLOW_STEP_RE.match(low))
 
