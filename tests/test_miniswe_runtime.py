@@ -2819,3 +2819,50 @@ def test_provider_view_budget_tracks_tokens_and_tail_is_bounded(
     # tail. Passing len(messages) makes the count cap unreachable so the
     # backfill in compact_provider_view stops at the budget, not a count.
     assert captured["max_tail_turns"] == len(messages)
+
+
+def test_failed_wire_attempt_journals_a_terminal_row_for_its_admission(
+    tmp_path, monkeypatch
+):
+    """An admitted request whose transport dies left provider_admission with
+    no delivery/response — an orphan the admission census could not reconcile
+    (run 34932393298, dynaconf seq 467: admitted, re-assembled, re-admitted).
+    provider_attempt_failed is the terminal row that closes the pair inside
+    the main journal, joined to its admission by admission_sequence."""
+    _configure_fixture_provider(monkeypatch)
+    adapter = MiniSweAdapter(
+        task_id="orphan-attempt", state_dir=tmp_path / "state",
+        repo_root=str(tmp_path), predicates=[],
+    )
+    agent = FakeAgent()
+
+    class FailingOnceModel(TransportFakeModel):
+        def _query(self, messages, **kwargs):
+            if not self.calls:
+                self.calls.append(messages)
+                raise RuntimeError("wire blew up")
+            return super()._query(messages, **kwargs)
+
+    agent.model = FailingOnceModel()
+    agent.messages = [{"role": "system", "content": "s"},
+                      {"role": "user", "content": "task"}]
+    install_runtime_hooks(agent, _session(adapter))
+    with pytest.raises(RuntimeError, match="wire blew up"):
+        agent.model.query(agent.messages)
+    # The retry — the next query — admits and completes normally.
+    agent.model.query(agent.messages)
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    admissions = [
+        row for row in rows
+        if row["event"] == "provider_admission" and row.get("status") == "admitted"
+    ]
+    failures = [row for row in rows if row["event"] == "provider_attempt_failed"]
+    deliveries = [row for row in rows if row["event"] == "provider_delivery"]
+    assert len(admissions) == 2
+    assert len(deliveries) == 1
+    assert len(failures) == 1
+    assert failures[0]["admission_sequence"] == admissions[0]["sequence"]
+    assert failures[0]["error_type"] == "RuntimeError"

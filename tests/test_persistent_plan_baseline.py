@@ -421,7 +421,9 @@ def test_spawn_fallback_prefers_repo_python_and_preserves_discovery(
         str(repo), budget_seconds=120,
         command=("tox",), basis="extension_fallback", confidence="low",
     )
-    assert calls[1] == (repo_python, "-m", "pytest")
+    # The fallback runs pytest verbose: a bare-pytest capture parses counts
+    # but no names, leaving test_file_digests empty and every recheck blind.
+    assert calls[1] == (repo_python, "-m", "pytest", "-v")
     assert calls[1][0] != sys.executable
     assert result.basis == "interpreter_fallback"
     assert result.detail.startswith("superseded:tox")
@@ -523,3 +525,79 @@ def test_pytest_nodeids_never_route_through_rust_resolution():
         ("tests/test_green.py", "src/lib.rs"),
     )
     assert paths == ("tests/test_green.py",)
+
+
+# name_emitting_argv makes non-verbose pytest print per-test nodeids; the
+# zero-verdict boundary refuses to call an all-errors capture a baseline.
+from gt_engine.persistent_plan.baseline import name_emitting_argv
+
+
+def test_name_emitting_argv_upgrades_bare_pytest():
+    """Run 34932393298: baseline ran bare `pytest` -> counts parsed, zero
+    names, empty test_file_digests, every recheck answered `unknown`."""
+    assert name_emitting_argv(("pytest",)) == ("pytest", "-v")
+    assert name_emitting_argv(("pytest", "tests/")) == ("pytest", "tests/", "-v")
+
+
+def test_name_emitting_argv_nets_existing_quiet_flag():
+    assert name_emitting_argv(("pytest", "-q")) == ("pytest", "-q", "-vv")
+    assert name_emitting_argv(("pytest", "-qq")) == ("pytest", "-qq", "-vvv")
+
+
+def test_name_emitting_argv_leaves_verbose_and_foreign_commands_alone():
+    assert name_emitting_argv(("pytest", "-v")) == ("pytest", "-v")
+    assert name_emitting_argv(("pytest", "--verbose")) == ("pytest", "--verbose")
+    assert name_emitting_argv(("npm", "test")) == ("npm", "test")
+    assert name_emitting_argv(("cargo", "test")) == ("cargo", "test")
+
+
+def test_name_emitting_argv_never_writes_past_a_double_dash():
+    argv = name_emitting_argv(("pytest", "--", "tests/test_x.py"))
+    assert argv == ("pytest", "-v", "--", "tests/test_x.py")
+
+
+def test_name_emitting_argv_covers_python_dash_m_pytest():
+    argv = name_emitting_argv(("python3", "-m", "pytest"))
+    assert argv == ("python3", "-m", "pytest", "-v")
+
+
+def test_an_erroring_suite_is_not_a_baseline(tmp_path, monkeypatch):
+    """dynaconf run 34932393298: `pytest` under importlib still collected zero
+    tests (missing deps) -> 4 errors, 0 verdicts. That capture claimed
+    `captured`, so every recheck reported `unknown` forever."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "test_x.py").write_text("def test_x(): assert True\n", encoding="utf-8")
+    _git_repo(root)
+
+    class _ErroringProc:
+        returncode = 2
+        stdout = "ERROR collecting test_x.py\n==== 4 errors in 0.5s ====\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline",
+        lambda command, repo_root, remaining, child_env: _ErroringProc(),
+    )
+    result = run_baseline(str(root), budget_seconds=30,
+                          command=(sys.executable, "-m", "pytest"))
+    assert result.status == "no_test_verdicts"
+    assert not result.captured
+    assert result.errored == 4
+
+
+def test_parse_collects_names_from_verbose_output():
+    """Verbose pytest output carries `nodeid PASSED/FAILED` rows; the name
+    lists are what make test_file_digests non-empty."""
+    from gt_engine.persistent_plan.baseline import _parse
+
+    output = (
+        "tests/test_a.py::test_one PASSED\n"
+        "tests/test_a.py::test_two PASSED\n"
+        "tests/test_b.py::test_bad FAILED\n"
+        "==== 2 passed, 1 failed in 0.3s ====\n"
+    )
+    counts, passing, failing = _parse(output, ("pytest", "-v"))
+    assert counts["passed"] == 2 and counts["failed"] == 1
+    assert "tests/test_a.py::test_one" in passing
+    assert "tests/test_b.py::test_bad" in failing

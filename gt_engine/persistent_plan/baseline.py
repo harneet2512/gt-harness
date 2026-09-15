@@ -162,6 +162,47 @@ def discover_command(repo_root: str) -> tuple[tuple[str, ...] | None, str, str]:
     return (tuple(command) if command else None), str(basis), str(confidence)
 
 
+def name_emitting_argv(command: tuple[str, ...]) -> tuple[str, ...]:
+    """Argv adjusted to print per-test identities, not just a summary count.
+
+    Bare ``pytest`` prints progress dots and a summary line: counts parse, but
+    no passing/failing NAME ever appears, so a capture records a suite result
+    while ``passing_names``/``failing_names`` stay empty, ``test_file_digests``
+    has nothing to digest, and every later recheck reports ``unknown`` — the
+    blind baseline. Run pytest verbose enough to print nodeids. pytest treats
+    ``-v``/``-q`` as counters, so the transform nets the existing flags rather
+    than appending blindly: ``pytest -q`` needs ``-vv`` to reach verbose.
+    Flags must not land after a ``--`` separator — everything past it is a
+    test path, not an option. Other runners emit per-test lines by default
+    and are left alone.
+    """
+    tokens = list(command)
+    is_pytest = any(
+        tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "pytest"
+        for tok in tokens
+    )
+    if not is_pytest:
+        return tuple(command)
+    net = 0
+    for tok in tokens:
+        if re.fullmatch(r"-v+", tok):
+            net += len(tok) - 1
+        elif tok == "--verbose":
+            net += 1
+        elif re.fullmatch(r"-q+", tok):
+            net -= len(tok) - 1
+        elif tok == "--quiet":
+            net -= 1
+    if net >= 1:
+        return tuple(command)
+    flag = "-" + "v" * (1 - net)
+    if "--" in tokens:
+        tokens.insert(tokens.index("--"), flag)
+    else:
+        tokens.append(flag)
+    return tuple(tokens)
+
+
 def _parse(output: str, command: tuple[str, ...]) -> tuple[dict[str, int], list[str], list[str]]:
     try:
         from groundtruth.runtime.test_runner import (
@@ -404,6 +445,7 @@ def run_baseline(
             status="no_test_command", basis=basis or "unknown",
             confidence=confidence or "unknown",
         )
+    command = name_emitting_argv(tuple(command))
 
     started = time.monotonic()
     try:
@@ -495,6 +537,21 @@ def run_baseline(
             output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
             detail=";".join(x for x in ("runner produced no parseable result",
                                         accommodated) if x),
+        )
+    if counts["passed"] + counts["failed"] == 0:
+        # Every observation was an error, not a verdict (collection
+        # interrupted, all setup-erroring). Nothing ever passed, so there is
+        # no passing set to conserve and no regression the recheck could ever
+        # name — recording "captured" here claims a baseline that does not
+        # exist and leaves every compare_to_baseline answering "unknown".
+        return BaselineResult(
+            status="no_test_verdicts", command=tuple(command), basis=basis,
+            confidence=confidence, duration_seconds=elapsed,
+            exit_code=proc.returncode, errored=int(counts["errored"]),
+            output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
+            detail=";".join(x for x in (
+                f"suite produced {counts['errored']} errors and no test verdicts",
+                accommodated) if x),
         )
     return BaselineResult(
         status="captured" if before.revision == after.revision else "source_changed_during_baseline",

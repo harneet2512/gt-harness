@@ -39,11 +39,11 @@
     },
     {
      "id": "ceiling_frontload_starve",
-     "observed": "smoke20 bandit-taint: localization_task_ceiling refused 113 deliveries; evidence front-loaded then starved",
+     "observed": "smoke20 bandit-taint: localization_task_ceiling refused 113 deliveries; evidence front-loaded then starved; run 34932393298 dynaconf: MAX_LOCALIZATION_DELIVERIES=3 consumed by seq 209, then 43 distinct semantic-localization units refused localization_task_ceiling and never re-admitted (refusals through iter 66, only 4 deliveries after). Cap is by-design anti-spam but cannot displace stale deliveries with better-ranked later evidence. Task still solved+verified - starvation impact unproven in this cohort.",
      "covering_tests": [
       "tests/test_delivery_payload.py"
      ],
-     "status": "known-issue"
+     "status": "known-issue - mechanism confirmed live 34932393298; design decision pending"
     },
     {
      "id": "byte_budget_exceeded",
@@ -73,11 +73,12 @@
     },
     {
      "id": "orphaned_provider_request",
-     "observed": "smoke20 fd run_terminal: orphaned_provider_requests + api_calls != provider_requests",
+     "observed": "smoke20 fd run_terminal: orphaned_provider_requests + api_calls != provider_requests; run 34932393298 dynaconf: provider_admission seq 467 superseded by context re-assembly (BadGatewayError, retried at 469) - provider_events.jsonl held the typed provider_failure terminal but events.jsonl admission had no terminal counterpart. provider_attempt_failed now journals on transport raise.",
      "covering_tests": [
-      "tests/test_miniswe_repro.py"
+      "tests/test_miniswe_repro.py",
+      "tests/test_miniswe_runtime.py"
      ],
-     "status": "partial"
+     "status": "fixing - provider_attempt_failed terminal row joins admission_sequence"
     },
     {
      "id": "transport_timeout",
@@ -122,11 +123,12 @@
     },
     {
      "id": "blind_baseline",
-     "observed": "smoke20 bandit-taint+claude-code: no_tests_observed; fd: baseline_failing 0/241 ambient - plan can't see f2p signal",
+     "observed": "smoke20 bandit-taint+claude-code: no_tests_observed; fd: baseline_failing 0/241 ambient - plan can't see f2p signal; run 34932393298 BOTH tasks: bare `pytest` baseline captured counts but zero names (parser only matches verbose per-test lines) -> test_file_digests empty -> rechecks status=unknown forever; dynaconf additionally errored-only (4 errors, 0 verdicts, exit 2) yet recorded captured. Regression detection dead cohort-wide. unknown/incomplete/new_failures_unattributed escaped the gate blind set (enumeration leaked) -> now sighted-whitelist intact|regressed.",
      "covering_tests": [
-      "tests/test_persistent_plan_baseline.py"
+      "tests/test_persistent_plan_baseline.py",
+      "tests/test_persistent_plan_gate.py"
      ],
-     "status": "fixing - interpreter_fallback now uses repo-env python + provenance; JS adapter no longer emits phantom npm test + reaches subpackage suites; deeper contract-blindness (ambient-vs-graded) remains open"
+     "status": "fixing - name-emitting argv + no_test_verdicts + gate whitelist landed"
     },
     {
      "id": "vacuous_proof",
@@ -138,9 +140,12 @@
     },
     {
      "id": "plan_static_frontloaded",
-     "observed": "delivered once at t~0, never re-delivered across 140-210 calls; gate decided 1-3 times total",
-     "covering_tests": [],
-     "status": "open - design question"
+     "observed": "delivered once at t~0, never re-delivered across 140-210 calls; gate decided 1-3 times total; REFUTED in 34932393298: dynaconf re-prepared verification_plan x5 (seq 429-1467), obligation_invalidation+reverify x5, plan_baseline_recheck at seq 1139+1527 (end-of-run), plan_request_rejected gate enforced on malformed agent update. context_contract still delivers once (by design - the requirement set is stable); the verification machinery is now dynamic.",
+     "covering_tests": [
+      "tests/test_obligation_reverify.py",
+      "tests/test_persistent_plan_gate.py"
+     ],
+     "status": "covered - run 34932393298 refuted the signature"
     },
     {
      "id": "budget_escape_by_design",

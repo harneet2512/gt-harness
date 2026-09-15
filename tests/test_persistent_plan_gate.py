@@ -92,10 +92,13 @@ def test_gate_legacy_call_does_not_invent_mapping_evidence():
 def test_every_row_verified_proves_completion():
     """completion_proven was hardcoded False, so a fully-verified plan and an
     unverified one journaled identically. Proof also requires a baseline that
-    could see the grading signal - captured, not blind."""
+    could see the grading signal - the recheck must have produced a
+    conservation verdict, which is "intact" (or "regressed", which then
+    blocks through regressions). The capture status "captured" never reaches
+    the gate: it is what run_baseline records, not what the recheck reports."""
     decision = decide(
         plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
-        baseline_status="captured",
+        baseline_status="intact",
         row_states={"req-a": "CHECK_PASSED", "req-b": "PROVEN"}, **AMPLE)
     assert decision.accepted
     row = decision.as_row()
@@ -110,7 +113,12 @@ def test_verified_rows_on_a_blind_baseline_are_not_proven():
     verifier failed the submission - the baseline was no_tests_observed, so
     the bound checks were ambient checks, never the graded suite. Verified
     rows on a blind baseline are verification against a proxy, not proof."""
-    for blind in ("no_tests_observed", "probe_failed", "budget_not_checked", ""):
+    # "unknown"/"incomplete"/"new_failures_unattributed" are recheck reports
+    # that observed the suite but could not establish conservation; they are
+    # as blind as a baseline that never ran. Only "intact" is sighted.
+    for blind in ("no_tests_observed", "probe_failed", "budget_not_checked", "",
+                  "unknown", "incomplete", "new_failures_unattributed",
+                  "no_test_verdicts", "no_baseline", "timeout"):
         decision = decide(
             plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
             baseline_status=blind,

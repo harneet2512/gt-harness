@@ -1216,6 +1216,7 @@ def install_runtime_hooks(
             reason="within_provider_window",
             **admission.to_dict(),
         )
+        admission_sequence = int(adapter.store.receipt()["event_count"])
         # The request is fully validated before the wire, but the delivery
         # ledger and the session's shipped latches commit only after the
         # transport returns. A raised attempt therefore leaves every pending
@@ -1278,6 +1279,20 @@ def install_runtime_hooks(
             # failure is paced here - journaled, diagnosed as consequential,
             # delayed by the provider's own Retry-After or a jittered draw -
             # then re-raised unchanged so the loop keeps its attempt budget.
+            # The admission row above has no delivery/response counterpart when
+            # the wire dies: journal the attempt's terminal row so admissions
+            # reconcile inside THIS journal too, not only in provider_events.
+            # A bookkeeping fault on this row must not mask the provider error.
+            try:
+                adapter.store.append(
+                    "provider_attempt_failed",
+                    iteration=adapter.iteration,
+                    admission_sequence=admission_sequence,
+                    error_type=type(exc).__name__,
+                    error=redact_secret_text(str(exc))[:500],
+                )
+            except Exception:  # noqa: BLE001
+                pass
             _pace_provider_retry(adapter, exc, pacing)
             raise
         if delivery is None:

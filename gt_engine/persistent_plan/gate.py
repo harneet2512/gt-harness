@@ -143,10 +143,12 @@ def decide(
     # were ambient checks, never the graded fail-to-pass suite. Rows verified
     # against a baseline that cannot see the grading signal are verification
     # against a proxy, not proof of the contract -- the receipt must say so.
-    _baseline_blind = baseline_status in {
-        "no_tests_observed", "probe_failed", "spawn_failed",
-        "unavailable", "budget_not_checked", "",
-    }
+    # Enumerating blind statuses leaks: "unknown" (identity conservation never
+    # established), "incomplete", "new_failures_unattributed", "timeout",
+    # "not_attempted" all shipped sighted while saying nothing. A baseline is
+    # sighted only when the recheck produced a conservation VERDICT — intact
+    # or regressed; regressed still blocks through `regressions` above.
+    _baseline_blind = baseline_status not in {"intact", "regressed"}
     completion_proven = (
         bool(row_ids)
         and all(states.get(key) in verified_states for key in row_ids)
