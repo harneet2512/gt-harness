@@ -1899,6 +1899,12 @@ def test_piped_test_command_emits_test_result_and_feature_evaluations(
     assert recovery["boundary"] == "test_result"
     assert recovery["eligible"] is True
     assert recovery["outcome"] in ("steer_due", "tracked_no_steer")
+    # The journal chain must still verify with the new row in it - the
+    # payload version lives in layout_schema, envelope schema untouched.
+    from gt_engine.event_journal import verify_event_journal
+
+    verification = verify_event_journal(adapter.store.path)
+    assert verification.valid, verification.issues
 
 
 def test_disabled_typed_capability_never_reaches_shell(tmp_path):
