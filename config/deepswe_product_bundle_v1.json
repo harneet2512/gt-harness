@@ -28,7 +28,7 @@
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "56a65a2057992730593d0adf550c2e3ce448eb445482f6075e91a3f6827c01dd",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "b3572fb08819616f44a20d62e2a89ac6b1b57951b053b5da1ff53b01f3da8fd0",
+    "producer_sha256": "b47f5bf9c7f082b2990a797c5b738519b00486f54b5235f6b15a5b51aa5041c1",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -48,12 +48,12 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "1e893f63dad16b5b473ce2335791cc9b70ad4d44",
-      "source_tree": "b50f748f1f295fe90851e6ae21b457f208162ebb",
-      "binary_sha256": "b3572fb08819616f44a20d62e2a89ac6b1b57951b053b5da1ff53b01f3da8fd0",
+      "source_commit": "4e346402f534e9d126d10d5719087b9899ac2efc",
+      "source_tree": "885fa423d18f19f454db9d50efa6ebb3b544339e",
+      "binary_sha256": "b47f5bf9c7f082b2990a797c5b738519b00486f54b5235f6b15a5b51aa5041c1",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "9aad2927b9361e913ad4c444300670cdde3f8e0c9a8253627360cbe96e6a6a9e",
-      "builder_image_digest": "3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+      "build_info_sha256": "40409dab0a68a3118911fb1d1f3de7ebdc212161af4df1aba2d41de38ebc4b82",
+      "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
       "build_tags": "netgo,osusergo,sqlite_fts5",
       "static_linking": true,
       "source_fingerprint": "14ab4de9700f36caffa968aaca1873c1b5573e419d9fdc69de2dc37cc6c956ce"
@@ -960,7 +960,7 @@
         "tests/wrapper/test_router_v2_telemetry.py",
         "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
       ],
-      "review_inbox_commit": "4a6a94f07c69fb172b8416e3c4b475741712d259",
+      "review_inbox_commit": "eec832ce622449cdc313d35b1ee33af15b28fa79",
       "review_packets": [
         {
           "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -1133,7 +1133,7 @@
           "kind": "check_outcome",
           "status": "PASS",
           "basis": "exact_ci_pytest_matrix_pretask_embedder_identity_fix",
-          "packet_digest_sha256": "330d82b106df5001bc2247e96ce5d1db03b6012a5e9398ad95a7c16aaf3a5d18"
+          "packet_digest_sha256": "9caa52cf7d5d83bf60da32538434b55bca98eb90eefd1a6958cb62749cd1c62b"
         }
       ],
       "product_review_packets": [
@@ -1154,7 +1154,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "d7bfac8bcd8f0666f995d8069ef80aec1afd3a90822c2d1acf91486917f41837"
+      "attestation_digest_sha256": "57ca9742c73dbb4c595b81185c806db851427db8975776f39cc95328dc15edc5"
     }
   },
   "capabilities": [
