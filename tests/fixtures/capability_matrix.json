@@ -78,7 +78,7 @@
       "tests/test_miniswe_repro.py",
       "tests/test_miniswe_runtime.py"
      ],
-     "status": "fixing - provider_attempt_failed terminal row joins admission_sequence"
+     "status": "fixed"
     },
     {
      "id": "transport_timeout",
@@ -128,7 +128,7 @@
       "tests/test_persistent_plan_baseline.py",
       "tests/test_persistent_plan_gate.py"
      ],
-     "status": "fixing - name-emitting argv + no_test_verdicts + gate whitelist landed"
+     "status": "fixed"
     },
     {
      "id": "vacuous_proof",
