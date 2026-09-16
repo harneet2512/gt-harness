@@ -942,6 +942,73 @@ commands produced no observation at all. Consolidated record:
 class proves the run-killers are gone, the cohort completes with honest
 receipts, and the token/solve comparison is computed — not asserted.
 
+## Gate-one fleet FAIL, remediation, and free-model validation (2026-09-16/17)
+
+The staged gate-one run `35056493769` solved+attested its task but the
+strict fleet gate failed the journal: `AMEND_FAILURES(2)` plus nine
+`semantic_localization_unavailable` events carrying exception signatures.
+Both classes are now fixed, certified, and pushed:
+
+- **FTS5 dead-index corruption** (`semantic_localization` crash): external-
+  content FTS5 shadow tables drifted (`nodes_fts_docsize` 190,953 vs
+  `nodes` 95,644) → `bm25()` returned `NULL` → `float(None)` crash.
+  Producer `d2e4a1c3` rebuilds FTS5 natively with drop/recreate fallback,
+  verifies parity + finite BM25, fails closed under `GT_REQUIRE_FTS5=1`;
+  consumer guards to typed `fts_bm25_score_invalid`; preflight rejects
+  corrupt graphs on the real artifact. Certified binary `9e2758c0`
+  (build `35117328791`), rebound in `515fe702`, producer CI `35120201968`
+  green, review packet on `gt-review-inbox-d2e4a1c3` (`256d7127`).
+- **Batch-amend memory**: one-file amend measured at ~full-build peak
+  (1,262 vs 1,333 MiB on a 93.6k-node graph). Pre-launch refusal
+  `GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor` journals a
+  typed refusal (opens the cgroup defer window, not an `amend_failed`).
+- **Internal request-id accounting** (`f2b82a1a`): the model's tenacity
+  loop re-entered `query_transport` per attempt and each retry committed
+  a `provider_delivery` row under the same task-scoped internal id —
+  run `35129435645` journaled seven rows under
+  `…-gt-internal-persistent-plan`, collapsing the attribution census
+  (duplicate request_id ×6, non-sequential iterations). One logical
+  internal call now owns one request identity; retries reuse the first
+  attempt's committed delivery while per-attempt accounting
+  (`provider_admission` + `provider_attempt_failed`) is preserved.
+  RED tests cover retry-then-succeed and all-attempts-fail; ~470
+  touched-surface tests green.
+
+**Functional verification on the free route** — `config/provider_route.v1.json`
+now points at `stealth/union-alpha` ($0 OpenRouter preview; functional
+verification only, **never benchmark evidence**; `109c379e`):
+
+- `35122878838` (`cyclotruc__gitingest-94`): official verifier **solved**;
+  zero fts5/amend/memory anomalies; attestation FAIL
+  `product_not_completed` — the model submitted without writing the
+  required acceptance test (`submitted_unverified`).
+- `35129435645` (`dynaconf__dynaconf-1241`, pre-fix SHA): **solved**,
+  timeout, 11 provider failures; canonical audit FAIL on the request-id
+  defect above — the free provider's flakiness surfaced it.
+- `35141054074` (`dynaconf__dynaconf-1241`, on `f2b82a1a`): **solved**;
+  canonical live gate **PASS** (`issues:[]`, `faults:[]`,
+  `attribution_issues:[]`, `complete_census`), 30 unique provider request
+  ids on strict 1..30 iterations, `provider_attempts=32` (2 retried
+  attempts journaled, no duplicated request rows), all 30 requests closed
+  by responses. Attestation FAIL is now only `product_completion_unverified`
+  + `product_unmet_predicates`: union-alpha submitted with
+  `active_red:[pred-c623be57912ad454]` — the advisory submit gate
+  (`enforced:false`) accepted, GT correctly reported the unmet predicate.
+  Model-side early-submit, not a GT defect.
+
+**Read on the free model:** union-alpha completes the fix (official
+verifier accepts the patch) but does not finish the verification contract —
+it submits while plan rows/predicates remain unverified or red. Every
+GT-side failure class observed across the three free runs is repaired and
+live-validated; the remaining attestation blocker is model compliance,
+which is why the paid `deepseek-v4-flash-0731`/`relace` route (which
+closed the contract cleanly in `35052806242`) stays the benchmark path.
+
+**Blocked pending owner decision:** restore the paid route
+(`deepseek/deepseek-v4-flash-0731` via `relace`) and re-dispatch the
+staged cohort — requires fresh paid approval. Union-alpha smoke results
+cannot support solve-rate or token-efficiency claims.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
