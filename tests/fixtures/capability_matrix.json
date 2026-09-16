@@ -339,11 +339,20 @@
     },
     {
      "id": "serviceable_zero_edges",
-     "observed": "smoke20 bandit-taint pyright: server_launched+probe_answered on all 36 legs but zero resolved calls - every probing leg ran cold (project_ready never reached in 20s cap); decomposition: revision churn dominant + memory exhaustion + unproven resolution gap -> pyright 150s readiness budget in wheel (environment-bound, not a resolution gap); zero-mutation legs still land no_edge_mutations honestly",
+     "observed": "READINESS LEG ONLY. smoke20 bandit-taint pyright (run 34801009507): server_launched+probe_answered on all 36 legs but zero resolved calls - every probing leg ran cold, project_ready never reached inside the 20s default cap; decomposition: revision churn dominant + memory exhaustion + unproven resolution gap. Fixed FOR THAT LEG: the wheel gives pyright-langserver a 150s readiness budget (resolve.py:1194), revision-churn backoff damps the churn component, and a leg whose project never became ready now classifies environment-bound (project_not_ready:readiness_budget_exhausted, required=False) instead of failing the strict gate on edges no leg could have made; zero-mutation legs still land no_edge_mutations honestly. NOT COVERED HERE: readiness is no longer the cause of zero edges. Run 34996816912 measured 926 empty answers of 2,447 selected units with project_ready=true and probe_answered_ok=true on every leg, so the original 'fixed by a 150s readiness budget' claim over-stated the scope; that remainder is tracked as pyright_empty_answers_project_ready and is open.",
      "covering_tests": [
-      "tests/test_miniswe_integration.py"
+      "tests/test_miniswe_integration.py",
+      "tests/test_gt_session.py"
      ],
      "status": "fixed"
+    },
+    {
+     "id": "pyright_empty_answers_project_ready",
+     "observed": "swelive run 34996816912: pyright returned an EMPTY definition result for 926 of 2,447 selected units while project_ready=true and probe_answered_ok=true on every leg - neither the readiness barrier nor the transport explains it, so the 150s budget that closed the readiness leg of serviceable_zero_edges cannot close this. Corroborated offline on the retained task-1 artifacts of the same run (dynaconf__dynaconf-1241, 4 distinct receipts): 861 empty of 1,893 selected units, identical all-ready shape, and the two receipts whose candidate set covers the src/ layout (446 and 447 units) converted ZERO edges while returning 243 empties each. CAUSE UNPROVEN: the receipt aggregates failed_empty per leg and keeps no per-unit record, so a wrong document URI, a workspace root that excludes src/, an unresolvable import, and a genuine no-definition answer are indistinguishable in the artifact. The CLASSIFICATION is covered - a project_ready=true leg with zero edges stays required=True and is never laundered as environment-bound - but the defect itself is not fixed. CLOSING EVIDENCE: a per-unit request/response capture for pyright-langserver on a src/ layout repository - the exact textDocument/definition params sent and the raw result for each empty unit, plus the resolved workspace root and the server's reported project files - which separates a localization/URI defect from a real no-definition answer.",
+     "covering_tests": [
+      "tests/test_gt_session.py"
+     ],
+     "status": "open - no per-unit LSP request/response capture exists for pyright on a src/ layout, so the 926/2447 empty answers have no proven cause; readiness and transport are already excluded by the receipt"
     },
     {
      "id": "unserviceable_leg_classification",
@@ -482,7 +491,7 @@
    "failure_modes": [
     {
      "id": "missing_patch_bind_crash",
-     "observed": "smoke20 boa+fd: docker cp model.patch RuntimeError killed job instead of typed ERROR receipt",
+     "observed": "smoke20 boa+fd: docker cp model.patch RuntimeError killed job instead of typed ERROR receipt; run 35016130850 then showed the quiet half - the collector's artifacts/manifest.json carried {source:/logs/artifacts/model.patch, status:failed} beside a null verifier_result and _failure_class never read the manifest, so the failed copy reported as missing_verifier/official_verifier_missing",
      "covering_tests": [
       "tests/test_standardize_benchmark_result.py"
      ],

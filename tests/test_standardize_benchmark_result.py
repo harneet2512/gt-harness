@@ -697,3 +697,177 @@ def test_unknown_or_absent_terminal_keeps_legacy_classification(tmp_path: Path) 
 
     assert receipt["failure_class"] == "setup_failure"
     assert receipt["error_code"] == "runner_setup_or_execution_failed"
+
+
+def _write_artifact_manifest(root: Path, rows: list[dict[str, object]]) -> Path:
+    """The upstream pier/harbor collector's per-trial artifact manifest.
+
+    Harbor copies each declared artifact out of the container after the agent
+    phase and records the outcome of every copy here; run 35016130850's
+    ``artifacts/manifest.json`` is exactly this shape with the model.patch row
+    carrying ``"status": "failed"``.
+    """
+    artifacts = root / "job" / "task-a__trial" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    manifest = artifacts / "manifest.json"
+    manifest.write_text(json.dumps({"artifacts": rows}), encoding="utf-8")
+    return manifest
+
+
+def test_failed_model_patch_collection_is_typed(tmp_path: Path) -> None:
+    """Run 35016130850: the patch copy failed, so nothing could be graded.
+
+    The trial's ``verifier_result`` is null and no exception was recorded, so
+    the classifier fell all the way through to ``missing_verifier`` /
+    ``official_verifier_missing`` -- a sentence about the verifier being absent
+    for a run whose verifier was never given anything to grade. The manifest
+    beside the result names the real failure, and the receipt must say so.
+    """
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": None,
+            "exception_info": None,
+        },
+    )
+    _write_artifact_manifest(
+        tmp_path,
+        [{"source": "/logs/artifacts/model.patch", "status": "failed"}],
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["error_code"] == "model_patch_copy_failed"
+    assert receipt["failure_class"] == "artifact_collection_failure"
+    assert receipt["artifact_collection"] == {
+        "artifact": "model.patch",
+        "source": "/logs/artifacts/model.patch",
+        "status": "failed",
+        "manifest_path": "job/task-a__trial/artifacts/manifest.json",
+    }
+    # Nothing graded, and no verifier outcome to preserve.
+    assert receipt["reward"] is None
+    assert receipt["verifier_outcome"] is None
+
+
+def test_failed_patch_collection_preserves_a_present_verifier_outcome(
+    tmp_path: Path,
+) -> None:
+    """A verifier that answered is recorded beside the collection failure.
+
+    The two are different facts: the copy failed, AND the verifier reported
+    something that is not a usable reward. Overwriting one with the other is
+    how the collection failure disappeared in the first place.
+    """
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": {"status": "no_patch", "rewards": {}},
+            "exception_info": None,
+        },
+    )
+    _write_artifact_manifest(
+        tmp_path,
+        [
+            {"source": "/logs/trajectory.json", "status": "ok"},
+            {"source": "/logs/artifacts/model.patch", "status": "failed"},
+        ],
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["error_code"] == "model_patch_copy_failed"
+    assert receipt["failure_class"] == "artifact_collection_failure"
+    assert receipt["verifier_outcome"] == {
+        "present": True,
+        "status": "no_patch",
+        "reward": None,
+    }
+
+
+def test_successful_patch_collection_keeps_missing_verifier(tmp_path: Path) -> None:
+    """A manifest whose model.patch row succeeded changes nothing."""
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": None,
+            "exception_info": None,
+        },
+    )
+    _write_artifact_manifest(
+        tmp_path,
+        [{"source": "/logs/artifacts/model.patch", "status": "ok"}],
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "missing_verifier"
+    assert receipt["error_code"] == "official_verifier_missing"
+    assert receipt["artifact_collection"] is None
+
+
+def test_absent_artifact_manifest_keeps_todays_classification(
+    tmp_path: Path,
+) -> None:
+    """No manifest is no evidence: the legacy collapse stands."""
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": None,
+            "exception_info": None,
+        },
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "missing_verifier"
+    assert receipt["error_code"] == "official_verifier_missing"
+    assert receipt["artifact_collection"] is None
+
+
+def test_typed_exception_evidence_still_outranks_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """The manifest replaces the generic collapse, never the named cause.
+
+    A provider failure explains why there was no patch to copy; reporting the
+    copy instead would name the symptom and lose the cause.
+    """
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": None,
+            "exception_info": {
+                "exception_type": "APIConnectionError",
+                "exception_message": "connection reset",
+            },
+        },
+    )
+    _write_artifact_manifest(
+        tmp_path,
+        [{"source": "/logs/artifacts/model.patch", "status": "failed"}],
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "provider_failure"
+    assert receipt["error_code"] == "provider_request_failed"
+    # The collection failure is still recorded as evidence, just not as the
+    # headline classification.
+    assert receipt["artifact_collection"]["status"] == "failed"

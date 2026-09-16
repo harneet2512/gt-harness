@@ -76,11 +76,21 @@ def conservative_outcomes(
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
+    payload = _read_json_any(path)
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_json_any(path: Path) -> Any:
+    """Decode without asserting a top-level shape.
+
+    `_read_json` exists to reject anything that is not an object, which is the
+    right contract for a receipt. The collector's artifact manifest has shipped
+    as a bare list, so that shape check belongs to its reader, not the decode.
+    """
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return payload if isinstance(payload, dict) else None
 
 
 def _reward(payload: dict[str, Any]) -> int | None:
@@ -182,12 +192,96 @@ _PRODUCT_TERMINAL_FAILURES: dict[str, tuple[str, str]] = {
 }
 
 
+# The upstream pier/harbor collector copies each declared artifact out of the
+# container after the agent phase and records every copy in the trial's
+# `artifacts/manifest.json`. A row whose source is the benchmark's model.patch
+# and whose status is "failed" means the grader was handed nothing: run
+# 35016130850 carried exactly that beside `verifier_result: null`, and because
+# nothing here read the manifest the receipt said `missing_verifier` /
+# `official_verifier_missing` -- a sentence about an absent verifier for a run
+# whose verifier was never given anything to verify. The manifest is the only
+# artifact that names the real failure, so it is read here.
+_MODEL_PATCH_NAME = "model.patch"
+_MANIFEST_ROW_KEYS = ("artifacts", "files", "entries", "rows")
+_MANIFEST_SOURCE_KEYS = ("source", "path", "src", "destination")
+
+
+def _manifest_rows(payload: Any) -> list[dict[str, Any]]:
+    """Both shapes the collector has written: a bare list, or a list under a key."""
+    if isinstance(payload, list):
+        candidates: Any = payload
+    elif isinstance(payload, dict):
+        candidates = next(
+            (payload[key] for key in _MANIFEST_ROW_KEYS
+             if isinstance(payload.get(key), list)),
+            [],
+        )
+    else:
+        candidates = []
+    return [row for row in candidates if isinstance(row, dict)]
+
+
+def _artifact_collection_failure(root: Path) -> dict[str, str] | None:
+    """The failed model.patch copy the collector recorded, if it recorded one.
+
+    Correct-or-quiet: an absent, unreadable or differently shaped manifest
+    yields None, which leaves every classification exactly as it was. Only a
+    row that explicitly names the model patch AND explicitly says "failed"
+    changes anything.
+    """
+    for manifest in sorted(root.rglob("manifest.json")):
+        if manifest.parent.name != "artifacts":
+            continue
+        payload = _read_json_any(manifest)
+        if payload is None:
+            continue
+        for row in _manifest_rows(payload):
+            source = next(
+                (str(row[key]) for key in _MANIFEST_SOURCE_KEYS
+                 if isinstance(row.get(key), str) and row[key]),
+                "",
+            )
+            if source.replace("\\", "/").rsplit("/", 1)[-1] != _MODEL_PATCH_NAME:
+                continue
+            if str(row.get("status") or "").strip().lower() != "failed":
+                continue
+            return {
+                "artifact": _MODEL_PATCH_NAME,
+                "source": source,
+                "status": "failed",
+                "manifest_path": str(
+                    manifest.relative_to(root)
+                ).replace("\\", "/"),
+            }
+    return None
+
+
+def _verifier_outcome(trial: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What the official verifier itself reported, kept apart from collection.
+
+    A failed artifact copy and a verifier that answered are two different
+    facts. Collapsing either into the other is how run 35016130850's copy
+    failure vanished behind a claim about the verifier.
+    """
+    result = (trial or {}).get("verifier_result")
+    if not isinstance(result, dict):
+        return None
+    rewards = result.get("rewards")
+    rewards = rewards if isinstance(rewards, dict) else {}
+    return {
+        "present": True,
+        "status": str(result.get("status") or ""),
+        "reward": rewards.get("reward"),
+    }
+
+
 def _failure_class(
     trial: dict[str, Any] | None,
     *,
     runner_result_present: bool,
     resource_evidence: dict[str, Any] | None = None,
     product_terminal: str = "",
+    artifact_collection: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     if not runner_result_present:
         return "setup_failure", "runner_result_missing"
@@ -207,6 +301,12 @@ def _failure_class(
         return "process_signal_failure", "process_exit_137_unattributed"
     if product_terminal in _PRODUCT_TERMINAL_FAILURES:
         return _PRODUCT_TERMINAL_FAILURES[product_terminal]
+    # Ranked below named causes and above the generic collapses. A provider
+    # failure or a typed product terminal explains WHY there was no patch to
+    # copy, so it keeps the headline; `runner_setup_or_execution_failed` and
+    # `official_verifier_missing` name nothing, so the manifest wins over both.
+    if artifact_collection is not None:
+        return "artifact_collection_failure", "model_patch_copy_failed"
     if exception_type:
         return "setup_failure", "runner_setup_or_execution_failed"
     return "missing_verifier", "official_verifier_missing"
@@ -317,6 +417,7 @@ def standardize_result(
         if aggregate_reward is not None and aggregate_reward == trial_reward
         else None
     )
+    artifact_collection = _artifact_collection_failure(root)
     failure_class, error_code = (
         ("graded", "")
         if reward is not None
@@ -325,6 +426,7 @@ def standardize_result(
             runner_result_present=result_path is not None,
             resource_evidence=resource_evidence,
             product_terminal=str((product or {}).get("terminal") or ""),
+            artifact_collection=artifact_collection,
         )
     )
     receipt: dict[str, object] = {
@@ -337,6 +439,12 @@ def standardize_result(
         "solved": reward == 1 if reward is not None else None,
         "failure_class": failure_class,
         "error_code": error_code,
+        # Both recorded, always, and never merged: the copy that failed and
+        # whatever the verifier itself said. A graded run keeps them too - a
+        # reward beside a failed model.patch row is a contradiction worth
+        # seeing rather than one worth hiding.
+        "artifact_collection": artifact_collection,
+        "verifier_outcome": _verifier_outcome(trial),
         "product_receipt_present": product is not None,
         "runner_result_sha256": (
             hashlib.sha256(result_bytes).hexdigest() if result_bytes is not None else None
