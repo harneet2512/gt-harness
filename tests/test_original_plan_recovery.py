@@ -200,8 +200,8 @@ def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_pa
     """
     from gt_engine.persistent_plan import recovery
 
-    assert recovery.LAYOUT == "gt.plan_checkpoint.v4"
-    assert _checkpoint_shape_fingerprint() == "70abda976bc1db42"
+    assert recovery.LAYOUT == "gt.plan_checkpoint.v5"
+    assert _checkpoint_shape_fingerprint() == "2ba48cb8b0612a9b"
 
     from gt_engine.persistent_plan import PlanRow
     from gt_engine.persistent_plan.baseline import BaselineResult
@@ -211,3 +211,14 @@ def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_pa
     row_names = {f.name for f in dataclasses.fields(PlanRow)}
     assert {"check_basis", "check_missing_paths", "symbol_basis"} <= row_names
     assert {"test_file_digests", "config_sha256", "dependency_sha256"} <= baseline_names
+
+    # v5: a plan built after the agent's first edit has to be able to say so,
+    # and a v4 checkpoint cannot - it never observed an edit count, so the only
+    # value a migration could supply is "none", which is the pre-edit claim
+    # itself. Hence a version bump rather than a default.
+    from gt_engine.persistent_plan import PlanInputs
+
+    input_names = {f.name for f in dataclasses.fields(PlanInputs)}
+    assert {
+        "edits_before_build", "first_edit_revision", "pre_build_edited_paths",
+    } <= input_names

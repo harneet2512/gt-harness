@@ -9,6 +9,13 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 from . import PersistentPlan
 
+# v5: PlanInputs gained edits_before_build, first_edit_revision and
+#     pre_build_edited_paths -- the provenance a plan built after the
+#     agent's first edit needs in order to say so (dynaconf 34996816912:
+#     first edit +157.0 s, persistent_plan_built +299.5 s). A v4
+#     checkpoint never observed any of them, and defaulting them to "no
+#     edits" would assert exactly the pre-edit claim this build exists to
+#     stop making.
 # v4: BaselineResult gained test_file_digests, config_sha256 and dependency_sha256.
 # v3: PlanRow gained check_basis, check_missing_paths and symbol_basis.
 # v2: BaselineResult gained source_revision and after_source_revision.
@@ -25,7 +32,7 @@ from . import PersistentPlan
 # the CURRENT workspace, which is precisely the thing those fields exist to
 # distinguish from. A checkpoint that cannot say what it saw does not get to
 # borrow what we see now.
-LAYOUT = "gt.plan_checkpoint.v4"
+LAYOUT = "gt.plan_checkpoint.v5"
 
 
 def _decode(value, annotation):

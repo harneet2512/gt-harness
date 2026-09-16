@@ -659,3 +659,194 @@ def test_an_abstained_plan_delivers_no_cursor(tmp_path, graph):
     session = _cursor_session(tmp_path, graph, repo, adapter)
     batch = session.before_model([{"role": "user", "content": "t"}], 1)
     assert not any("[GT_PLAN_CURSOR]" in text for text in batch.context_additions)
+
+
+def test_final_state_carries_the_gates_completion_verdict(tmp_path, graph, monkeypatch):
+    """The gate's receipt has to reach the terminal, or it decides nothing.
+
+    `persistent_plan/gate.py` computes `completion_proven` against the
+    sighted-baseline whitelist and `GTSession.plan_submit_gate` journals it as
+    a `plan_gate_decision` row -- and it had no non-test consumer. The run then
+    named its terminal `submitted_verified` from `verified` alone, which reads
+    predicate status and the row ledger and never looks at the baseline. This
+    is the wire: the last decision comes back off the journal onto the final
+    state, and the runner's terminal is computed from both facts.
+    """
+    from scripts.miniswe_gt_run import _submission_terminal
+
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    _plan_for(inputs, adapter)
+    session = GTSession(
+        GTSessionConfig(task_id="verdict", repo_root=str(repo), mode="advisory"),
+        engine=adapter,
+    )
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (600.0, 20))
+    # A baseline that never produced a conservation verdict: the exact blind
+    # shape the whitelist exists to catch.
+    monkeypatch.setattr(session, "_plan_baseline_check", lambda: ((), "unknown"))
+    monkeypatch.setattr(adapter, "unmet_plan_rows", lambda: ())
+    adapter.start_task()
+    adapter.begin_verify()
+    adapter.begin_submit()
+
+    assert session.plan_submit_gate() is True
+    decision = next(
+        row for row in reversed(_journal(adapter))
+        if row["event"] == "plan_gate_decision"
+    )
+    assert decision["completion_proven"] is False
+    assert decision["baseline_status"] == "unknown"
+
+    state = adapter.final_state()
+
+    assert state["completion_proven"] is False
+    assert state["baseline_status"] == "unknown"
+    # Every predicate green is not proof of completion when the baseline was
+    # blind, so the terminal must not say verified.
+    assert _submission_terminal({**state, "verified": True}) == "submitted_unverified"
+
+
+def test_final_state_reports_no_gate_verdict_when_no_gate_ran(tmp_path, graph):
+    """Absence stays absent: a plan-off run must not be relabelled."""
+    adapter, _inputs, _contract, _merged, _repo = _built(tmp_path, graph)
+
+    state = adapter.final_state()
+
+    assert state["completion_proven"] is None
+    assert state["baseline_status"] == ""
+
+
+def test_plan_built_after_first_edit_is_typed_post_edit(tmp_path, graph):
+    """A plan built after the agent started editing may not claim otherwise.
+
+    `_finalize_startup` builds the plan whenever the async initial index lands,
+    with no barrier against the agent editing first - and it routinely does:
+    dynaconf 34996816912 recorded the first edit at +157.0 s and
+    `persistent_plan_built` at +299.5 s; gitingest 34907273607 at +34.2 s and
+    +65.8 s. `PlanInputs.anchors_are_current` then read unknown as current
+    (`observed_source_revision` equals `source_revision` at capture, because
+    the capture IS the post-edit tree), so `render_plan_block` shipped "Built
+    before implementation began ... Every anchor and check below was validated
+    against that capture" describing a tree the agent had already changed.
+
+    No barrier is added: delaying the first edit to wait for an index is a
+    worse trade than an honest label. The build stays where it is and says
+    what it is.
+    """
+    from gt_engine.persistent_plan.render import render_plan_block
+
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    contract = extract_task_contract(PROMPT)
+    inputs = build_plan_inputs(
+        PROMPT, contract=contract, graph_db=graph, repo_root=str(repo),
+        source_revision="rev-after-edit", graph_revision="g1",
+        capture_baseline=False,
+        # What `_finalize_startup` observed on the adapter before it built:
+        # two journaled edit transactions, the first of which produced
+        # rev-first-edit and touched src/container.py.
+        edits_before_build=2,
+        first_edit_revision="rev-first-edit",
+        pre_build_edited_paths=("src/container.py",),
+    )
+
+    assert inputs.built_after_first_edit is True
+    assert inputs.first_edit_revision == "rev-first-edit"
+    assert inputs.edits_before_build == 2
+    # Anchors captured from an already-edited tree are not current, whatever
+    # the revision comparison says.
+    assert inputs.anchors_are_current is False
+
+    counts = inputs.counts()
+    assert counts["built_after_first_edit"] is True
+    assert counts["edits_before_plan_build"] == 2
+    assert counts["first_edit_revision"] == "rev-first-edit"
+
+    merged = merged_plan_contract(contract, inputs.ledger, PROMPT)
+    compiled = compile_obligation_predicates(merged)
+    predicates = tuple(
+        Predicate(compiled[obligation.obligation_id].predicate_id, obligation.text)
+        for obligation in merged.obligations
+        if obligation.obligation_id in compiled
+    )
+    adapter = MiniSweAdapter(
+        task_id="post-edit", state_dir=tmp_path / "state", predicates=predicates,
+        contract=merged, repo_root=str(repo), graph_db=graph, issue_text=PROMPT,
+    )
+    adapter.plan_inputs = inputs
+    plan = _plan_for(inputs, adapter)
+
+    block = render_plan_block(plan)
+
+    assert "Built before implementation began" not in block
+    assert "Context captured before implementation began" not in block
+    assert "BUILT AFTER 2 EDIT" in block.upper()
+    assert "rev-first-edit" in block
+    # Name the anchors the pre-build edits could have moved, not just the fact
+    # that some exist: a warning that cannot be acted on is a warning nobody
+    # reads.
+    assert "src/container.py" in block
+
+    adapter.store.append("persistent_plan_built", **plan.counts())
+    row = next(
+        item for item in reversed(_journal(adapter))
+        if item["event"] == "persistent_plan_built"
+    )
+    assert row["built_after_first_edit"] is True
+    assert row["edits_before_plan_build"] == 2
+    assert row["first_edit_revision"] == "rev-first-edit"
+
+
+def test_plan_built_before_any_edit_keeps_its_claim(tmp_path, graph):
+    """The honest pre-edit case must keep saying so."""
+    from gt_engine.persistent_plan.render import render_plan_block
+
+    adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+
+    assert inputs.built_after_first_edit is False
+    assert inputs.anchors_are_current is True
+    assert inputs.counts()["built_after_first_edit"] is False
+
+    block = render_plan_block(plan)
+
+    assert "Built before implementation began" in block
+    assert "BUILT AFTER" not in block.upper()
+
+
+def test_finalize_startup_observes_the_edits_that_beat_the_index(tmp_path, graph):
+    """The count and revision the post-edit label is built from are real.
+
+    `_finalize_startup` cannot know whether the agent edited first unless it
+    asks, and the adapter is the only thing that knows: it increments
+    `_edit_epoch`, fills `_path_edit_epochs`, and journals one
+    `edit_transaction` row per transaction. This is the read that turns those
+    into the plan's provenance, so the label cannot drift from the journal.
+    """
+    from gt_engine.runtime_observation import capture_workspace, diff_workspace
+    from scripts.miniswe_gt_run import _edits_observed_so_far
+
+    adapter, _inputs, _contract, _merged, repo = _built(tmp_path, graph)
+
+    # Nothing edited yet: the pre-edit label is still the honest one.
+    assert _edits_observed_so_far(adapter) == (0, "", ())
+
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    adapter.record_repository_snapshot(
+        capture_workspace(repo), boundary="task_start"
+    )
+    before = capture_workspace(repo)
+    (repo / "mod.py").write_text("value = 2\n", encoding="utf-8")
+    after = capture_workspace(repo)
+    transaction = diff_workspace(before, after, action_id=1, command="edit mod.py")
+    adapter.record_edit_transaction(transaction)
+
+    edits, first_revision, paths = _edits_observed_so_far(adapter)
+
+    assert edits == 1
+    assert first_revision == str(transaction.post_revision)
+    assert "mod.py" in paths
+    journaled = [
+        row for row in _journal(adapter) if row["event"] == "edit_transaction"
+    ]
+    assert first_revision == journaled[0]["post_revision"]

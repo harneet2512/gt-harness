@@ -566,6 +566,46 @@ def resolve_run_task_identity(canonical_task_id: str, task: str) -> str:
     return resolve_identity(canonical_task_id, task)
 
 
+def _edits_observed_so_far(adapter) -> tuple[int, str, tuple[str, ...]]:
+    """How much editing the adapter has already journaled, and what it touched.
+
+    `_finalize_startup` runs when the async initial index lands, which is not
+    necessarily before the agent's first edit - dynaconf 34996816912 recorded
+    the first edit at +157.0 s and `persistent_plan_built` at +299.5 s.
+    `MiniSweAdapter.record_edit_transaction` increments `_edit_epoch`, records
+    every changed path in `_path_edit_epochs`, and journals one
+    `edit_transaction` row carrying the revisions, so the count and the paths
+    come off the adapter and the FIRST edit's revision comes off the journal
+    (the adapter keeps only the latest).
+
+    Correct-or-quiet: anything unreadable yields a zero count, which is
+    exactly the pre-edit label the renderer used to apply unconditionally.
+    """
+    try:
+        edits = int(getattr(adapter, "_edit_epoch", 0) or 0)
+    except (TypeError, ValueError):
+        return 0, "", ()
+    if edits <= 0:
+        return 0, "", ()
+    paths = tuple(sorted(str(key) for key in getattr(adapter, "_path_edit_epochs", {})))
+    first_revision = ""
+    try:
+        with Path(adapter.store.path).open(encoding="utf-8") as journal:
+            for line in journal:
+                if '"edit_transaction"' not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict) and row.get("event") == "edit_transaction":
+                    first_revision = str(row.get("post_revision") or "")
+                    break
+    except OSError:
+        first_revision = ""
+    return edits, first_revision, paths
+
+
 def build_agent(
     *,
     task: str,
@@ -883,6 +923,13 @@ def build_agent(
                         getattr(receipt, "source_revision", "") or ""
                     )
                     return
+                # NO BARRIER. Holding the agent's first edit until the index
+                # lands trades a real cost (idle wall clock on every task) for
+                # a label, and the label is the cheaper fix: the build stays
+                # where it is and the inputs record what it actually saw.
+                edits, first_edit_revision, edited_paths = _edits_observed_so_far(
+                    adapter
+                )
                 inputs = build_plan_inputs(
                     task,
                     contract=contract,
@@ -890,6 +937,9 @@ def build_agent(
                     repo_root=str(cwd),
                     source_revision=getattr(receipt, "source_revision", "") or "",
                     graph_revision=getattr(receipt, "graph_revision", "") or "",
+                    edits_before_build=edits,
+                    first_edit_revision=first_edit_revision,
+                    pre_build_edited_paths=edited_paths,
                     # A lost checkpoint cannot turn the post-edit workspace
                     # into a new pre-edit regression baseline.
                     capture_baseline=False,
@@ -1103,6 +1153,42 @@ def _classify_terminal(exception: BaseException | None, result: dict) -> str:
     return "internal_error"
 
 
+def _submission_terminal(gt_state: dict | None) -> str:
+    """Name an accepted submission from BOTH facts the engine has.
+
+    T2.2: a submission where GT has no evidence for some obligation is
+    UNVERIFIED, not VERIFIED. UNKNOWN must never silently become success.
+
+    `verified` answers only "is every registered predicate and plan row
+    green": `miniswe_integration.final_state` computes it from predicate
+    status and the row ledger and reads neither `baseline_status` nor
+    `completion_proven`. So a run whose regression baseline never produced a
+    conservation verdict - `unknown`, `no_tests_observed`, `incomplete`,
+    `timeout`, `not_attempted` - could close `submitted_verified` on rows
+    proven against bound checks the graded signal never touched. That is the
+    smoke20 shape (run 34801009507, bandit-interprocedural-taint-checks): the
+    gate refused twice, every row was proven, and the official verifier failed
+    the submission.
+
+    `persistent_plan/gate.py` already decides this correctly and has had no
+    non-test consumer since it was written; this is that consumer. It does not
+    tighten the gate - a refused gate still concedes exactly when it did
+    before - it only stops the terminal from overstating what the concession
+    established.
+
+    Tri-valued on purpose. `completion_proven` is absent (None) when no
+    `plan_gate_decision` was ever journaled, which is every plan-off run.
+    Absence is not a contradiction, so it keeps the old terminal; only an
+    explicit False from the gate downgrades one.
+    """
+    state = gt_state or {}
+    if not state.get("verified"):
+        return "submitted_unverified"
+    if state.get("completion_proven") is False:
+        return "submitted_unverified"
+    return "submitted_verified"
+
+
 def main() -> int:
     harden_process_secret_boundary()
     parser = argparse.ArgumentParser()
@@ -1287,11 +1373,8 @@ def main() -> int:
         except Exception:  # noqa: BLE001 - completion state must never mask the run
             pass
     terminal = _classify_terminal(exception, result)
-    # T2.2: a submission where GT has no evidence for some obligation is
-    # UNVERIFIED, not VERIFIED. UNKNOWN must never silently become success.
     if terminal == "submitted" and gt_active:
-        verified = bool(gt_state and gt_state.get("verified"))
-        terminal = "submitted_verified" if verified else "submitted_unverified"
+        terminal = _submission_terminal(gt_state)
     report["terminal"] = terminal
     report["gt_mode"] = "off" if not gt_active else args.gt_mode
     report["exit_code"] = TERMINAL_EXIT_CODES.get(

@@ -41,6 +41,58 @@ def _truncate(lines: list[str], limit: int) -> tuple[list[str], int]:
     return kept, 0
 
 
+def _provenance_lines(plan: PersistentPlan) -> list[str]:
+    """When this plan was captured, in the words the capture actually earns.
+
+    The pre-edit sentence was unconditional. `_finalize_startup` builds the
+    plan when the async initial index lands, with no barrier against the agent
+    editing first, and it routinely does (dynaconf 34996816912: first edit
+    +157.0 s, `persistent_plan_built` +299.5 s; gitingest 34907273607: +34.2 s
+    versus +65.8 s). Those runs shipped "Built before implementation began ...
+    Every anchor and check below was validated against that capture" about a
+    tree the agent had already rewritten - a false statement in the one place
+    the model cannot cheaply check.
+    """
+    if not getattr(plan.inputs, "built_after_first_edit", False):
+        return [
+            "Built before implementation began, from the change request and a "
+            "verified code graph. Every anchor and check below was validated "
+            "against that capture; nothing here is an unverified claim about "
+            "the code. It is advisory: inspect anything, disagree with "
+            "anything, and follow your own evidence. It is not a boundary.",
+            "Context captured before implementation began. Anchors describe "
+            "that capture, not proof of the current workspace after edits or "
+            "restart.",
+        ]
+    edits = int(getattr(plan.inputs, "edits_before_build", 0) or 0)
+    revision = str(getattr(plan.inputs, "first_edit_revision", "") or "")
+    since = f" (first edit at revision {revision})" if revision else ""
+    lines = [
+        f"BUILT AFTER {edits} EDIT TRANSACTION(S) HAD ALREADY LANDED{since}, "
+        "not before implementation began. It was captured from the change "
+        "request and a code graph built from the workspace AS IT WAS AFTER "
+        "those edits, so anchors below may describe your own partial work "
+        "rather than the code you started from. It is advisory: inspect "
+        "anything, disagree with anything, and follow your own evidence. It "
+        "is not a boundary.",
+    ]
+    stale = tuple(getattr(plan.inputs, "stale_anchor_paths", lambda: ())())
+    if stale:
+        lines.append(
+            "ANCHORS THAT MAY BE STALE - these files were edited before the "
+            "capture, so their line numbers and signatures below were "
+            "validated against already-changed code: "
+            + ", ".join(stale[:12])
+            + ("" if len(stale) <= 12 else f", and {len(stale) - 12} more")
+        )
+    else:
+        lines.append(
+            "Which anchors moved is not recorded for this capture; confirm "
+            "any line number or signature below before relying on it."
+        )
+    return lines
+
+
 def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
                       receipt: dict | None = None) -> str:
     """The immutable artifact the model reads for the rest of the task."""
@@ -48,6 +100,7 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         if receipt is not None:
             receipt.clear()
         return ""
+    built_after_edit = bool(getattr(plan.inputs, "built_after_first_edit", False))
     head = [
         f"[{PLAN_TAG}]",
         "Requirement index: " + ", ".join(row.row_id for row in plan.rows),
@@ -57,21 +110,18 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         "own intended change with `gt-plan revise <row-id> --file <json>` or "
         "bind an argv check with `gt-plan bind-check <row-id> --file <json>`. "
         "These requests cannot grant evidence.",
-        "Built before implementation began, from the change request and a "
-        "verified code graph. Every anchor and check below was validated "
-        "against that capture; nothing here is an unverified claim about the "
-        "code. It is advisory: inspect anything, disagree with anything, and "
-        "follow your own evidence. It is not a boundary.",
-        "Context captured before implementation began. Anchors describe "
-        "that capture, not proof of the current workspace after edits or "
-        "restart.",
     ]
-    if not plan.inputs.anchors_are_current:
+    head.extend(_provenance_lines(plan))
+    if not plan.inputs.anchors_are_current and not built_after_edit:
         # A restart re-indexes the workspace, and the revision it finds is the
         # one the agent is editing. When it differs from the captured one, every
         # file path, line number and signature below describes a tree that is
         # no longer there. Saying so is the difference between a stale map and
         # a map presented as current.
+        #
+        # A post-edit build is also not current, but for a different reason and
+        # with a different remedy, so `_provenance_lines` has already said so
+        # in its own words rather than repeating this one.
         head.append(
             "STALE ANCHORS: the workspace has changed since this plan was "
             "captured. Line numbers, file paths and signatures below were "

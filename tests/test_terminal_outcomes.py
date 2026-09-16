@@ -263,3 +263,57 @@ def test_sigterm_during_agent_run_conserves_patch_and_terminal_artifacts(
     # keeps "the patch exists" from being satisfied by a stale file.
     assert "patch_export_error" not in report
     assert json.loads(manifest.read_text(encoding="utf-8"))["research_valid"] is False
+
+
+# --------------------------------------------------------------------------- #
+# The submitted_* split: what "verified" is allowed to mean
+# --------------------------------------------------------------------------- #
+
+
+def test_blind_baseline_terminal_is_not_submitted_verified():
+    """A terminal may not claim verification the gate could not establish.
+
+    `completion_state()["verified"]` is computed from predicate and plan-row
+    status alone (`miniswe_integration.final_state`): it reads neither
+    `baseline_status` nor `completion_proven`, so a run whose regression
+    baseline never produced a conservation verdict - `unknown`, `incomplete`,
+    `no_tests_observed`, `timeout`, `not_attempted` - could close
+    `submitted_verified` on rows proven against a proxy the grading signal
+    never touched. `persistent_plan/gate.py` already decides this correctly
+    and has had no non-test consumer since it was written.
+    """
+    from scripts.miniswe_gt_run import _submission_terminal
+
+    blind = {
+        "verified": True,
+        "completion_proven": False,
+        "baseline_status": "unknown",
+    }
+    assert _submission_terminal(blind) == "submitted_unverified"
+
+    proven = {
+        "verified": True,
+        "completion_proven": True,
+        "baseline_status": "intact",
+    }
+    assert _submission_terminal(proven) == "submitted_verified"
+
+    # The gate cannot rescue an unverified row ledger either.
+    assert _submission_terminal(
+        {"verified": False, "completion_proven": True, "baseline_status": "intact"}
+    ) == "submitted_unverified"
+
+
+def test_a_session_with_no_gate_decision_keeps_todays_terminal():
+    """No plan means no gate evidence, and absence is not a contradiction.
+
+    GT-on runs with the persistent plan off journal no `plan_gate_decision` at
+    all, so `completion_proven` is absent rather than False. Treating absent as
+    False would relabel every plan-off run, which is a different claim from the
+    one this defect is about.
+    """
+    from scripts.miniswe_gt_run import _submission_terminal
+
+    assert _submission_terminal({"verified": True}) == "submitted_verified"
+    assert _submission_terminal({"verified": False}) == "submitted_unverified"
+    assert _submission_terminal(None) == "submitted_unverified"

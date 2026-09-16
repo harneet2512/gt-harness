@@ -6984,6 +6984,38 @@ class MiniSweAdapter(GroundtruthController):
         """
         self._select_catalog_bootstrap_calls += 1
 
+    def _last_plan_gate_decision(self) -> dict[str, Any] | None:
+        """The gate's own last answer, read back from the journal it wrote.
+
+        `persistent_plan/gate.py` computes `completion_proven` with the
+        sighted-baseline whitelist and `GTSession.plan_submit_gate` journals
+        the whole decision as a `plan_gate_decision` row -- and until now
+        nothing outside the tests ever read it, so the terminal could call a
+        submission verified while the gate's own receipt said completion was
+        never proven. The journal is the only place the decision survives:
+        the session owns the gate and this engine only receives the append.
+
+        Correct-or-quiet. An unreadable, absent or truncated journal returns
+        None, which is "no gate evidence", not "the gate said no" -- a
+        plan-off run must keep its existing terminal rather than be relabelled
+        by a file that was never written.
+        """
+        latest: dict[str, Any] | None = None
+        try:
+            with self.store.path.open(encoding="utf-8") as journal:
+                for line in journal:
+                    if '"plan_gate_decision"' not in line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(row, dict) and row.get("event") == "plan_gate_decision":
+                        latest = row
+        except OSError:
+            return None
+        return latest
+
     def final_state(self) -> dict[str, Any]:
         state = {"phase": self.phase, "epoch": self.workspace_epoch,
                  "predicate_evidence": {key: receipt.evidence_summary() for key, receipt in self._receipts.items()},
@@ -7005,6 +7037,13 @@ class MiniSweAdapter(GroundtruthController):
                  "fallback_model": self.fallback_model,
                  "event_journal": self.store.receipt(),
                  "usage": dict(self._usage)}
+        # The gate's verdict travels with the final state so the terminal can
+        # be named honestly. `completion_proven` is tri-valued on purpose:
+        # True/False when a gate decision exists, None when none does.
+        decision = self._last_plan_gate_decision() or {}
+        proven = decision.get("completion_proven")
+        state["completion_proven"] = proven if isinstance(proven, bool) else None
+        state["baseline_status"] = str(decision.get("baseline_status") or "")
         if self.phase == "FINISHED":
             # T2.2: an accepted submission with UNKNOWN obligations is NOT
             # verified. Only report verified when every obligation has positive

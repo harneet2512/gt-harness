@@ -62,11 +62,27 @@ class PlanInputs:
     # the runner indexed then, which is how a plan learns that the tree its
     # anchors describe is no longer the tree the agent is editing.
     observed_source_revision: str = ""
+    # How much editing had already happened when this plan was captured, and
+    # what it touched. `_finalize_startup` builds the plan when the async
+    # initial index lands, which is not necessarily before the agent's first
+    # edit: dynaconf 34996816912 recorded the first edit at +157.0 s and
+    # `persistent_plan_built` at +299.5 s; gitingest 34907273607 at +34.2 s
+    # and +65.8 s. Deliberately not fixed with a barrier - making edits wait
+    # for an index is a worse trade than labelling the plan honestly - so the
+    # inputs carry what the capture actually saw.
+    edits_before_build: int = 0
+    first_edit_revision: str = ""
+    pre_build_edited_paths: tuple[str, ...] = ()
     language: str = ""
     # Test files the graph ties to each row's own definitions. This is the
     # check that comes from context rather than from a model's suggestion.
     covering: dict[str, tuple[str, ...]] = field(default_factory=dict)
     abstentions: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def built_after_first_edit(self) -> bool:
+        """Whether the agent had already edited when this plan was captured."""
+        return self.edits_before_build > 0
 
     @property
     def anchors_are_current(self) -> bool:
@@ -75,10 +91,35 @@ class PlanInputs:
         Unknown counts as current: with no observation to compare against there
         is nothing to warn about, and a warning that fires on every run is a
         warning nobody reads.
+
+        A post-edit capture is the case where unknown was NOT ignorance. The
+        revision comparison cannot see it, because at capture
+        `observed_source_revision` IS `source_revision` - the plan was built
+        from the already-edited tree, so the two agree and the plan reported
+        itself current while describing code the agent had just rewritten.
         """
+        if self.built_after_first_edit:
+            return False
         if not self.observed_source_revision or not self.source_revision:
             return True
         return self.observed_source_revision == self.source_revision
+
+    def stale_anchor_paths(self) -> tuple[str, ...]:
+        """Files the pre-build edits touched that anchors still point into.
+
+        Naming them is the difference between a warning that can be acted on
+        and one that can only be worried about.
+        """
+        edited = {path.replace("\\", "/") for path in self.pre_build_edited_paths}
+        if not edited:
+            return ()
+        anchored = {
+            anchor.file_path.replace("\\", "/")
+            for anchors in self.anchors.anchors.values()
+            for anchor in anchors
+            if anchor.file_path
+        }
+        return tuple(sorted(anchored & edited))
 
     def counts(self) -> dict[str, Any]:
         ledger_counts = self.ledger.counts()
@@ -97,6 +138,10 @@ class PlanInputs:
             ),
             "anchors_are_current": self.anchors_are_current,
             "observed_source_revision": self.observed_source_revision,
+            "built_after_first_edit": self.built_after_first_edit,
+            "edits_before_plan_build": self.edits_before_build,
+            "first_edit_revision": self.first_edit_revision,
+            "stale_anchor_paths": list(self.stale_anchor_paths()),
             "baseline_status": self.baseline.status,
             "baseline_seconds": round(self.baseline.duration_seconds, 3),
             "baseline_passing": self.baseline.passed,
@@ -110,6 +155,9 @@ class PlanInputs:
             "source_revision": self.source_revision,
             "graph_revision": self.graph_revision,
             "observed_source_revision": self.observed_source_revision,
+            "first_edit_revision": self.first_edit_revision,
+            "edits_before_plan_build": self.edits_before_build,
+            "pre_build_edited_paths": list(self.pre_build_edited_paths),
             "language": self.language,
             "rows": [row.as_dict() for row in self.ledger.rows],
             "unclassified_spans": [list(span) for span in self.ledger.unclassified_spans],
@@ -332,6 +380,9 @@ def build_plan_inputs(
     capture_baseline: bool = True,
     execution_env: dict[str, str] | None = None,
     baseline_result: BaselineResult | None = None,
+    edits_before_build: int = 0,
+    first_edit_revision: str = "",
+    pre_build_edited_paths: tuple[str, ...] = (),
 ) -> PlanInputs:
     """Phase 0: everything derivable with no provider call.
 
@@ -398,6 +449,9 @@ def build_plan_inputs(
         source_revision=source_revision,
         graph_revision=graph_revision,
         observed_source_revision=source_revision,
+        edits_before_build=max(0, int(edits_before_build)),
+        first_edit_revision=first_edit_revision,
+        pre_build_edited_paths=tuple(pre_build_edited_paths),
         language=sorted(languages)[0] if len(languages) == 1 else "",
         covering=covering,
         abstentions=tuple(abstentions),
