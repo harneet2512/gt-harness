@@ -1076,6 +1076,13 @@ def install_runtime_hooks(
     bootstrap_preparing = False
     plan_started = False
     plan_preparing = False
+    # Internal calls bind one stable request identity end to end. The model's
+    # tenacity loop re-enters query_transport per attempt, so the committed
+    # delivery for each internal request id is held here: a retry reuses the
+    # first attempt's row instead of appending a duplicate provider_delivery
+    # under the same id, which the attribution census reads as a second
+    # request with a colliding identity.
+    internal_request_deliveries: dict[str, Any] = {}
     # The previous action's post-image, reused as the next action's pre-image.
     #
     # capture_workspace ran twice per action -- 601 times on arktype at 1.08s
@@ -1316,18 +1323,21 @@ def install_runtime_hooks(
         )
         delivery = None
         if internal_request:
-            delivery = adapter.bind_provider_payload(
-                payload, request_id=internal_request_id, carry_pending=False,
-                pending_kinds=pending_kinds,
-            )
-            # The call is spent the moment it is bound to the wire: counting
-            # here keeps a transport failure reconciled against the namespaced
-            # failure's terminal row, where counting after the return would
-            # lose the attempt entirely.
-            if bootstrap_request:
-                adapter.note_select_catalog_bootstrap()
-            else:
-                adapter.note_persistent_plan_bootstrap()
+            delivery = internal_request_deliveries.get(internal_request_id)
+            if delivery is None:
+                delivery = adapter.bind_provider_payload(
+                    payload, request_id=internal_request_id, carry_pending=False,
+                    pending_kinds=pending_kinds,
+                )
+                internal_request_deliveries[internal_request_id] = delivery
+                # The call is spent the moment it is bound to the wire: counting
+                # here keeps a transport failure reconciled against the namespaced
+                # failure's terminal row, where counting after the return would
+                # lose the attempt entirely.
+                if bootstrap_request:
+                    adapter.note_select_catalog_bootstrap()
+                else:
+                    adapter.note_persistent_plan_bootstrap()
         try:
             response = transport(
                 messages,

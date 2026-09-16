@@ -336,6 +336,43 @@ class TransportFakeModel(FakeModel):
                 "extra": {"actions": [], "response": response}}
 
 
+class FlakyInternalCallModel(TransportFakeModel):
+    """Transport that fails a chosen GT-internal call kind N times, then
+    answers. ``query`` mirrors ``LitellmModel.query``'s tenacity loop: the
+    transport boundary (``self._query``, bound to ``query_transport`` at
+    install) is re-entered per attempt regardless of the num_retries kwarg.
+    """
+
+    def __init__(self, flag: str, fail_attempts: int):
+        super().__init__()
+        self.flag = flag
+        self.fail_attempts = fail_attempts
+        self.internal_attempts = 0
+
+    def _query(self, messages, **kwargs):
+        if kwargs.get(self.flag):
+            self.internal_attempts += 1
+            if self.internal_attempts <= self.fail_attempts:
+                raise TimeoutError("fixture transient provider failure")
+        return super()._query(messages, **kwargs)
+
+    def query(self, messages, **kwargs):
+        last_error: Exception | None = None
+        for _ in range(10):
+            try:
+                prepared = self._prepare_messages_for_api(messages)
+                response = self._query(prepared, **kwargs)
+                return {
+                    "role": "assistant", "content": "ok",
+                    "extra": {"actions": [], "response": response},
+                }
+            except TimeoutError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise AssertionError("fixture exhausted provider attempts")
+
+
 class FakeEnv:
     def __init__(self):
         self.executed: list[str] = []
@@ -415,6 +452,140 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     projection, issues = _native_plan_projection(rows, adapter.store.root)
     assert issues == []
     assert _native_feature_projection(rows, plan_projection=projection)["persistent_plan"]["status"] == "WITNESSED"
+
+
+def test_persistent_plan_retry_attempts_share_one_provider_request_id(
+    tmp_path, monkeypatch
+):
+    """A flaky provider retries the plan call inside the model's own loop.
+
+    ``LitellmModel.query`` re-enters ``model._query`` (the GT transport
+    boundary) per tenacity attempt. One logical internal call owns one
+    request identity: each retried attempt must reuse the delivery the first
+    attempt committed, not append another ``provider_delivery`` row under the
+    same ``request_id``. Live run 35129435645 committed seven rows under
+    ``...-gt-internal-persistent-plan``; the attribution census read them as
+    duplicates and failed the canonical audit.
+    """
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    monkeypatch.setenv("GT_PROVIDER_RETRY_JITTER_MAX_SECONDS", "0")
+    task = "The widget must preserve behavior."
+    adapter = MiniSweAdapter(
+        task_id="plan-retry", repo_root=str(tmp_path),
+        state_dir=tmp_path / "state", predicates=[], issue_text=task,
+    )
+    adapter.plan_inputs = build_plan_inputs(
+        task, repo_root=str(tmp_path), capture_baseline=False
+    )
+
+    agent = FakeAgent()
+    agent.model = FlakyInternalCallModel("_gt_persistent_plan", fail_attempts=3)
+    agent.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": task},
+    ]
+    install_runtime_hooks(agent, _session(adapter))
+    agent.model.query(agent.messages)
+    assert agent.model.internal_attempts == 4
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    deliveries = [row for row in rows if row.get("event") == "provider_delivery"]
+    plan_requests = [
+        row for row in deliveries
+        if str(row.get("request_id") or "").endswith("gt-internal-persistent-plan")
+    ]
+    assert len(plan_requests) == 1
+    # The auditor's request census: request ids unique, iterations strictly
+    # sequential, every request closed by exactly one response or failure.
+    request_ids = [row["request_id"] for row in deliveries]
+    assert len(request_ids) == len(set(request_ids))
+    ordered_iterations = [
+        int(row["iteration"])
+        for row in sorted(deliveries, key=lambda row: int(row["sequence"]))
+    ]
+    assert ordered_iterations == list(range(1, len(deliveries) + 1))
+    responses = {
+        row["request_id"] for row in rows if row.get("event") == "provider_response"
+    }
+    failures = {
+        row["request_id"] for row in rows if row.get("event") == "provider_failure"
+    }
+    assert set(request_ids) <= responses | failures
+    # Failed wire attempts remain journaled as attempt rows: dedup removes
+    # duplicate request rows, never the attempt accounting.
+    assert sum(
+        row.get("event") == "provider_attempt_failed" for row in rows
+    ) == 3
+
+
+def test_persistent_plan_exhausted_retries_close_as_request_failure_pair(
+    tmp_path, monkeypatch
+):
+    """When every attempt of the plan call fails, the one committed request
+    row must close against the namespaced failure row — not leak N duplicate
+    request rows nor orphan the request for the missing-responses census."""
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    monkeypatch.setenv("GT_PROVIDER_RETRY_JITTER_MAX_SECONDS", "0")
+    task = "The widget must preserve behavior."
+    adapter = MiniSweAdapter(
+        task_id="plan-retry-fail", repo_root=str(tmp_path),
+        state_dir=tmp_path / "state", predicates=[], issue_text=task,
+    )
+    adapter.plan_inputs = build_plan_inputs(
+        task, repo_root=str(tmp_path), capture_baseline=False
+    )
+
+    agent = FakeAgent()
+    agent.model = FlakyInternalCallModel("_gt_persistent_plan", fail_attempts=10)
+    agent.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": task},
+    ]
+    install_runtime_hooks(agent, _session(adapter))
+    # The plan bootstrap is advisory: the agent turn still completes.
+    agent.model.query(agent.messages)
+    assert agent.model.internal_attempts == 10
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    deliveries = [row for row in rows if row.get("event") == "provider_delivery"]
+    plan_requests = [
+        row for row in deliveries
+        if str(row.get("request_id") or "").endswith("gt-internal-persistent-plan")
+    ]
+    assert len(plan_requests) == 1
+    plan_failures = [
+        row for row in rows
+        if row.get("event") == "provider_failure"
+        and str(row.get("request_id") or "").endswith("gt-internal-persistent-plan")
+    ]
+    assert len(plan_failures) == 1
+    request_ids = [row["request_id"] for row in deliveries]
+    assert len(request_ids) == len(set(request_ids))
+    ordered_iterations = [
+        int(row["iteration"])
+        for row in sorted(deliveries, key=lambda row: int(row["sequence"]))
+    ]
+    assert ordered_iterations == list(range(1, len(deliveries) + 1))
+    responses = {
+        row["request_id"] for row in rows if row.get("event") == "provider_response"
+    }
+    failures = {
+        row["request_id"] for row in rows if row.get("event") == "provider_failure"
+    }
+    assert set(request_ids) <= responses | failures
+    assert any(
+        row.get("event") == "persistent_plan_unavailable" for row in rows
+    )
 
 
 @pytest.mark.parametrize("receipt_failure", [False, True])
