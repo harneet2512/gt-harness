@@ -1,0 +1,7987 @@
+{
+ "source": "tests/fixtures/command_corpus/model_test_commands.json",
+ "labels": [
+  {
+   "index": 0,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 2,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 3,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 4,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 5,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 6,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 7,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 8,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 9,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 10,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 11,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 12,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 13,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 14,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 15,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 16,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 17,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 18,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:cp"
+  },
+  {
+   "index": 19,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 20,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:npm"
+  },
+  {
+   "index": 21,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:npm"
+  },
+  {
+   "index": 22,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 23,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 24,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 25,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 26,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 27,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 28,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 29,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 30,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 31,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 32,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 33,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 34,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 35,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 36,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 37,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 38,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 39,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 40,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 41,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 42,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 43,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 44,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 45,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 46,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 47,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 48,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 49,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 50,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 51,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 52,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 53,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 54,
+   "family": "go",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 55,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 56,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 57,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 58,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 59,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 60,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 61,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 62,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 63,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 64,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 65,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 66,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 67,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 68,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 69,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 70,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 71,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 72,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 73,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 74,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 75,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 76,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 77,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 78,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 79,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 80,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 81,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 82,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "non_benign_segment:cargo"
+  },
+  {
+   "index": 83,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 84,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 85,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 86,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 87,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 88,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 89,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 90,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 91,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 92,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 93,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 94,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 95,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 96,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 97,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 98,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 99,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 100,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 101,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 102,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 103,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 104,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 105,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 106,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 107,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 108,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 109,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 110,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 111,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 112,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 113,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 114,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 115,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 116,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 117,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 118,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 119,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 120,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 121,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 122,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 123,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 124,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 125,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 126,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 127,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 128,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 129,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 130,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 131,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 132,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 133,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 134,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 135,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 136,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 137,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 138,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 139,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 140,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 141,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 142,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 143,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 144,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 145,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 146,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 147,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 148,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 149,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 150,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 151,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 152,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 153,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 154,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 155,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 156,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 157,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 158,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 159,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 160,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 161,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 162,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 163,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 164,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 165,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 166,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 167,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 168,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 169,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 170,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 171,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 172,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 173,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 174,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 175,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 176,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 177,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 178,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 179,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 180,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 181,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 182,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 183,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 184,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 185,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 186,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 187,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 188,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 189,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 190,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 191,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 192,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 193,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 194,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 195,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 196,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 197,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 198,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 199,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 200,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 201,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 202,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 203,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 204,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 205,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 206,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:cp"
+  },
+  {
+   "index": 207,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 208,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 209,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 210,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 211,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 212,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 213,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 214,
+   "family": "go",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 215,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 216,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:yarn"
+  },
+  {
+   "index": 217,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 218,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 219,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 220,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 221,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 222,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 223,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 224,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:for"
+  },
+  {
+   "index": 225,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 226,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 227,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:for"
+  },
+  {
+   "index": 228,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:for"
+  },
+  {
+   "index": 229,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:for"
+  },
+  {
+   "index": 230,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 231,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:for"
+  },
+  {
+   "index": 232,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 233,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 234,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 235,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 236,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 237,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 238,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 239,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 240,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 241,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 242,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 243,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 244,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 245,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 246,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 247,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 248,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 249,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 250,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 251,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 252,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 253,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 254,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 255,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 256,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 257,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 258,
+   "family": "make",
+   "kind": "compound",
+   "reason": "non_benign_segment:go"
+  },
+  {
+   "index": 259,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 260,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 261,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 262,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 263,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 264,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 265,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 266,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 267,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:go"
+  },
+  {
+   "index": 268,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 269,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 270,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 271,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 272,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 273,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 274,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 275,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 276,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 277,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 278,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 279,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 280,
+   "family": "go",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 281,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 282,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 283,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 284,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 285,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 286,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 287,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 288,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 289,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 290,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 291,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 292,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 293,
+   "family": "go",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 294,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 295,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 296,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 297,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:gofmt"
+  },
+  {
+   "index": 298,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:gofmt"
+  },
+  {
+   "index": 299,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:gofmt"
+  },
+  {
+   "index": 300,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:gofmt"
+  },
+  {
+   "index": 301,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 302,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 303,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 304,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 305,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 306,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:find"
+  },
+  {
+   "index": 307,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 308,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 309,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 310,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 311,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 312,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 313,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 314,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 315,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 316,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 317,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 318,
+   "family": "make",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 319,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 320,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 321,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 322,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 323,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 324,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 325,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 326,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 327,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 328,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 329,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 330,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 331,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 332,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 333,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 334,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 335,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 336,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 337,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 338,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 339,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 340,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 341,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 342,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:npm"
+  },
+  {
+   "index": 343,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:npm"
+  },
+  {
+   "index": 344,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:npm"
+  },
+  {
+   "index": 345,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 346,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 347,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 348,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 349,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 350,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 351,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 352,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 353,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 354,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 355,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 356,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 357,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 358,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 359,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 360,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 361,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 362,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 363,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 364,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 365,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 366,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 367,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 368,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 369,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 370,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 371,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 372,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 373,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 374,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 375,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 376,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 377,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 378,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 379,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 380,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 381,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 382,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 383,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 384,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 385,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 386,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 387,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 388,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 389,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 390,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 391,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 392,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 393,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 394,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 395,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 396,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 397,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 398,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 399,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 400,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 401,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 402,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 403,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 404,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 405,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 406,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 407,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 408,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 409,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 410,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 411,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 412,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 413,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 414,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 415,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 416,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 417,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 418,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 419,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 420,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 421,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 422,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 423,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 424,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 425,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 426,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 427,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 428,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 429,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 430,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 431,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 432,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:gt-plan"
+  },
+  {
+   "index": 433,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 434,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 435,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 436,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 437,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 438,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python3"
+  },
+  {
+   "index": 439,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 440,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 441,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 442,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 443,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 444,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 445,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 446,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 447,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 448,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 449,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 450,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 451,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 452,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 453,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 454,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 455,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 456,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 457,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 458,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 459,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 460,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 461,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 462,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 463,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 464,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 465,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 466,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 467,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 468,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 469,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 470,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 471,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python3"
+  },
+  {
+   "index": 472,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 473,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 474,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 475,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 476,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 477,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 478,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:gt-plan"
+  },
+  {
+   "index": 479,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 480,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:gt-plan"
+  },
+  {
+   "index": 481,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 482,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 483,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 484,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 485,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 486,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 487,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 488,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 489,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 490,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 491,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 492,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 493,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 494,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 495,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 496,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 497,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 498,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 499,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 500,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 501,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 502,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 503,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 504,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 505,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 506,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 507,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 508,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 509,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 510,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 511,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 512,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 513,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 514,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 515,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 516,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 517,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 518,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 519,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 520,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 521,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 522,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 523,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 524,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 525,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 526,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 527,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 528,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 529,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 530,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 531,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 532,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 533,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 534,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 535,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 536,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 537,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 538,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 539,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 540,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 541,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 542,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 543,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 544,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 545,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 546,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 547,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 548,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 549,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 550,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 551,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 552,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 553,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 554,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 555,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 556,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 557,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 558,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 559,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 560,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 561,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 562,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 563,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 564,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 565,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 566,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 567,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 568,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 569,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 570,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 571,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 572,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 573,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 574,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 575,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 576,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 577,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 578,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 579,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 580,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 581,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 582,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 583,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 584,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 585,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 586,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 587,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 588,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 589,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 590,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 591,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 592,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 593,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 594,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 595,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 596,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 597,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 598,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 599,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 600,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 601,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 602,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 603,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 604,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 605,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 606,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 607,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 608,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 609,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 610,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 611,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 612,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 613,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 614,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 615,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 616,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 617,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 618,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 619,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 620,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 621,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 622,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 623,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 624,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 625,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 626,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 627,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 628,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 629,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 630,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 631,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 632,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 633,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 634,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 635,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 636,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 637,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 638,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 639,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 640,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 641,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 642,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 643,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 644,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 645,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 646,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 647,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 648,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 649,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 650,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 651,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 652,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 653,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 654,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 655,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 656,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 657,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 658,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 659,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 660,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 661,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 662,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 663,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 664,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 665,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 666,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 667,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 668,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 669,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 670,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 671,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 672,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 673,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 674,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 675,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 676,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 677,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 678,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 679,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 680,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 681,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 682,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 683,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 684,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 685,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 686,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 687,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 688,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 689,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 690,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 691,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 692,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 693,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 694,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 695,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 696,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 697,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 698,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 699,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 700,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 701,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 702,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 703,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 704,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 705,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 706,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 707,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 708,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 709,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 710,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 711,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 712,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 713,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 714,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 715,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 716,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 717,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 718,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 719,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 720,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 721,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 722,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 723,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 724,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 725,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 726,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 727,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 728,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 729,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 730,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 731,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 732,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 733,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 734,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 735,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 736,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 737,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 738,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 739,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python3"
+  },
+  {
+   "index": 740,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 741,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 742,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 743,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 744,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 745,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 746,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 747,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 748,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 749,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 750,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python3"
+  },
+  {
+   "index": 751,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 752,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 753,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 754,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "backgrounded"
+  },
+  {
+   "index": 755,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 756,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 757,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 758,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 759,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 760,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 761,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 762,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 763,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 764,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 765,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 766,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 767,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 768,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 769,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 770,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 771,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 772,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 773,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 774,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 775,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 776,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 777,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 778,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 779,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 780,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 781,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 782,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 783,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 784,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 785,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 786,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 787,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 788,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 789,
+   "family": "cargo",
+   "kind": "compound",
+   "reason": "non_benign_segment:cargo"
+  },
+  {
+   "index": 790,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 791,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 792,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 793,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 794,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 795,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 796,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 797,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 798,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 799,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 800,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 801,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 802,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 803,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 804,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 805,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 806,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 807,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 808,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 809,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 810,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 811,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 812,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 813,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 814,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 815,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 816,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 817,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 818,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 819,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 820,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 821,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 822,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 823,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 824,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 825,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 826,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 827,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 828,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 829,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 830,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 831,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 832,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 833,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 834,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 835,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 836,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 837,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 838,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 839,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 840,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 841,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 842,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 843,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 844,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 845,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 846,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 847,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 848,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 849,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 850,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 851,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 852,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 853,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 854,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 855,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 856,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 857,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 858,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 859,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 860,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 861,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 862,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 863,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 864,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 865,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 866,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 867,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 868,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 869,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 870,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 871,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 872,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 873,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 874,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 875,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 876,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 877,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 878,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 879,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 880,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 881,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 882,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 883,
+   "family": "cargo",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 884,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 885,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 886,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 887,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 888,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 889,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 890,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 891,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 892,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 893,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 894,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 895,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 896,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "non_benign_segment:node"
+  },
+  {
+   "index": 897,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 898,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 899,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 900,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 901,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 902,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 903,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 904,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 905,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:cp"
+  },
+  {
+   "index": 906,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:npx"
+  },
+  {
+   "index": 907,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 908,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:npx"
+  },
+  {
+   "index": 909,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:npx"
+  },
+  {
+   "index": 910,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 911,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 912,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 913,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 914,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 915,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 916,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 917,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 918,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 919,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 920,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 921,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 922,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 923,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 924,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 925,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 926,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 927,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 928,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 929,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 930,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 931,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 932,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 933,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 934,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 935,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 936,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 937,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 938,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 939,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 940,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 941,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 942,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 943,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 944,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 945,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 946,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 947,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 948,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 949,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 950,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 951,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 952,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 953,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 954,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 955,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 956,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 957,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 958,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 959,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 960,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 961,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 962,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 963,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 964,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 965,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 966,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 967,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 968,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 969,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 970,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 971,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 972,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 973,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 974,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 975,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 976,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 977,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 978,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 979,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 980,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 981,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 982,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 983,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 984,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 985,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 986,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 987,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 988,
+   "family": "jsrunner",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 989,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 990,
+   "family": "npm",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 991,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 992,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "ambiguous_operator"
+  },
+  {
+   "index": 993,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 994,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 995,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 996,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 997,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 998,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 999,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1000,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1001,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1002,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1003,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1004,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1005,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1006,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1007,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1008,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1009,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1010,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1011,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1012,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1013,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1014,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1015,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1016,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1017,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1018,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1019,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1020,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1021,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1022,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1023,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1024,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1025,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1026,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1027,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1028,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1029,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1030,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1031,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1032,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1033,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1034,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1035,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:find"
+  },
+  {
+   "index": 1036,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1037,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1038,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1039,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1040,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1041,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1042,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1043,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1044,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1045,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1046,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1047,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1048,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:git"
+  },
+  {
+   "index": 1049,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1050,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1051,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1052,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1053,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1054,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1055,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1056,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1057,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1058,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1059,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1060,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1061,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1062,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1063,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1064,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1065,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1066,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1067,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1068,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1069,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1070,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1071,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1072,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1073,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1074,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1075,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1076,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1077,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1078,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1079,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1080,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1081,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1082,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1083,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1084,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1085,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1086,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1087,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1088,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1089,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1090,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1091,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1092,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1093,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1094,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1095,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1096,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1097,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1098,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1099,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1100,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1101,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1102,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1103,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1104,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1105,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1106,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1107,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1108,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1109,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1110,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1111,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1112,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1113,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1114,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1115,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1116,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1117,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1118,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1119,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1120,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1121,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1122,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1123,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1124,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1125,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1126,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1127,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1128,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1129,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1130,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1131,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1132,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1133,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1134,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1135,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1136,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1137,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1138,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1139,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1140,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1141,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1142,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1143,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1144,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1145,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1146,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1147,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1148,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1149,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1150,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1151,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1152,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1153,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1154,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1155,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1156,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1157,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1158,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1159,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1160,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1161,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1162,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1163,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1164,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1165,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1166,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1167,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1168,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1169,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1170,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1171,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1172,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1173,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1174,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1175,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1176,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1177,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1178,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1179,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1180,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1181,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1182,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1183,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1184,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1185,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1186,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1187,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1188,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1189,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1190,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1191,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1192,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1193,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1194,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1195,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1196,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1197,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1198,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1199,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1200,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1201,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1202,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1203,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1204,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1205,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1206,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1207,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1208,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1209,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1210,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1211,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1212,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "multiple_runner_invocations"
+  },
+  {
+   "index": 1213,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1214,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1215,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1216,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1217,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1218,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1219,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1220,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1221,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1222,
+   "family": "make",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1223,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1224,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:python"
+  },
+  {
+   "index": 1225,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1226,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1227,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1228,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1229,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1230,
+   "family": "go",
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1231,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1232,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1233,
+   "family": "go",
+   "kind": "compound",
+   "reason": "non_benign_segment:1"
+  },
+  {
+   "index": 1234,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1235,
+   "family": "go",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1236,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1237,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1238,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1239,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1240,
+   "family": "npm",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1241,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1242,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1243,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1244,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1245,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1246,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1247,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1248,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1249,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1250,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1251,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1252,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1253,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1254,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1255,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1256,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1257,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1258,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1259,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1260,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1261,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1262,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1263,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1264,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1265,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1266,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1267,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1268,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1269,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1270,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1271,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1272,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1273,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1274,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1275,
+   "family": null,
+   "kind": "compound",
+   "reason": "heredoc"
+  },
+  {
+   "index": 1276,
+   "family": "pytest",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 1277,
+   "family": "jsrunner",
+   "kind": "compound",
+   "reason": "non_benign_segment:rm"
+  },
+  {
+   "index": 1278,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1279,
+   "family": "pytest",
+   "kind": "plain",
+   "reason": "single runner invocation surrounded by benign segments"
+  },
+  {
+   "index": 1280,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  },
+  {
+   "index": 1281,
+   "family": null,
+   "kind": "compound",
+   "reason": "no_runner_invocation"
+  }
+ ],
+ "sample": [
+  {
+   "index": 91,
+   "command": "cd /app && cargo test --test tests sort 2>&1 | tail -80",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "--test tests selects one integration target plus a name filter"
+  },
+  {
+   "index": 205,
+   "command": "cd /app && cd ark/json-schema && pnpm test 2>&1 | tail -40",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "pnpm test inside the ark/json-schema package, no selection"
+  },
+  {
+   "index": 260,
+   "command": "cd /app && git status --short && git branch --show-current && git log --oneline -1 && echo \"=== npm test ===\" && npm test 2>&1 | tail -6; echo \"npm-test-exit=$?\"",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npm test with no selection"
+  },
+  {
+   "index": 261,
+   "command": "cd /app && git status --short && git log --oneline -1 && echo \"=== final npm test ===\" && npm test 2>&1 | tail -8; echo \"npm-test-exit=$?\"",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npm test with no selection"
+  },
+  {
+   "index": 263,
+   "command": "cd /app && git status --short; git log --oneline -2; timeout 900 make test 2>&1 | tail -18; echo \"MAKE TEST EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "make test with no target selection"
+  },
+  {
+   "index": 270,
+   "command": "cd /app && go test -count=1 ./object",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "./object names one package"
+  },
+  {
+   "index": 290,
+   "command": "cd /app && go test ./evaluator/... 2>&1 | tail -20",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "./evaluator/... names one package subtree"
+  },
+  {
+   "index": 292,
+   "command": "cd /app && go test ./parser/... -run \"TestParsingIndexStepRange|TestIndexExpressionStringWithStep\" -v 2>&1 | head -40",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "./parser/... plus a -run regexp"
+  },
+  {
+   "index": 335,
+   "command": "cd /app && npm test -- --runInBand 2>&1 | tail -30",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npm test -- --runInBand passes a runner flag, not a selection"
+  },
+  {
+   "index": 355,
+   "command": "cd /app && npx jest --runInBand 2>&1 | tail -20",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npx jest with no selection"
+  },
+  {
+   "index": 356,
+   "command": "cd /app && npx jest --runInBand 2>&1 | tail -25",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npx jest with no selection"
+  },
+  {
+   "index": 363,
+   "command": "cd /app && npx jest 2>&1 | tail -25",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npx jest with no selection"
+  },
+  {
+   "index": 383,
+   "command": "cd /app && npx jest tests/initialize.test.ts -t \"register accepts object map\" 2>&1 | tail -12",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "one test file plus -t name filter"
+  },
+  {
+   "index": 407,
+   "command": "cd /app && pytest -q tests/test_snapshot_cli.py -k diff 2>&1 | tail -2",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "one test file plus -k filter"
+  },
+  {
+   "index": 539,
+   "command": "cd /app && python -m pytest -q 2>&1 | tail -5",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "python -m pytest -q with no selection"
+  },
+  {
+   "index": 574,
+   "command": "cd /app && python -m pytest tests/test_snapshot_cli.py::test_save_echoes_id_and_name -q 2>&1 | head -60",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "one ::nodeid"
+  },
+  {
+   "index": 788,
+   "command": "cd /app && timeout 120 python -m pytest tests/test_snapshots.py -q 2>&1 | tail -15; echo \"EXIT: $?\"",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "one test file"
+  },
+  {
+   "index": 799,
+   "command": "cd /app && timeout 200 cargo test -p pest_meta --lib -- coalesce_is_final_top_down_pass 2>&1 | grep -B2 -A8 \"^warning\" | head -40",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "-p pest_meta --lib plus a single test-name filter"
+  },
+  {
+   "index": 806,
+   "command": "cd /app && timeout 26 cargo test -p boa_engine --test evaluation_cancellation public_api_surface > /tmp/run.log 2>&1; echo \"EXIT $?\"; tail -25 /tmp/run.log",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "-p boa_engine --test evaluation_cancellation plus a filter"
+  },
+  {
+   "index": 818,
+   "command": "cd /app && timeout 300 cargo test -p oxvg_optimiser 2>&1 | grep -E \"^test |reproduce|running\" | head -20",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "-p oxvg_optimiser selects one workspace package"
+  },
+  {
+   "index": 824,
+   "command": "cd /app && timeout 300 cargo test -p pest_meta --lib -- classifier 2>&1 | tail -40",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "-p pest_meta --lib plus a name filter"
+  },
+  {
+   "index": 831,
+   "command": "cd /app && timeout 300 go test `go list -buildvcs=false ./... | grep -v \"/js\"` 2>&1 | tail -30",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "unknown",
+   "rationale": "the package set comes from a backtick command substitution evaluated at run time; the extent is not readable from the text"
+  },
+  {
+   "index": 832,
+   "command": "cd /app && timeout 300 go test github.com/abs-lang/abs/evaluator -v 2>&1 | grep -E \"FAIL:|^FAIL|TestEnv\" | head; echo \"EXIT: ${PIPESTATUS[0]}\"",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "one fully qualified import path"
+  },
+  {
+   "index": 835,
+   "command": "cd /app && timeout 300 make test evaluator/evaluator_test.go 2>&1 | tail -20; echo \"EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "make test with an extra per-file target"
+  },
+  {
+   "index": 836,
+   "command": "cd /app && timeout 300 npx mocha lib/__tests/exports.js lib/__tests/lexer.js --require lib/__tests/helpers/setup.js --reporter dot 2>&1 | tail -8",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "two explicit spec files"
+  },
+  {
+   "index": 846,
+   "command": "cd /app && timeout 400 cargo test --workspace --all-features 2>&1 | grep -E \"^test result|error\\[|error:|FAILED|failed\" | head -60",
+   "family": "cargo",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "--workspace --all-features selects everything"
+  },
+  {
+   "index": 885,
+   "command": "cd /app && timeout 900 make test 2>&1 | tail -20; echo \"MAKE EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "make test with no target selection"
+  },
+  {
+   "index": 886,
+   "command": "cd /app && timeout 900 make test 2>&1 | tail -25; echo \"EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "make test with no target selection"
+  },
+  {
+   "index": 887,
+   "command": "cd /app && timeout 900 make test 2>&1 | tail -25; echo \"MAKE TEST EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "make test with no target selection"
+  },
+  {
+   "index": 888,
+   "command": "cd /app && timeout 900 make test 2>&1 | tail -30; echo \"EXIT: $?\"",
+   "family": "make",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "make test with no target selection"
+  },
+  {
+   "index": 914,
+   "command": "cd /app/backend && npx vitest run --reporter=verbose 2>&1 | grep -E \"\u2713|\u00d7|FAIL|PASS|Test Files|Tests\" | head -60",
+   "family": "jsrunner",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "npx vitest run with no selection"
+  },
+  {
+   "index": 966,
+   "command": "cd /app; npm test -- tests/initialize-errors.test.ts -t \"initialization failure throws AwilixInitializationError with registration name, original message and cause\" 2>&1 | grep -E \"Tests:|PASS|FAIL\"",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "npm test -- <file> -t <name>"
+  },
+  {
+   "index": 972,
+   "command": "cd /app; npm test -- tests/initialize.test.ts -t \"registers initializer via register map\" 2>&1 | tail -20",
+   "family": "npm",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "npm test -- <file> -t <name>"
+  },
+  {
+   "index": 1100,
+   "command": "cd /testbed && python -m pytest -v 2>&1 | tail -45",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "suite",
+   "rationale": "python -m pytest -v with no selection"
+  },
+  {
+   "index": 1179,
+   "command": "cd /testbed && timeout 120 python -m pytest tests/test_base.py tests/test_utils.py -q 2>&1 | tail -3",
+   "family": "pytest",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "two explicit test files"
+  },
+  {
+   "index": 1235,
+   "command": "go test ./evaluator -run TestRequire -count=1 -v 2>&1 | tail -n 50",
+   "family": "go",
+   "kind": "plain",
+   "expected_scope": "scoped",
+   "rationale": "./evaluator plus -run TestRequire"
+  }
+ ]
+}
