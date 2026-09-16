@@ -865,10 +865,12 @@ the `gt.event.v1` envelope; `verify_event_journal` stays green (asserted in
 feature_evaluated rows), recovery/GT_HYPOTHESIS NO_DELIVERY naming the
 missing row, def_partition DECLINED_CORRECTLY.
 
-**Gates:** canonical provider-free acceptance `35028936016` **GREEN** and
-installed full-flow rehearsal `35028940514` **GREEN**, both on `100de171`
-(`9f5f57b7` adds a test-only assertion). 526 tests pass locally, 1
-Linux-only skip.
+**Gates:** canonical provider-free acceptance `35049683364` **GREEN** and
+installed full-flow rehearsal `35049685863` **GREEN**, both on `d9dd5809`
+(the audit-21 wave tip; docs-only atop the code commit `4f40e73a`).
+Earlier pair `35028936016`/`35028940514` on `100de171` is superseded.
+31-file touched-surface sweep (~2100 tests) all green locally, 6
+platform-boundary skips.
 
 ## Plan to benchmark readiness — current sequence
 
@@ -905,10 +907,10 @@ commands produced no observation at all. Consolidated record:
    `_viewed_files` seam, localization ranking at scale, multi-process
    graph-lock contention, real ENOSPC/cgroup-OOM) are boundary-limited
    and covered by the installed-rehearsal gate — none block the paid
-   smoke. A fresh gate pair on `4f40e73a` is required before step 1.
+   smoke. The fresh gate pair is green (`35049683364` / `35049685863`).
 1. **Paid 2-task SWE-Live re-smoke** on the gate-green SHA — needs a fresh
    explicit owner approval + dispatch tag citing `readiness_run_id`
-   `35028936016`. Success shape: both tasks attested — verifier GRADED
+   `35049683364`. Success shape: both tasks attested — verifier GRADED
    joined to clean product receipts (no `receipt_issuance_failed`, no
    engine-disable), `feature_evaluated` rows present for the local lanes,
    `submit_window` advisory fires when a green suite-equivalent run exists.
