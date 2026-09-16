@@ -17,6 +17,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -605,6 +606,12 @@ def _index_child_environment(memory_limit_bytes: int) -> dict[str, str]:
     child["GOMAXPROCS"] = str(_INDEX_MAX_PROCS)
     go_limit = min(_INDEX_GOMEMLIMIT_BYTES, memory_limit_bytes * 3 // 4)
     child["GOMEMLIMIT"] = f"{max(48 * 1024 * 1024, go_limit)}B"
+    if _execution_identity()["identity_scope"] == "benchmark_bound":
+        # Fail-closed FTS5 gates in the producer only arm under this flag: an
+        # index that cannot be rebuilt and verified aborts the staged build
+        # instead of publishing a graph whose lexical_rank would crash or
+        # silently degrade mid-run.
+        child["GT_REQUIRE_FTS5"] = "1"
     return child
 
 
@@ -631,6 +638,39 @@ def _effective_index_memory_limit(snapshot: dict[str, int | None]) -> int:
     # transcript and reserve 128 MiB from currently available memory. Tiny or
     # already-pressured cgroups refuse indexing instead of risking the runner.
     return min(_INDEX_RSS_LIMIT_BYTES, cgroup_max // 2, safe_headroom)
+
+
+# Measured batch-amend peak RSS on the vendored producer (Windows, -workers 2,
+# cold parse cache — see docs/PLAN-GATE1-FTS5-AMEND-REMEDIATION.md §2):
+#   15,600-node parent  -> 320 MiB
+#   93,600-node parent  -> 1,262 MiB   (~95% of the same repo's full build)
+# Model: 130 MiB fixed + 12.4 KiB per parent node. The constants below carry a
+# ~30% margin over that model because the producer runs under cgroups the
+# measurement box cannot reproduce — real repos parse bigger files and keep
+# resident LSP/enrichment pressure this synthetic graph does not have.
+_AMEND_MEMORY_FLOOR_BASE_BYTES = 170 * 1024 * 1024
+_AMEND_MEMORY_FLOOR_PER_NODE_BYTES = 16 * 1024
+
+
+def _batch_amend_memory_floor(parent_graph: Path, parent_manifest: Path) -> int:
+    """Predicted peak RSS for one ``-amend-parent`` run over this parent.
+
+    The number answers "would the current memory limit kill this child" —
+    nothing more. An unreadable parent scale falls back to the fixed base,
+    which still refuses the truly hopeless launches while the in-flight guard
+    bounds everything above it.
+    """
+    nodes = 0
+    try:
+        manifest = json.loads(parent_manifest.read_text(encoding="utf-8"))
+        declared = manifest.get("indexed_node_count")
+        if isinstance(declared, int) and declared > 0:
+            nodes = declared
+    except (OSError, ValueError):
+        pass
+    if not nodes:
+        _files, nodes = _graph_scale(parent_graph)
+    return _AMEND_MEMORY_FLOOR_BASE_BYTES + nodes * _AMEND_MEMORY_FLOOR_PER_NODE_BYTES
 
 
 _SECRET_RUN = re.compile(r"[A-Za-z0-9_\-]{24,}")
@@ -1875,6 +1915,25 @@ def _ensure_index_incremental_unlocked(
         # is the shape a producer swap takes: the binary that would amend is
         # not the binary the parent was certified against.
         return None, f"incremental_parent_uncertifiable:{certification_reason}", results
+    if batch:
+        # A batch amend runs the whole pipeline over the parent copy, so its
+        # memory need scales with the parent graph, not the dirty set —
+        # measured: 15.6k-node parent -> 320 MiB peak, 93.6k-node parent ->
+        # 1,262 MiB peak (~95% of the full build). When the live cgroup limit
+        # is below that floor the amend is guaranteed to die mid-flight; the
+        # gate-one journal (run 35056493769) shows two such SIGKILLs. Refuse
+        # before launch instead: the reason is a typed scheduling signal —
+        # no producer ran, so nothing died — and the caller's defer window
+        # waits the pressure out instead of paying minutes of doomed work.
+        floor = _batch_amend_memory_floor(parent_graph, parent_manifest)
+        limit = _effective_index_memory_limit(_cgroup_snapshot())
+        if limit < floor:
+            return (
+                None,
+                f"GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:"
+                f"limit={limit}need={floor}",
+                results,
+            )
 
     root_path = Path(root)
     if batch:
@@ -2278,6 +2337,65 @@ def _graph_phase_metadata(graph: Path) -> dict[str, object]:
     }
 
 
+def _graph_fts5_health_reason(con: sqlite3.Connection, tables: set[str]) -> str | None:
+    """Reason a graph's nodes_fts index cannot serve lexical_rank, else None.
+
+    The check is a real scored query, not a row count. On an external-content
+    table ``COUNT(*) FROM nodes_fts`` is answered from ``nodes``, so it cannot
+    see an empty or divergent index — that is the trap the producer's
+    FTS5RowCount docstring and the properties_fts parity test both document.
+    Two failure shapes are caught here:
+
+    - docsize/content divergence: ``nodes_fts_docsize`` holds one row per
+      indexed document, so its count must equal ``nodes``. A dead index
+      generation (the gate-one paid graph: 190,953 index docs over 95,644
+      nodes) breaks the invariant even though bm25 may stay finite on the
+      driver's build.
+    - non-finite scores: stale index statistics make bm25's idf term
+      log() of a non-positive value, which SQLite surfaces as NULL — the
+      exact value the consumer's float(bm25) crashed on in run 35056493769.
+
+    An absent index is refused only when the run is benchmark-bound; local
+    graphs keep the documented name-match fallback. Probe errors (e.g.
+    malformed shadow tables) propagate to the caller's sqlite3.Error handler
+    as a typed refusal.
+    """
+    if "nodes_fts" not in tables:
+        if _execution_identity()["identity_scope"] == "benchmark_bound":
+            return "nodes_fts_absent"
+        return None
+    docsize = int(con.execute("SELECT COUNT(*) FROM nodes_fts_docsize").fetchone()[0])
+    nodes = int(con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+    if docsize != nodes:
+        return f"nodes_fts_desynced:{docsize}of{nodes}"
+    if nodes == 0:
+        return None
+    # Probe individual tokens, not whole names: the stale-statistics signature
+    # is a single term whose doclist outgrows the claimed row count, and a
+    # phrase match on one name only exercises a doclist of length one.
+    terms: list[str] = []
+    for (name,) in con.execute(
+        "SELECT name FROM nodes WHERE name IS NOT NULL AND name <> '' ORDER BY id LIMIT 16"
+    ):
+        for token in re.split(r"[^0-9A-Za-z]+", str(name)):
+            if token and token not in terms:
+                terms.append(token)
+    matched = False
+    for term in terms[:32]:
+        rows = con.execute(
+            "SELECT bm25(nodes_fts) FROM nodes_fts WHERE nodes_fts MATCH ?",
+            (term,),
+        ).fetchall()
+        if not rows:
+            continue
+        matched = True
+        if any(score is None or not math.isfinite(score) for (score,) in rows):
+            return "nodes_fts_bm25_invalid"
+    if not matched:
+        return "nodes_fts_match_nothing"
+    return None
+
+
 def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
     try:
         with sqlite3.connect(f"file:{graph.resolve().as_posix()}?mode=ro", uri=True) as con:
@@ -2287,10 +2405,13 @@ def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
             tables = {row[0] for row in con.execute(
                 "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
             )}
-        required = {"project_meta"}
-        missing = sorted(required - tables)
-        if missing:
-            return False, f"missing_tables:{','.join(missing)}"
+            required = {"project_meta"}
+            missing = sorted(required - tables)
+            if missing:
+                return False, f"missing_tables:{','.join(missing)}"
+            fts_reason = _graph_fts5_health_reason(con, tables)
+            if fts_reason is not None:
+                return False, f"fts5_invalid:{fts_reason}"
         _graph_phase_metadata(graph)
         return True, "ok"
     except (sqlite3.Error, OSError, ValueError) as exc:

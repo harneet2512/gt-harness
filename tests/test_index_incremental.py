@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from gt_engine import indexer
+from gt_engine import indexer, retrieval
 from gt_engine.miniswe_integration import MiniSweAdapter
 
 
@@ -1271,3 +1271,160 @@ def test_a_successful_amend_resets_the_streak(tmp_path, monkeypatch):
     assert adapter.refresh_graph() is False   # streak 1 again -- not 2
     rows = _journal_rows(adapter)
     assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
+
+
+# ------------------------------------------------- batch amend memory floor
+
+
+def _batch_parent_manifest(parent: Path, nodes: int) -> None:
+    manifest = parent.with_suffix(".manifest.json")
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    doc["indexed_node_count"] = nodes
+    manifest.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_batch_amend_floor_scales_with_the_parent_graph(tmp_path, monkeypatch):
+    """The floor is the measured pipeline envelope: base + per-node slope."""
+    graph = tmp_path / "graph.db"
+    with sqlite3.connect(graph) as con:
+        con.execute("create table nodes (id integer)")
+        con.executemany("insert into nodes values (?)", [(i,) for i in range(50)])
+    manifest = tmp_path / "graph.manifest.json"
+    manifest.write_text(json.dumps({"indexed_node_count": 93_600}), encoding="utf-8")
+
+    floor = indexer._batch_amend_memory_floor(graph, manifest)
+    expected = (
+        indexer._AMEND_MEMORY_FLOOR_BASE_BYTES
+        + 93_600 * indexer._AMEND_MEMORY_FLOOR_PER_NODE_BYTES
+    )
+    assert floor == expected
+    assert floor > 1024 * 1024 * 1024  # a ~95k-node parent needs >1 GiB
+
+    # Manifest without the field falls back to counting the graph itself.
+    manifest.write_text(json.dumps({}), encoding="utf-8")
+    floor = indexer._batch_amend_memory_floor(graph, manifest)
+    assert floor == (
+        indexer._AMEND_MEMORY_FLOOR_BASE_BYTES
+        + 50 * indexer._AMEND_MEMORY_FLOOR_PER_NODE_BYTES
+    )
+
+
+def test_batch_amend_refuses_before_spawn_below_the_floor(tmp_path, monkeypatch):
+    """Gate-one shipped two mid-flight SIGKILLs on single-file dirty sets.
+
+    The fix is not a kinder kill: it is refusing before launch. The reason is
+    the typed scheduling code, NOT ``amend_failed:*`` — no producer ran, so
+    nothing died, and the strict gate's producer-death count stays honest.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: False)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability == indexer.BATCH_AMEND_CAPABILITY)
+    monkeypatch.setattr(
+        indexer, "_effective_index_memory_limit", lambda snapshot: 32 * 1024 * 1024)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("an amend whose floor exceeds the limit must not spawn a producer")
+    monkeypatch.setattr(indexer, "_run_index_bounded", forbidden)
+
+    result, reason, rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None
+    assert reason.startswith(
+        "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:")
+    assert not reason.startswith("amend_failed:")
+    assert rows == ()
+
+
+def test_batch_amend_above_the_floor_still_launches(tmp_path, monkeypatch):
+    """The floor refuses only what would die; headroom launches as before."""
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: False)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability == indexer.BATCH_AMEND_CAPABILITY)
+    monkeypatch.setattr(
+        indexer, "_effective_index_memory_limit",
+        lambda snapshot: 8 * 1024 * 1024 * 1024)
+
+    spawned: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        spawned.append("ran")
+        return indexer.IndexProcessResult(
+            success=False, status="nonzero_exit",
+            error_code="GT_INDEX_PROCESS_FAILED", exit_code=1, elapsed_ms=5)
+    monkeypatch.setattr(indexer, "_run_index_bounded", fake_run)
+
+    result, reason, _rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert spawned == ["ran"], "a headroom-satisfying amend must still launch"
+    assert result is None and reason.startswith("amend_failed:GT_INDEX_PROCESS_FAILED")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("GT_INDEX_BINARY"),
+    reason="real producer binary required (set GT_INDEX_BINARY)",
+)
+def test_a_freshly_produced_graph_passes_preflight_and_ranks(tmp_path):
+    """The producer→consumer contract on a real built artifact.
+
+    Gate-one (35056493769) shipped a graph whose nodes_fts carried a dead
+    index generation (docsize 190,953 vs nodes 95,644); under Python's
+    SQLite, bm25() returned NULL for terms whose doclist exceeded the
+    claimed row count and lexical_rank crashed float(None). The producer
+    now rebuilds and verifies the index at the publication boundary. This
+    test runs the real producer and asserts the consumer-visible
+    invariants end to end: adoption preflight passes, docsize parity
+    holds, every matched row scores a finite bm25, and the consumer ranks.
+    """
+    root = tmp_path / "repo"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "base.py").write_text(
+        "class Base:\n    def save(self):\n        return 1\n", encoding="utf-8")
+    (root / "pkg" / "child.py").write_text(
+        "from pkg.base import Base\n\n\nclass Child(Base):\n"
+        "    def run(self):\n        return self.save()\n", encoding="utf-8")
+
+    graph = tmp_path / "graph.db"
+    binary = os.environ["GT_INDEX_BINARY"]
+    build = indexer.subprocess.run(
+        indexer._index_command(binary, str(root), str(graph)),
+        check=False, capture_output=True)
+    assert build.returncode == 0, build.stderr
+
+    ok, reason = indexer._graph_schema_receipt(graph)
+    assert ok, f"a freshly produced graph must pass adoption preflight: {reason}"
+
+    with sqlite3.connect(graph) as con:
+        nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        docsize = con.execute(
+            "SELECT COUNT(*) FROM nodes_fts_docsize").fetchone()[0]
+        assert docsize == nodes, (
+            f"index desynced at publication: docsize={docsize} nodes={nodes}")
+        null_scores = con.execute(
+            "SELECT COUNT(*) FROM ("
+            "  SELECT bm25(nodes_fts) AS s FROM nodes_fts"
+            "  WHERE nodes_fts MATCH 'save OR run'"
+            ") WHERE s IS NULL").fetchone()[0]
+        assert null_scores == 0
+
+    ranking = retrieval.lexical_rank(graph, "save OR run", k=10)
+    assert ranking.available
+    names = {entry.snippet for entry in ranking.ranking}
+    assert {"save", "run"} <= names

@@ -55,6 +55,7 @@ result still records ``stored`` vs ``derived`` so a reader knows which path ran.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import re
 import sqlite3
@@ -630,14 +631,43 @@ def lexical_rank(
         if owned:
             con.close()
 
-    scored = [
-        (
-            _provenance_from_row(row),
-            -float(row[9]),
-            _clean_snippet(row[10]) or f"{row[5]}:{row[3]}",
+    # bm25() can return SQL NULL when the index's own statistics disagree with
+    # its doclists — observed in production when a stale external-content index
+    # held a dead node generation, so nHit exceeded the recorded nRow and the
+    # idf term's log() went non-positive. Scoring past it would manufacture an
+    # ordering the index cannot back, so one invalid score degrades the whole
+    # source with a named reason — never a crash, never a silent empty result.
+    invalid_scores = 0
+    scored = []
+    for row in rows:
+        score = row[9]
+        if (
+            score is None
+            or isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+        ):
+            invalid_scores += 1
+            continue
+        scored.append(
+            (
+                _provenance_from_row(row),
+                -float(score),
+                _clean_snippet(row[10]) or f"{row[5]}:{row[3]}",
+            )
         )
-        for row in rows
-    ]
+    if invalid_scores:
+        return SourceRanking(
+            RetrievalSource.LEXICAL,
+            (),
+            available=False,
+            reason="fts_bm25_score_invalid",
+            detail={
+                "terms": list(terms),
+                "matched_rows": len(rows),
+                "invalid_scores": invalid_scores,
+            },
+        )
     return SourceRanking(
         RetrievalSource.LEXICAL,
         _collapse(scored, limit=k, provenance=collected),

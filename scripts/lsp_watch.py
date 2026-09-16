@@ -14,6 +14,9 @@ tier state plus the degradation predictors the paid postmortems exposed:
 - NO_LEG_ON_FINAL:   the last adopted graph revision was never offered a leg
 - SCHEDULED_NO_TERMINAL: a leg is in flight right now
 - AMEND_FAILURES:    producer amend deaths observed this run
+- CAPABILITY_CRASH:  a *_unavailable event carrying an exception class —
+                     the capability crashed, not abstained (gate-one read
+                     nine TypeError localizations as graceful)
 - SEAL_*:            the seal-time convergence outcome once close runs
 
 Usage:
@@ -28,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -35,6 +39,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 TEE_PREFIX = "GT_EVENT|"
+
+# A reason that opens with an exception class name (``TypeError:``,
+# ``sqlite3.OperationalError:``) is a crash the typed layer caught - not a
+# designed unavailability like ``graph_snapshot_not_current``.
+_EXCEPTION_REASON = re.compile(r"^[\w.]*Error\b")
 
 _TERMINAL_DISPOSITIONS = (
     "published", "obsolete", "obsolete_after_certification",
@@ -68,6 +77,7 @@ class TaskHealth:
         self.publications: list[dict] = []
         self.churn_backoffs = 0
         self.amend_failures = 0
+        self.capability_crashes = 0
         self.seal_rows: list[dict] = []
         self.sealed = False
         self.last_ts = ""
@@ -96,6 +106,15 @@ class TaskHealth:
             pass
         if "amend_failed" in str(row.get("reason") or row.get("error") or ""):
             self.amend_failures += 1
+        # A *_unavailable event whose reason is an exception class name is a
+        # crash the typed wrapper caught, not a designed abstention. Gate-one
+        # sealed with nine semantic_localization_unavailable TypeErrors that
+        # read as graceful; they are a capability failure the strict gate
+        # must count.
+        if event.endswith("_unavailable") and _EXCEPTION_REASON.match(
+            str(row.get("reason") or row.get("error") or "")
+        ):
+            self.capability_crashes += 1
 
     # -- derived state -----------------------------------------------------
 
@@ -148,6 +167,8 @@ class TaskHealth:
             flags.append("SCHEDULED_NO_TERMINAL")
         if self.amend_failures:
             flags.append(f"AMEND_FAILURES({self.amend_failures})")
+        if self.capability_crashes:
+            flags.append(f"CAPABILITY_CRASH({self.capability_crashes})")
         if self.seal_rows:
             flags.append(
                 "SEAL_" + str(self.seal_rows[-1].get("outcome") or "?").upper()
@@ -167,7 +188,10 @@ class TaskHealth:
         """
         out: list[str] = []
         for flag in self.flags():
-            if flag.startswith(("TIER_PARTIAL", "SCHEDULED_NO_TERMINAL", "AMEND_FAILURES")):
+            if flag.startswith((
+                "TIER_PARTIAL", "SCHEDULED_NO_TERMINAL", "AMEND_FAILURES",
+                "CAPABILITY_CRASH",
+            )):
                 out.append(flag)
         seal_outcome = str(self.seal_rows[-1].get("outcome") or "") if self.seal_rows else ""
         if (

@@ -2322,3 +2322,45 @@ def test_unbound_check_stays_pending_and_retries_on_new_revision(tmp_path):
         assert spec.check_id not in adapter._pending_check_ids
     finally:
         os.environ.pop("GT_VERIFY_EXECUTE", None)
+
+
+def test_a_headroom_refused_amend_opens_the_cgroup_window_only(monkeypatch, tmp_path):
+    """A pre-launch headroom refusal defers without pretending a producer died.
+
+    Gate-one (35056493769) SIGKILLed two single-file batch amends mid-flight.
+    The floor refusal returns before spawn, so the reason is the bare typed
+    code — not ``amend_failed:*`` — and only the cgroup window opens: the
+    spawn window exists for dead producers, and none ran.
+    """
+    adapter, _repo, _graph = _edited_adapter(tmp_path)
+    clock = {"now": 4200.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
+    def headroom_refusal(root, *, parent_graph, changed_paths, **kwargs):
+        return (None,
+                "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:"
+                "limit=100need=200", ())
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked", headroom_refusal)
+
+    assert adapter.refresh_graph() is False
+    assert adapter._index_memory_defer_until > clock["now"], (
+        "measured pressure must open the cgroup window")
+    assert adapter._graph_amend_defer_until == 0.0, (
+        "no producer spawned — the spawn window must not open")
+
+    rows = _journal_rows(adapter)
+    refused = [r for r in rows if r.get("event") in {
+        "graph_sync_amend_refused", "graph_boundary_amend_refused"}]
+    assert refused and "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT" in refused[-1]["reason"]
+    assert "amend_failed" not in refused[-1]["reason"]
+    assert any(r.get("event") == "index_memory_backoff" for r in rows)
+
+    # Boundaries inside the window defer without re-measuring; none journal
+    # a second refusal.
+    adapter.refresh_graph()
+    assert sum(1 for r in _journal_rows(adapter)
+               if r.get("event") in {
+                   "graph_sync_amend_refused", "graph_boundary_amend_refused"}) == 1

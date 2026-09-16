@@ -116,6 +116,10 @@ def _build_base(path: Path) -> None:
         db.execute("INSERT INTO metadata (key,value) VALUES ('build','base')")
         db.execute("INSERT INTO closure (ancestor,descendant) VALUES (1,3)")
         db.execute("INSERT INTO project_meta (key,value) VALUES ('p','v')")
+        # A published graph carries a populated index: external-content FTS5
+        # does not index inserts on its own, and the adoption preflight
+        # refuses a desynced nodes_fts (docsize must equal nodes).
+        db.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
         db.commit()
 
 
@@ -963,6 +967,9 @@ def _inventoried_graphs(tmp_path: Path) -> tuple[Path, Path, Path]:
         db.execute("DELETE FROM parser_edge_inventory WHERE edge_id=1")
         db.execute("DELETE FROM edges WHERE id=2")
         db.execute("DELETE FROM parser_edge_inventory WHERE edge_id=2")
+        # The inserted node must reach the index, or docsize parity (6 != 7)
+        # trips the same refusal a dead index generation trips in production.
+        db.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
         db.commit()
     return base, cand, live
 

@@ -3964,9 +3964,16 @@ class MiniSweAdapter(GroundtruthController):
         whatever the code; the memory family additionally opens the cgroup
         window so legs and rebuilds stop launching into measured pressure.
         Pre-spawn refusals (capability, parent, path scope) never ran a
-        producer and open no window.
+        producer and open no window — except the memory-coded ones: a
+        pre-launch ``GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT`` refusal means
+        the cgroup is measurably pressured, so the cgroup window opens even
+        though no producer ran. That is what lets the same amend retry after
+        the pressure drains instead of stampeding or dying mid-flight.
         """
         if not reason.startswith("amend_failed:"):
+            head = reason.split(":", 1)[0]
+            if head in self._INDEX_MEMORY_ERRORS:
+                self._note_index_memory_code(head)
             return
         self._graph_amend_defer_until = (
             time.monotonic() + self._AMEND_SPAWN_DEFER_S

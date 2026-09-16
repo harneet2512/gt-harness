@@ -195,6 +195,70 @@ def test_lexical_rank_reports_absent_fts_table(tmp_path: Path) -> None:
     assert result.reason == "nodes_fts_absent"
 
 
+def _corrupt_fts_stats(path: Path, *, claimed_rows: int = 1) -> None:
+    """Force the exact state the gate-one graph carried: the FTS5 averages
+    record (``nodes_fts_data`` id=1, first varint = ``nRow``) claims fewer
+    indexed rows than the doclists actually hold. ``bm25``'s idf term
+    ``log((nRow - nHit + 0.5)/(nHit + 0.5))`` then takes ``log`` of a
+    non-positive value, SQLite maps the NaN to SQL NULL, and every score the
+    query returns is NULL. Reproduced from the run-35056493769 artifact, whose
+    stats claimed 95,644 rows against 190,953 docsize entries.
+    """
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "UPDATE nodes_fts_data SET block = ? || substr(block, 2) WHERE id = 1",
+            (bytes([claimed_rows]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_lexical_rank_degrades_typed_on_null_bm25(graph: Path) -> None:
+    _corrupt_fts_stats(graph)
+
+    # "clone" matches more rows than the corrupted nRow admits, so every
+    # score bm25 returns for it is NULL — the gate-one failure shape.
+    result = retrieval.lexical_rank(graph, "clone", 5)
+
+    # A corrupt index must degrade the source with a named reason — never
+    # raise, and never pretend it ran and found nothing.
+    assert result.available is False
+    assert result.reason is not None and "bm25" in result.reason
+    assert list(result) == []
+
+
+def test_lexical_rank_malformed_shadow_is_typed(graph: Path) -> None:
+    # A structurally damaged shadow table raises sqlite3.Error on MATCH —
+    # already a typed fts_query_failed, pinned here so it cannot regress.
+    connection = sqlite3.connect(graph)
+    try:
+        connection.execute("DELETE FROM nodes_fts_docsize")
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = retrieval.lexical_rank(graph, "clone", 5)
+
+    assert result.available is False
+    assert result.reason is not None and result.reason.startswith("fts_query_failed:")
+
+
+def test_hybrid_rank_survives_null_bm25_lexical(graph: Path) -> None:
+    _corrupt_fts_stats(graph)
+
+    result = retrieval.hybrid_rank(graph, "clone empty input", 5, use_dense=False)
+
+    by_source = {str(s.source): s for s in result.sources}
+    assert by_source["lexical"].available is False
+    assert "bm25" in (by_source["lexical"].reason or "")
+    # The property source still answers the behavioural query; fusion runs on
+    # what is left instead of dying with the lexical crash.
+    assert by_source["property"].available is True
+    assert [row.stable_id for row in by_source["property"]]
+
+
 # ---------------------------------------------------------------------------
 # 2. property
 # ---------------------------------------------------------------------------
