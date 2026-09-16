@@ -1725,7 +1725,9 @@ def test_install_missing_legs_are_degraded_but_not_required(tmp_path):
             terminal]
 
     assert _capability_rows(tmp_path, rows, blobs)["lsp_promotion"] == (
-        "DEGRADED", "terminal_succeeded:no_edge_mutations:no_serviceable_candidates"
+        "DEGRADED",
+        "terminal_succeeded:no_edge_mutations:no_serviceable_candidates"
+        ":install_missing",
     )
     assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is False
 
@@ -1761,6 +1763,115 @@ def test_one_serviceable_leg_among_unserviceable_ones_stays_required(tmp_path):
         "language_receipts": {
             "javascript": dict(_UNSERVICEABLE_JS), "python": serviceable,
         },
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_terminal", "status": "succeeded",
+             "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+             "artifact_blob": f"lsp_receipts/{digest}.json"}]
+
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is True
+
+
+# The recorded rust shape, run 34801009507 (smoke20): 29/29 rust legs came
+# back project_ready=false after the full 180s rust-analyzer budget
+# (resolve.py:1176 in the vendored wheel), 9414 definition queries returned
+# empty and zero edges were ever selected, because no workflow installs
+# cargo/rustup into the task images. Field names are copied from a recorded
+# lsp receipt (gate1-conv-34907273607 .../lsp_receipts/*.json): the receipt
+# journals project_ready / project_ready_wait_ms / project_ready_attempts,
+# not readiness_wait_ms, and counts edges as verified/corrected/deleted, not
+# edges_selected. No recorded receipt carries any toolchain or
+# cargo_available field, so the leg's absent toolchain is what the fixture
+# models.
+_PROJECT_NEVER_READY_RUST = {
+    "server_launched": True,
+    "project_ready": False,
+    "project_ready_wait_ms": 180002.0,
+    "project_ready_attempts": 8,
+    "candidate_unit_count": 324,
+    "selected_unit_count": 324,
+    "probe_requests_issued": 324,
+    "probe_answered_ok": True,
+    "failed_empty": 324,
+    "failed": 324,
+    "verified": 0,
+    "corrected": 0,
+    "deleted": 0,
+    "selected": 0,
+    "selection_complete": True,
+}
+
+
+def test_project_ready_false_leg_is_env_bound_not_required(tmp_path):
+    """A leg whose project never became ready is environment-bound.
+
+    The serviceability classifier read install gap, launch, candidate count
+    and request count, never the receipt's own project_ready verdict (it had
+    no reason to name a reason either, so it returned a bare bool). A rust
+    leg that
+    launched, issued 324 requests and got 324 empty answers back therefore
+    passed every serviceability check and kept lsp_promotion required=True -
+    so the strict gate failed the run for edges no leg could have made,
+    exactly the class aef3a2f5 fixed for the TS/JS install gap. The named
+    reason must reach the row's evidence: a not-required row whose evidence
+    does not say WHY is indistinguishable from a laundered failure.
+    """
+    digest = "a" * 64
+    blobs = {digest: {
+        "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {"rust": dict(_PROJECT_NEVER_READY_RUST)},
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+            {"event": "lsp_promotion_terminal", "status": "succeeded",
+             "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+             "artifact_blob": f"lsp_receipts/{digest}.json"}]
+
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is False
+    state, evidence = _capability_rows(tmp_path, rows, blobs)["lsp_promotion"]
+    assert state == "DEGRADED"
+    assert evidence == (
+        "terminal_succeeded:no_edge_mutations:no_serviceable_candidates"
+        ":project_not_ready:readiness_budget_exhausted"
+    )
+
+
+def test_a_ready_project_with_zero_edges_stays_required(tmp_path):
+    """The no-over-fix boundary: readiness reached, still no edges.
+
+    This is run 34996816912's pyright shape - project_ready true,
+    probe_answered_ok true, answers empty anyway. Nothing about the
+    environment stopped this leg, so it is a real capability gap and must
+    keep failing the strict gate.
+    """
+    digest = "b" * 64
+    leg = dict(_PROJECT_NEVER_READY_RUST)
+    leg["project_ready"] = True
+    leg["project_ready_wait_ms"] = 1423.0
+    blobs = {digest: {
+        "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {"python": leg},
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_terminal", "status": "succeeded",
+             "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+             "artifact_blob": f"lsp_receipts/{digest}.json"}]
+
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is True
+
+
+def test_an_unready_leg_that_still_produced_edges_stays_required(tmp_path):
+    """project_ready false is only env-bound when the leg produced nothing.
+
+    A slow indexer that missed the barrier and still converted edges proves
+    the capability worked; excusing it would launder a real partial failure.
+    """
+    digest = "c" * 64
+    leg = dict(_PROJECT_NEVER_READY_RUST)
+    leg["verified"] = 7
+    blobs = {digest: {
+        "verified": 7, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {"rust": leg},
     }}
     rows = [_DENSE_READY,
             {"event": "lsp_promotion_terminal", "status": "succeeded",

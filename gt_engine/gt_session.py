@@ -1935,26 +1935,33 @@ class GTSession:
                 else "",
             )
 
-        def _leg_serviceable(leg: object) -> bool:
-            """True iff this language leg could actually have produced edges.
+        def _leg_env_bound_reason(leg: object) -> str:
+            """The named environment reason this leg could not produce edges.
+
+            Empty string means serviceable: the leg could have produced
+            edges, so producing none is a real capability failure. A
+            non-empty return is a short stable label, not free text - it is
+            appended to the capability row's evidence, where a reader needs
+            to tell WHICH environment gap excused the tier apart from a
+            laundered failure.
 
             Unserviceable means the environment, not the capability, stopped
             the leg: an install/substrate gap journaled as
             install_missing_reason (resolve.py's GT_SS_ELIGIBILITY label -
             e.g. no workspace TypeScript install and no tsserver.path), a
             server that never launched, zero promotable candidates on the leg
-            (candidate_unit_count == 0), or a launch that never served a
-            single request (probe_requests_issued == 0 - the init-time shape
-            gopls-without-module-cache and jdtls-without-JDK take as well).
-            A leg that served requests is serviceable: producing zero edges
-            there is a real capability failure. An unreadable leg cannot
-            prove unserviceable, so it counts as serviceable - fail closed,
-            the same direction as a missing receipt.
+            (candidate_unit_count == 0), a launch that never served a single
+            request (probe_requests_issued == 0 - the init-time shape
+            gopls-without-module-cache and jdtls-without-JDK take as well),
+            or a project that never became ready inside the server's whole
+            readiness budget. An unreadable leg cannot prove unserviceable,
+            so it counts as serviceable - fail closed, the same direction as
+            a missing receipt.
             """
             if not isinstance(leg, dict):
-                return True
+                return ""
             if str(leg.get("install_missing_reason") or ""):
-                return False
+                return "install_missing"
             # Every check below fires only on positive evidence: an absent
             # field cannot prove the leg was unserviceable, and an unproven
             # leg stays serviceable - the same fail-closed direction as a
@@ -1963,19 +1970,54 @@ class GTSession:
                 "server_launched" in leg
                 and not leg.get("server_launched")
             ):
-                return False
+                return "server_never_launched"
             if (
                 "candidate_unit_count" in leg
                 and int(leg.get("candidate_unit_count") or 0) == 0
             ):
-                return False
+                return "no_candidates"
             if (
                 "probe_requests_issued" in leg
                 and int(leg.get("candidate_unit_count") or 0) > 0
                 and int(leg.get("probe_requests_issued") or 0) == 0
             ):
-                return False
-            return True
+                return "no_requests_issued"
+            # A leg that SERVED requests was treated as serviceable outright,
+            # and that is the hole run 34801009507 fell through: all 29 rust
+            # legs launched, issued requests and got empty answers back
+            # because rust-analyzer never finished loading a cargo workspace
+            # no task image installs cargo for. project_ready is the
+            # receipt's OWN verdict on that (resolve.py stamps it from the
+            # _await_project_ready barrier), and nothing here read it, so a
+            # toolchain the image never shipped kept lsp_promotion required
+            # and failed the strict gate on edges no leg could have made.
+            #
+            # The predicate is deliberately the same one resolve.py:1870 uses
+            # to stamp its own "still indexing the workspace" failure_detail,
+            # so the reporter and the producer cannot disagree about which
+            # legs this describes: readiness false, queries went out and came
+            # back empty, and nothing at all was converted. A leg that missed
+            # the barrier and still converted edges proves the capability
+            # worked and stays required; readiness reached with empty answers
+            # (run 34996816912's pyright shape) is a real gap and stays
+            # required too.
+            #
+            # Only the budget is named. No recorded receipt carries a
+            # toolchain or cargo_available field, so naming cargo as the
+            # cause would assert something no artifact proves - the wait
+            # expiring is the whole of what the receipt witnesses.
+            if (
+                leg.get("project_ready") is False
+                and float(leg.get("project_ready_wait_ms") or 0.0) > 0.0
+                and int(leg.get("failed_empty") or 0) > 0
+                and (
+                    int(leg.get("verified") or 0)
+                    + int(leg.get("corrected") or 0)
+                    + int(leg.get("deleted") or 0)
+                ) == 0
+            ):
+                return "project_not_ready:readiness_budget_exhausted"
+            return ""
 
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
@@ -2009,6 +2051,10 @@ class GTSession:
         # real gap and stays required.
         lsp_required = True
         no_serviceable = False
+        # The distinct environment reasons, in leg order, that excused
+        # the tier. Kept beside the flag because evidence is what a
+        # human reads; the flag alone never said which gap it was.
+        no_serviceable_reasons = ""
         fail_open: dict[str, object] | None = None
         scheduled = False
         terminals: list[dict[str, object]] = []
@@ -2281,19 +2327,27 @@ class GTSession:
                     ).get(
                         "language_receipts"
                     )
-                    if (
-                        isinstance(legs, dict)
-                        and legs
-                        and not any(
-                            _leg_serviceable(leg) for leg in legs.values()
-                        )
-                    ):
-                        # Every leg was environment-bound: the toolchain,
-                        # the server, or the request path was absent before
-                        # any work could run. Honest DEGRADED stays, but the
-                        # strict gate cannot require edges no leg could make.
+                    reasons = (
+                        [_leg_env_bound_reason(leg) for leg in legs.values()]
+                        if isinstance(legs, dict) and legs
+                        else []
+                    )
+                    if reasons and all(reasons):
+                        # Every leg was environment-bound: the toolchain, the
+                        # server, the request path or the readiness barrier
+                        # stopped it before any work could run. Honest
+                        # DEGRADED stays, but the strict gate cannot require
+                        # edges no leg could make. One serviceable leg - an
+                        # empty reason - keeps the whole tier required, so an
+                        # unserviceable neighbour never launders it.
                         lsp_required = False
                         no_serviceable = True
+                        # dict.fromkeys, not a set: a human reads these in
+                        # the order the legs ran, and a set would reorder
+                        # them unpredictably between interpreter runs.
+                        no_serviceable_reasons = ",".join(
+                            dict.fromkeys(reasons)
+                        )
                 if status == "no_op":
                     # no_op IS languages_promotable == [] - that is the branch
                     # condition. Its coordinator disposition is the generic
@@ -2435,7 +2489,14 @@ class GTSession:
                     # The environment reason is why the tier is empty; naming
                     # it in evidence keeps the not-required row distinguishable
                     # from a serviceable failure instead of relying on the flag.
+                    # The bare flag was not enough either: it blamed "the
+                    # environment" without saying which part, so a readiness
+                    # budget that expired and a toolchain that was never
+                    # installed read identically to whoever has to decide
+                    # whether to fix the image or the code.
                     lsp_evidence += ":no_serviceable_candidates"
+                    if no_serviceable_reasons:
+                        lsp_evidence += f":{no_serviceable_reasons}"
             elif scheduled:
                 lsp_state = CapabilityState.DEGRADED
                 lsp_evidence = "scheduled_no_terminal"
