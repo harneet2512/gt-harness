@@ -1170,7 +1170,14 @@ def _referenced_revisions(parent: Path) -> set[Path]:
     # derivation_base_manifest_unreadable on a verifier-solved task.
     for manifest in parent.parent.rglob("graph.manifest.json"):
         try:
-            derivation = json.loads(manifest.read_text(encoding="utf-8")).get("derivation")
+            body = json.loads(manifest.read_text(encoding="utf-8"))
+            if not isinstance(body, dict):
+                # Valid JSON that is not a manifest object still cannot be
+                # audited for citations: "[1]" parses fine and says nothing
+                # about what it references. Unauditable is unknown, and
+                # unknown freezes the prune exactly like an unreadable file.
+                raise ValueError("manifest_not_object")
+            derivation = body.get("derivation")
         except (OSError, ValueError):
             # Unreadable means unknown, and unknown must not authorise a
             # delete. A corrupt manifest's citations are unknowable, so
@@ -1234,7 +1241,23 @@ def _prune_superseded_revisions(live: Path, extra_protected: Iterable[Path] = ()
     nineteen builds in a row. ``extra_protected`` carries the other paths the
     authority is about to need -- the frozen parents of pending and running
     builds -- which production order cannot see.
+
+    Retention is a best-effort reclamation riding on top of certified
+    publications: every caller has already secured the artifact it produced.
+    A fault anywhere in the scan or the delete -- an un-auditable manifest,
+    a filesystem error mid-iteration, a path that will not resolve -- freezes
+    the prune instead of propagating. Propagating is how a retention hiccup
+    becomes ``ensure_index`` reporting no graph for a build that succeeded:
+    ``_poll_startup_index`` reads that as ``BenchmarkGraphRequired`` and the
+    run aborts on the defect that deletes least.
     """
+    try:
+        _prune_superseded_revisions_inner(live, extra_protected)
+    except Exception:  # noqa: BLE001 - in doubt, retain: a frozen prune leaks
+        return         # disk; a raised prune can eat a certified publication
+
+
+def _prune_superseded_revisions_inner(live: Path, extra_protected: Iterable[Path]) -> None:
     parent = live.parent
     if parent.name != "revisions":
         return  # not the layout-bound scheme; nothing here is ours to remove

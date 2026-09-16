@@ -57,6 +57,7 @@ from .run_diagnostics import (
 )
 from .runtime_observation import (
     EditTransaction,
+    _unquoted_command_surface,
     capture_workspace,
     compile_execution_evidence,
     compile_transaction_artifacts,
@@ -699,6 +700,7 @@ def _run_evidence(
                 cwd=adapter.repo_root or os.getcwd(),
                 changed_files=changed_files,
                 viewed_files=_viewed_files(command, adapter.repo_root or ""),
+                edit_before_after=edit_before_after,
                 test_outcome=test_outcome,
                 output_artifact=output_artifact,
             )
@@ -741,6 +743,7 @@ def _run_evidence(
         cwd=adapter.repo_root or os.getcwd(),
         changed_files=changed_files,
         viewed_files=_viewed_files(command, adapter.repo_root or ""),
+        edit_before_after=edit_before_after,
         covering=covering,
         test_outcome=test_outcome,
         output_artifact=output_artifact,
@@ -2066,9 +2069,13 @@ def install_runtime_hooks(
                 execution_candidates = []
                 if pre_snapshot is not None:
                     adapter.observe_plan_checks(command, result, pre_snapshot, post_snapshot, environment)
-                adapter.note_search_drift(command)
+                # Quoted payload is message text, never command shape:
+                # `git commit -m 'x;pytest'` must not reset the governor's
+                # verification-failure streak or read as a search.
+                command_surface = _unquoted_command_surface(command)
+                adapter.note_search_drift(command_surface)
                 churn_signal = adapter.churn_governor.observe(
-                    command,
+                    command_surface,
                     productive=bool(changed_files),
                     returncode=returncode,
                 )

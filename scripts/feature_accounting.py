@@ -178,6 +178,17 @@ ROW_DELIVERIES = {
     "plan_gate_directive_prepared": "plan_gate",
 }
 
+# Events that stage bytes into the pending provider payload but are not, by
+# themselves, model exposure. The wire-binding proof is a provider_delivery
+# row naming the identity in ``delivery_ids``; a staged identity that never
+# gets one was prepared, not delivered. (gt_trajectory_eval already draws the
+# same line: "Blobs without a delivered event prove preparation, not
+# delivery".)
+STAGING_EVENTS = frozenset({
+    "delivery_prepared",
+    "decision_context_unit_prepared",
+})
+
 # Paths whose edit cannot start a covering-test regression, because they are
 # the test. Kept crude on purpose: a false NEGATIVE here would invent an
 # eligibility the run never had.
@@ -572,6 +583,8 @@ def account(
     identity_refused: dict[str, bool] = {}
     identity_channel: dict[str, str] = {}
     identity_kinds: dict[str, str] = {}
+    identity_bound: set[str] = set()
+    identity_events: dict[str, set[str]] = collections.defaultdict(set)
     reached: collections.Counter[str] = collections.Counter()
     witnessed: dict[str, collections.Counter] = collections.defaultdict(
         collections.Counter
@@ -596,7 +609,19 @@ def account(
             # These carry no delivery_identity of their own, so they get a
             # synthetic one keyed by position. It cannot collide with a real
             # identity (those are hex digests) and cannot collide with itself.
-            identity_feature[f"{name}#{position}"] = ROW_DELIVERIES[name]
+            synthetic = f"{name}#{position}"
+            identity_feature[synthetic] = ROW_DELIVERIES[name]
+            identity_events[synthetic].add(name)
+        # provider_delivery.delivery_ids is the wire-binding proof: a staged
+        # delivery counts as model exposure only when a request carried it.
+        # prepared_deliveries_discarded is the rollback for a refused request -
+        # its identities were staged and revoked, which is a refusal.
+        if name == "provider_delivery":
+            for did in event.get("delivery_ids") or ():
+                identity_bound.add(str(did))
+        if name == "prepared_deliveries_discarded":
+            for did in event.get("delivery_ids") or ():
+                identity_refused[str(did)] = True
         supersession = str(event.get("supersession_key") or "")
         evidence_type = str(event.get("evidence_type") or "")
         if not supersession and not evidence_type:
@@ -634,13 +659,29 @@ def account(
             identity_channel.setdefault(unit, channel)
         else:
             identity_kinds.setdefault(unit, supersession or evidence_type)
+        identity_events[unit].add(name)
         if name in REFUSAL_EVENTS:
             identity_refused[unit] = True
 
     delivered: collections.Counter[str] = collections.Counter()
     refused: collections.Counter[str] = collections.Counter()
+    prepared_unbound: collections.Counter[str] = collections.Counter()
     for unit, feature in identity_feature.items():
-        (refused if identity_refused.get(unit) else delivered)[feature] += 1
+        if identity_refused.get(unit):
+            refused[feature] += 1
+        elif (
+            identity_events.get(unit)
+            and identity_events[unit] <= STAGING_EVENTS
+            and unit not in identity_bound
+        ):
+            # delivery_prepared / decision_context_unit_prepared stage bytes
+            # into the pending provider payload; without a provider_delivery
+            # binding (or a second, exposure-side row) the model never saw
+            # them. Prepared is not delivered (run 34625781346 already needed
+            # the distinction for its discarded staging).
+            prepared_unbound[feature] += 1
+        else:
+            delivered[feature] += 1
     # submit_refusal's delivery is the suppression itself: session.suppress
     # journals action_suppressed rows carrying reason=submit_refused, and the
     # suppressed action's result is what the model sees (gt_session.py:1721).
@@ -815,6 +856,7 @@ def account(
         "direct_features": sum(1 for row in rows if not row["alias_of"]),
         "capability_aliases_shown": sum(1 for row in rows if row["alias_of"]),
         "deliveries_resolved": len(identity_feature),
+        "prepared_unbound": dict(prepared_unbound),
         "delivered": sum(1 for row in rows if row["state"] == "DELIVERED"),
         "refused": sum(1 for row in rows if row["state"] == "REFUSED"),
         "no_delivery": sum(1 for row in rows if row["state"] == "NO_DELIVERY"),

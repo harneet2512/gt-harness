@@ -80,10 +80,65 @@ _TEST_FAILURE_FILE_RE = __import__("re").compile(
     r"(?m)([A-Za-z0-9_./-]+\.py)(?::\d+|::)"
 )
 
+# Path-bearing tokens in test output: ``vendor/src/a.py``, ``src/a.py:12``,
+# ``tests/test_a.py::test_x``, ``D:\repo\src\a.py``. Anything without a
+# separator or extension never matches an edited path anyway.
+_OUTPUT_TOKEN_RE = __import__("re").compile(r"[A-Za-z0-9_~$./\\:+@=-]+")
+
 
 def _failing_test_files(output: str) -> tuple[str, ...]:
     """Test source files named in a failing test's output (best-effort)."""
     return tuple(dict.fromkeys(_TEST_FAILURE_FILE_RE.findall(output or "")))
+
+
+def _command_cwds(command: str, repo_root: str) -> list[str]:
+    """Working directories named by ``cd`` segments in the command.
+
+    ``cd tests && pytest`` emits paths relative to ``tests/`` - and an agent
+    quoting ``../src/a.py`` still reaches the edited file it hit. A ``cd``
+    inside quoted payload text is not a ``cd`` word pair after shlex.
+    """
+    import shlex
+
+    try:
+        words = shlex.split(command or "", posix=True)
+    except ValueError:
+        words = (command or "").split()
+    cwds: list[str] = []
+    for index, word in enumerate(words[:-1]):
+        if word == "cd" and not words[index + 1].startswith("-"):
+            cwds.append(os.path.join(repo_root, words[index + 1]))
+    return cwds
+
+
+def _output_repo_paths(command: str, output: str, repo_root: str) -> set[str]:
+    """Every path token in the output, normalized to repo-relative form.
+
+    Absolute paths, repo-relative paths and paths relative to a ``cd``'d
+    working directory all resolve to the same string an edited file carries;
+    ``vendor/src/a.py`` normalizes to itself and never to ``src/a.py`` - the
+    exact miss substring matching made (it linked ``src/a.py`` because the
+    vendor path CONTAINS it).
+    """
+    bases = [repo_root, *_command_cwds(command, repo_root)]
+    found: set[str] = set()
+    for token in _OUTPUT_TOKEN_RE.findall(output or ""):
+        token = token.strip("\"'")
+        token = token.split("::", 1)[0]  # file::nodeid
+        # ``path:12`` and ``path:12:34`` line/column refs; ``path:L12``.
+        token = __import__("re").sub(r"(?::\d+|:\d+:\d+|:L\d+)$", "", token)
+        if not token or "://" in token:
+            continue
+        candidates = (
+            (token,)
+            if os.path.isabs(token)
+            else tuple(os.path.join(base, token) for base in bases)
+        )
+        for candidate in candidates:
+            rel = _repo_relative(candidate, repo_root)
+            if rel:
+                found.add(rel.lower())
+    return found
 
 
 def attribute_test_failure(
@@ -108,9 +163,19 @@ def attribute_test_failure(
         return None
     if not command or not output:
         return None
-    low_output = (output or "").lower()
+    # Path attribution, not substring attribution: ``vendor/src/a.py`` must
+    # never satisfy an edit to ``src/a.py``. Every path token in the output
+    # is normalized to repo-relative form - resolving absolute paths and
+    # ``cd``-relative paths - and only exact equality links a failure to an
+    # edited file.
+    root = adapter.repo_root or os.getcwd()
     edited = sorted(adapter._edited_files)
-    linked = [f for f in edited if f.lower() in low_output]
+    found = _output_repo_paths(command, output, root)
+    linked = [
+        f
+        for f in edited
+        if str(f).replace("\\", "/").strip("/").lower() in found
+    ]
     if not linked:
         return None
     from groundtruth.runtime.gateway import CoveringResult

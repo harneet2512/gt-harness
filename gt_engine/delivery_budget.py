@@ -80,6 +80,10 @@ MAX_LOCALIZATION_HARD_DELIVERIES = 6
 REFUSAL_EVENTS = frozenset({
     "decision_context_unit_refused",
     "delivery_refused",
+    # prepared_deliveries_discarded carries ``delivery_ids`` (a list), not a
+    # per-row delivery_identity, so identity-shaped consumers must special-case
+    # it; it still belongs in this closed vocabulary of declined deliveries.
+    "prepared_deliveries_discarded",
 })
 
 DELIVERY_REFUSAL_REASONS = frozenset({

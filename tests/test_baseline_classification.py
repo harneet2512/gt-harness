@@ -246,7 +246,9 @@ def test_suite_observed_ledger_classifies_without_any_baseline():
     ("pytest tests/test_base.py::test_get_item -q", "scoped"),
     ("pytest -k merge", "scoped"),
     ("pytest --deselect tests/test_x.py", "scoped"),
-    ("cargo test", "unknown"),
+    # cargo is a runner family in its own right (E1): `cargo test` with no
+    # selection is the whole crate's suite.
+    ("cargo test", "suite"),
     ("git status", "unknown"),
     # D3: run 34996816912 issued ten test commands and the parser read
     # `unknown` for every one of them, so the classifier never ran once in
@@ -292,8 +294,10 @@ def test_suite_observed_ledger_classifies_without_any_baseline():
     ("python3 -m pytest -q 2>&1 | tail -5", "suite"),
     ("/usr/local/bin/pytest -q", "suite"),
     ("py.test -q", "suite"),
-    # Genuinely compound or unparseable stays unknown.
-    ("pytest -q && echo done", "unknown"),
+    # Genuinely compound or unparseable stays unknown. A benign companion
+    # (echo prints bytes; it cannot change what the run collected) does not
+    # make the command compound - E1.
+    ("pytest -q && echo done", "suite"),
     ("pytest -q; make lint", "unknown"),
     ("pytest -q | python analyze.py", "unknown"),
     ("make test && pytest -q", "unknown"),
@@ -328,11 +332,23 @@ def test_classification_serializes_with_layout_schema():
 # --- wiring: record_execution_evidence through MiniSweAdapter -------------
 
 
-def _adapter_with_baseline(tmp_path, *, captured=True):
+def _adapter_with_baseline(tmp_path, *, captured=True, with_repo=False,
+                           extra_repo_files=()):
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.persistent_plan.baseline import BaselineResult
 
     adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    if with_repo:
+        # Whole-suite claims need the repo's real test inventory: write the
+        # files the baseline names so `pytest tests/` provably covers them.
+        repo = tmp_path / "repo"
+        rels = {n.split("::", 1)[0] for n in (*BASELINE_PASSING,
+                                             *BASELINE_FAILING)}
+        for rel in rels | set(extra_repo_files):
+            target = repo / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("def test_x(): pass\n", encoding="utf-8")
+        adapter.repo_root = str(repo)
     if captured:
         adapter.plan_inputs = SimpleNamespace(
             baseline=BaselineResult(
@@ -1120,7 +1136,7 @@ def test_real_baseline_outranks_the_probe(tmp_path):
 
 
 def test_directory_run_covering_the_known_suite_writes_suite_truth(tmp_path):
-    adapter = _adapter_with_baseline(tmp_path)
+    adapter = _adapter_with_baseline(tmp_path, with_repo=True)
     adapter.record_execution_evidence(
         _evidence("pytest tests/ -q",
                   "378 passed, 2 skipped in 40.0s\n", returncode=0),
@@ -1139,7 +1155,7 @@ def test_directory_run_covering_the_known_suite_writes_suite_truth(tmp_path):
 
 def test_directory_run_covering_the_known_suite_opens_the_window(tmp_path):
     """The advisory's whole-suite-green gate must credit `pytest tests/`."""
-    adapter = _adapter_with_baseline(tmp_path)
+    adapter = _adapter_with_baseline(tmp_path, with_repo=True)
     line = adapter.record_execution_evidence(
         _evidence("pytest tests/ -q",
                   "378 passed, 2 skipped in 40.0s\n", returncode=0),
@@ -1154,7 +1170,7 @@ def test_directory_run_covering_the_known_suite_opens_the_window(tmp_path):
 def test_directory_run_covering_the_known_suite_records_suite_failures(tmp_path):
     """The other half of suite truth: a failure inside a covering run is a
     SUITE failure, not a scoped observation."""
-    adapter = _adapter_with_baseline(tmp_path)
+    adapter = _adapter_with_baseline(tmp_path, with_repo=True)
     adapter.record_execution_evidence(
         _evidence("pytest tests/ -q",
                   _failing_output("tests/test_base.py::test_get_item")
@@ -1167,13 +1183,12 @@ def test_directory_run_covering_the_known_suite_records_suite_failures(tmp_path)
 
 
 def test_a_subdirectory_run_does_not_claim_suite(tmp_path):
-    """Baseline names under tests/ AND integration/; `pytest tests/` misses
-    half the known suite - it must stay scoped."""
-    adapter = _adapter_with_baseline(tmp_path)
+    """The repo carries tests/ AND integration/; `pytest tests/` misses half
+    the real inventory - it must stay scoped."""
+    adapter = _adapter_with_baseline(
+        tmp_path, with_repo=True,
+        extra_repo_files=("integration/test_api.py",))
     ledger = adapter._suite_ledger()
-    ledger.baseline_passing = ledger.baseline_passing | {
-        "integration/test_api.py::test_roundtrip"
-    }
     adapter.record_execution_evidence(
         _evidence("pytest tests/ -q",
                   "378 passed in 40.0s\n", returncode=0),
@@ -1224,10 +1239,18 @@ def test_an_empty_known_universe_never_claims_suite(tmp_path):
     assert not ledger.covers_known_suite(("tests",), ())
 
 
-def test_covers_known_suite_unit_table():
+def test_covers_known_suite_unit_table(tmp_path):
+    from gt_engine.runtime_observation import repo_test_inventory
+
+    repo = tmp_path / "repo"
+    for rel in ("tests/test_base.py", "tests/test_utils.py"):
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_x(): pass\n", encoding="utf-8")
     ledger = SuiteVerdictLedger(
         baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
     )
+    ledger.note_repo_test_inventory(repo_test_inventory(repo))
     assert ledger.covers_known_suite(("tests",), ())
     assert ledger.covers_known_suite(("tests/",), ())
     assert not ledger.covers_known_suite(("tests/test_base.py",), ())
@@ -1235,6 +1258,34 @@ def test_covers_known_suite_unit_table():
     assert not ledger.covers_known_suite(
         ("tests",), ("tests/test_utils.py",)
     )
-    # A name outside the covered root defeats the claim.
-    ledger.note_failing({"elsewhere/test_x.py::test_z"})
+    # A test FILE outside the covered root defeats the claim.
+    extra = repo / "integration" / "test_x.py"
+    extra.parent.mkdir(parents=True, exist_ok=True)
+    extra.write_text("def test_x(): pass\n", encoding="utf-8")
+    ledger.note_repo_test_inventory(repo_test_inventory(repo))
     assert not ledger.covers_known_suite(("tests",), ())
+
+
+def test_covers_known_suite_without_extent_evidence():
+    """Neither inventory nor baseline scope: extent is unknown and unknown
+    never authorises a whole-suite claim."""
+    ledger = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING
+    )
+    assert not ledger.covers_known_suite(("tests",), ())
+
+    # The baseline command's own declared scope is the fallback ground truth.
+    declared = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING,
+        baseline_scope="scoped", baseline_scope_paths=("tests",),
+    )
+    assert declared.covers_known_suite(("tests",), ())
+    assert not declared.covers_known_suite(("tests/unit",), ())
+
+    # A baseline that ran unrestricted makes every directory run narrower
+    # than the suite by construction.
+    unrestricted = SuiteVerdictLedger(
+        baseline_passing=BASELINE_PASSING, baseline_failing=BASELINE_FAILING,
+        baseline_scope="suite",
+    )
+    assert not unrestricted.covers_known_suite(("tests",), ())

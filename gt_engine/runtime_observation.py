@@ -20,7 +20,7 @@ import sqlite3
 import stat
 import subprocess
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .repository_identity import (
@@ -334,9 +334,46 @@ _BASELINE_CLASSIFICATION_LAYOUT = "gt.baseline_classification.v1"
 # `unknown` for all ten, so nothing downstream ever ran. Every one of them was
 # `cd /testbed && python -m pytest <paths> ... 2>&1 | tail -N`: the `cd`
 # prefix, the `2>&1` word and the trailing pipe each defeated it on their own.
+#
+# E1: measured over the 790 recorded trajectories in this harness's own
+# command corpus (tests/fixtures/command_corpus/model_test_commands.json -
+# 1282 recorded test commands, 964 once heredoc bodies are excluded), the
+# single-family successor to D3 still read `unknown` for 622 of them: 169 of
+# 511 pytest commands (33.1%) and 100% of the 453 non-pytest ones -
+# jest/vitest/mocha 157, cargo 116, npm/pnpm/yarn 85, go 78, make/tox 16,
+# unittest 1 - because it recognised no runner but pytest. Downstream,
+# `_classify_execution_vs_baseline` classifies only when the scope is known,
+# so the classifier, the suite ledger and the submit-window advisory were
+# inert on every Rust/Go/JS/TS task (16 of the 20 DeepSWE smoke tasks) and on
+# a third of the Python ones. The pytest misses were not exotic: `&&` chains
+# with benign preludes, `;` chains, `| grep -E "passed|failed"` (grep IS an
+# output filter), `timeout 180 python -m pytest`, `FORCE_COLOR=1` env
+# prefixes, `PY=... && $PY -m pytest`, `git worktree add ... && cd ... &&
+# pytest`, and `> /tmp/log 2>&1; tail -6 /tmp/log`.
+#
+# The parser below is therefore two layers:
+#   1. a shell-segment tokenizer that splits on `&&`, `||`, `;`, `|` and
+#      newline while treating quotes, `$(...)`, `${...}` and backticks as
+#      opaque - ``go test `go list ./... | grep -v /js` `` is ONE segment;
+#   2. a per-family runner reader. A command is a runner command when exactly
+#      ONE segment invokes a runner and every other segment is benign. Two
+#      runner segments are ambiguous (which one produced these bytes?) and a
+#      non-benign segment can change what the runner sees, so both read
+#      `unknown`.
+# The docstring's conservatism is unchanged: an ambiguous suite may read
+# `scoped` and lose only a ledger-promotion opportunity; a narrowed run must
+# NEVER read `suite`.
 
 _REDIRECT_RE = re.compile(r"^(?:\d*|&)(?:>>?|<)")
 _BARE_REDIRECT = frozenset({">", ">>", "<", "2>", "2>>", "&>", "&>>", ">&"})
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A heredoc body is arbitrary text - `cat > tests/new_test.py <<EOF` writes a
+# whole test file - so nothing about the run can be read from the argv alone.
+# 318 of the corpus's 1282 recorded test commands carry one.
+_HEREDOC_RE = re.compile(r"<<-?\s*[\"'\\]?\w")
+# A path that is really a glob or a command substitution: its extent is not
+# knowable here, so it narrows the run rather than describing its coverage.
+_OPAQUE_PATH_RE = re.compile(r"[*?`]|\$\(|\$\{")
 # A trailing segment that only reshapes bytes already produced cannot change
 # what the run covered, so it does not make the command compound.
 _OUTPUT_FILTERS = frozenset({
@@ -344,13 +381,83 @@ _OUTPUT_FILTERS = frozenset({
     "wc", "less", "more", "sort", "uniq", "cut", "tr", "awk", "column",
     "strings", "nl", "fold", "rev", "expand",
 })
-# Wrappers that may precede the pytest token inside its own segment. Without
-# this allowlist `grep pytest out.log` reads as a pytest invocation.
-_RUNNER_WRAPPERS = frozenset({
-    "python", "python2", "python3", "py", "uv", "uvx", "poetry", "pdm",
-    "hatch", "pipenv", "timeout", "env", "nice", "stdbuf", "xvfb-run",
-    "coverage", "nohup", "tox",
+# Segments that read or print without changing what the runner will collect.
+# `git diff` and `cat` DO stream text into the same captured bytes the name
+# extractors read, so a file that literally contains `FAILED x::y` can still
+# donate a name (the H5 hazard); what bounds that is the `kind == "test"` gate
+# in `_classify_execution_vs_baseline`, and admitting these prefixes is what
+# recovers ~30% of the pytest corpus. Anything that writes, installs, builds
+# or runs another program is deliberately NOT here.
+_BENIGN_COMMANDS = frozenset({
+    "cd", "echo", "printf", "true", ":", "pwd", "export", "ls", "cat", "nl",
+    "head", "tail", "wc", "sed", "grep", "egrep", "fgrep", "rg", "test", "[",
+    "sort", "uniq", "cut", "tr", "awk", "column", "date", "basename",
+    "dirname", "readlink", "file", "stat", "md5sum", "sha256sum", "cmp",
+    "tee", "less", "more", "rev", "fold", "expand", "strings", "which",
+    "type", "hostname", "whoami", "env",
 })
+# `git worktree add` builds a second checkout the agent then `cd`s into; the
+# runner still runs once, against a tree this command names.
+_BENIGN_GIT = frozenset({
+    "status", "rev-parse", "branch", "log", "diff", "show", "merge-base",
+})
+# A static check reads the tree and reports; it neither builds anything nor
+# selects a single test, and none of these print a runner's name grammar
+# (`ruff` prints `path:line:col: CODE`, `tsc` prints `path(l,c): error TSnnnn`).
+# The wheel's own taxonomy draws the same line - ValidationKind.STATIC_CHECK
+# here, COMPILER_CHECK deliberately NOT: a build is the `npm run build` class
+# and stays non-benign.
+_STATIC_CHECKS = frozenset({
+    "ruff", "mypy", "flake8", "pylint", "pyright", "black", "isort",
+    "eslint", "prettier", "tsc", "biome", "rubocop", "phpstan", "shellcheck",
+})
+_STATIC_CHECK_SUBCOMMANDS = {
+    "cargo": frozenset({"clippy", "fmt"}),
+    "go": frozenset({"vet", "fmt"}),
+    "gofmt": frozenset(),
+}
+# Wrappers that may precede the runner token inside its own segment. Without
+# an allowlist `grep pytest out.log` reads as a pytest invocation.
+_PLAIN_WRAPPERS = frozenset({
+    "nohup", "stdbuf", "xvfb-run", "sudo", "command", "exec", "time",
+    "setsid", "ionice",
+})
+# `<tool> run <runner>` forms. `pnpm test` is a runner, `pnpm exec vitest` is
+# a wrapper, so the subcommand - not the tool - decides.
+#
+# E2 (Terminal-Bench 2.0): 82 of the 89 TB2 tasks invoke their tests as
+# `uvx pytest ...` or `uv run [--project <dir>] pytest ...`. The pinned wheel
+# recognises `uv run pytest` but NOT `uvx pytest` (`uvx` is absent from its
+# wrapper alternatives), so those runs produced no `execution_evidence
+# kind=test` row at all and covering_red / recovery / submit_refusal were dead
+# on them. Both forms are peeled here, and `wrapper_stripped_command` re-
+# exposes the runner to the kind decision in `compile_execution_evidence`.
+_RUN_WRAPPERS = frozenset({"uv", "poetry", "pdm", "hatch", "pipenv", "rye"})
+_EXEC_WRAPPERS = frozenset({"npx", "bunx", "uvx"})
+# Options `uv run` consumes before the program it runs. `--project <dir>` also
+# names the directory the run happened in, which is that run's coverage.
+_UV_RUN_VALUE_OPTIONS = frozenset({
+    "--project", "--directory", "--with", "--with-requirements", "--python",
+    "-p", "--package", "--extra", "--group", "--index", "--color",
+    "--config-file", "--cache-dir", "--python-preference",
+})
+_INTERPRETER_RE = re.compile(r"^(?:python[\d.]*|py|pypy[\d.]*)$")
+# CPython flags that take no value and leave `-m` reachable. `-c`, `-`,
+# `--help`-class options and a bare script path are NOT here on purpose:
+# they replace the module run rather than precede it.
+_INTERPRETER_NOARG_FLAGS = frozenset({
+    "-B", "-b", "-E", "-I", "-O", "-OO", "-P", "-R", "-s", "-S", "-u",
+    "-q", "-v", "-V", "-VV", "-x",
+})
+# Interpreter flags that consume exactly one value.
+_INTERPRETER_VALUE_FLAGS = frozenset({"-W", "-X", "--check-hash-based-pycs"})
+_SCRIPT_RUNNERS = frozenset({"npm", "pnpm", "yarn", "bun", "deno"})
+_DIRECT_RUNNERS = {
+    "pytest": "pytest", "py.test": "pytest",
+    "jest": "jest", "vitest": "vitest", "mocha": "mocha",
+    "ctest": "ctest", "tox": "tox", "nox": "nox",
+}
+
 # Options that consume the following word. `-p no:cacheprovider` read that
 # plugin name as a positional path and turned a whole-suite run into `scoped`.
 _VALUE_OPTIONS = frozenset({
@@ -369,102 +476,446 @@ _NARROWING_OPTIONS = frozenset({
 # Options that subtract from coverage; their targets are recorded so a name
 # inside an ignored file is never promoted by the run that skipped it.
 _EXCLUDE_OPTIONS = frozenset({"--ignore", "--ignore-glob", "--deselect"})
-_SHELL_OPERATORS = frozenset({"|", "||", "&&", ";", "&"})
-
-
-def _shell_words(command: str) -> list[str] | None:
-    """Split a command into words, with `;` separated out.
-
-    ``shlex`` does not treat `;` as a delimiter, so action 26's
-    `... | tail -10; git stash pop` arrives as the word `-10;`.
-    """
-    try:
-        words = shlex.split(command or "", posix=True)
-    except ValueError:
-        return None
-    out: list[str] = []
-    for word in words:
-        if ";" in word:
-            out.extend(part for part in re.split(r"(;)", word) if part)
-        else:
-            out.append(word)
-    return out
-
-
-def _shell_segments(words: list[str]) -> list[tuple[str, list[str]]]:
-    """Split words into ``(preceding_operator, segment)`` pairs."""
-    segments: list[tuple[str, list[str]]] = []
-    current: list[str] = []
-    operator = ""
-    for word in words:
-        if word in _SHELL_OPERATORS:
-            if current:
-                segments.append((operator, current))
-            current = []
-            operator = word
-        else:
-            current.append(word)
-    if current:
-        segments.append((operator, current))
-    return segments
-
-
-def _pytest_index(words: list[str]) -> int | None:
-    """Index of the pytest token in a segment, or None.
-
-    ``python -m pytest`` is the interpreter form: the `-m` sits BEFORE the
-    token and must never be read as a marker expression.
-    """
-    for i, word in enumerate(words):
-        base = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if base not in ("pytest", "py.test"):
-            continue
-        if i == 0 or words[i - 1] == "-m":
-            return i
-        first = words[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if first in _RUNNER_WRAPPERS or first.startswith("python"):
-            return i
-        return None
-    return None
-
-
-def _is_setup_prefix(words: list[str]) -> bool:
-    """`cd <dir>` and `git stash` may precede the runner without hiding it."""
-    return (len(words) == 2 and words[0] == "cd") or words == ["git", "stash"]
-
-
-def _is_stash_pop(words: list[str]) -> bool:
-    return words[:3] == ["git", "stash", "pop"]
-
-
-def _is_output_filter(words: list[str]) -> bool:
-    if not words:
-        return False
-    base = words[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    return base in _OUTPUT_FILTERS
 
 
 @dataclass(frozen=True)
-class CommandCoverage:
-    """What one test command actually attempted.
+class CommandShape:
+    """What one test command actually attempted, and by which runner.
 
-    ``paths``    - positional path/nodeid arguments (the run's coverage)
-    ``excluded`` - --ignore / --ignore-glob / --deselect targets, subtracted
-    ``narrowed`` - -k / -m / a ::nodeid: the run skipped part of its own
-                   coverage, so it may fold names but never promote them
+    ``scope``           - ``suite`` | ``scoped`` | ``unknown``
+    ``family``          - the runner that produced the bytes, so the name
+                          extractors can be pointed at the right grammar
+    ``coverage``        - positional path/nodeid/package arguments. For a
+                          ``suite`` run in a per-package family (npm, jest,
+                          vitest, mocha) it is instead the package DIRECTORY
+                          the run happened in: ``cd ark/json-schema && pnpm
+                          test`` is the whole suite OF THAT PACKAGE, and where
+                          it ran is the only coverage statement it makes.
+    ``excluded``        - --ignore / --ignore-glob / --deselect targets
+    ``narrowed``        - -k / -m / -run / -t / a ::nodeid / a filter after
+                          `--`: the run skipped part of its own coverage, so
+                          it may fold names but never promote them
+    ``runner_segment``  - the runner's own argv, wrappers and redirections
+                          stripped, suitable to hand to a counts parser
     """
 
     scope: str
-    paths: tuple[str, ...] = ()
+    family: str = "unknown"
+    coverage: tuple[str, ...] = ()
     excluded: tuple[str, ...] = ()
     narrowed: bool = False
+    runner_segment: tuple[str, ...] = ()
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        """Compatibility alias for the pytest-era ``CommandCoverage.paths``."""
+        return self.coverage
 
 
-def _parse_pytest_segment(words: list[str]) -> CommandCoverage:
-    index = _pytest_index(words)
-    if index is None:
-        return CommandCoverage("unknown")
-    args = words[index + 1:]
+# The pre-E1 name. Callers that only ever saw pytest keep working unchanged.
+CommandCoverage = CommandShape
+
+_UNKNOWN_SHAPE = CommandShape("unknown")
+
+
+def _basename(word: str) -> str:
+    return word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+
+
+_EXECUTABLE_SUFFIX_RE = re.compile(r"(?i)\.(?:exe|bat|cmd|com)$")
+
+
+def _runner_basename(word: str) -> str:
+    """Executable basename a runner identity can match.
+
+    A Windows-shaped invocation still names the runner:
+    ``"C:\\...\\python.exe" -m unittest`` is a unittest run on any host, so
+    runner resolution must see ``python`` the way the shell does. Applied
+    only where a word is resolved AS a program name - never to payload args.
+    """
+    return _EXECUTABLE_SUFFIX_RE.sub("", _basename(word))
+
+
+def _closing_quote(text: str, start: int) -> int | None:
+    """Index of the quote that closes the one at ``start``, or None."""
+    quote = text[start]
+    i = start + 1
+    while i < len(text):
+        if quote == '"' and text[i] == "\\" and i + 1 < len(text):
+            i += 2
+            continue
+        if text[i] == quote:
+            return i
+        i += 1
+    return None
+
+
+def _closing_bracket(text: str, start: int) -> int | None:
+    """Index of the `)`/`}` closing the bracket at ``start``, or None."""
+    opening = text[start]
+    closing = ")" if opening == "(" else "}"
+    depth = 0
+    i = start
+    while i < len(text):
+        char = text[i]
+        if char == "\\" and i + 1 < len(text):
+            i += 2
+            continue
+        if char in "'\"":
+            end = _closing_quote(text, i)
+            if end is None:
+                return None
+            i = end + 1
+            continue
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _split_segments(command: str) -> list[tuple[str, str]] | None:
+    """``[(preceding_operator, raw_text)]`` split at TOP-LEVEL operators.
+
+    Quotes, ``$(...)``, ``${...}`` and backticks are opaque, so the `|` inside
+    ``go test `go list ./... | grep -v /js` `` does not split the command and
+    the `;` inside ``echo "a;b"`` does not either. Returns None when quoting
+    never closes - an unreadable command must read ``unknown`` rather than
+    half a command.
+    """
+    text = command or ""
+    segments: list[tuple[str, str]] = []
+    operator = ""
+    buf: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        char = text[i]
+        if char == "\\" and i + 1 < n:
+            buf.append(text[i:i + 2])
+            i += 2
+            continue
+        if char in "'\"":
+            end = _closing_quote(text, i)
+            if end is None:
+                return None
+            buf.append(text[i:end + 1])
+            i = end + 1
+            continue
+        if char == "`":
+            end = text.find("`", i + 1)
+            if end == -1:
+                return None
+            buf.append(text[i:end + 1])
+            i = end + 1
+            continue
+        if text.startswith("$(", i) or text.startswith("${", i):
+            end = _closing_bracket(text, i + 1)
+            if end is None:
+                return None
+            buf.append(text[i:end + 1])
+            i = end + 1
+            continue
+        if text.startswith("&&", i) or text.startswith("||", i):
+            segments.append((operator, "".join(buf)))
+            operator = text[i:i + 2]
+            buf = []
+            i += 2
+            continue
+        if char == "&" and (
+            (buf and "".join(buf).rstrip()[-1:] == ">")
+            or text[i + 1:i + 2] == ">"
+        ):
+            # `2>&1`, `&>out`, `>&2`: a descriptor, not the background
+            # operator. Splitting here is what made every `... 2>&1 | tail`
+            # command in the corpus unreadable.
+            buf.append(char)
+            i += 1
+            continue
+        if char in ";|&\n":
+            segments.append((operator, "".join(buf)))
+            operator = "\n" if char == "\n" else char
+            buf = []
+            i += 1
+            continue
+        buf.append(char)
+        i += 1
+    segments.append((operator, "".join(buf)))
+    return [(op, raw) for op, raw in segments if raw.strip()]
+
+
+def _mask_substitutions(text: str) -> tuple[str, dict[str, str]]:
+    """Replace ``$(...)``/``${...}``/backtick spans with space-free tokens.
+
+    ``shlex`` knows nothing about substitution, so ``go test `go list ./... |
+    grep -v /js``` came back as five words and the package argument was lost.
+    Masking keeps each substitution as ONE word, which is what it is.
+    """
+    table: dict[str, str] = {}
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        char = text[i]
+        if char == "\\" and i + 1 < n:
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if char in "'\"":
+            end = _closing_quote(text, i)
+            if end is None:
+                return text, {}
+            out.append(text[i:end + 1])
+            i = end + 1
+            continue
+        end = None
+        if char == "`":
+            found = text.find("`", i + 1)
+            end = None if found == -1 else found
+        elif text.startswith("$(", i) or text.startswith("${", i):
+            end = _closing_bracket(text, i + 1)
+        if end is None:
+            out.append(char)
+            i += 1
+            continue
+        key = f"\x00sub{len(table)}\x00"
+        table[key] = text[i:end + 1]
+        out.append(key)
+        i = end + 1
+    return "".join(out), table
+
+
+def _shell_words(command: str) -> list[str] | None:
+    """Split one segment into words. None when the quoting is unreadable."""
+    masked, table = _mask_substitutions(command or "")
+    try:
+        words = shlex.split(masked, posix=True)
+    except ValueError:
+        return None
+    if not table:
+        return words
+    restored: list[str] = []
+    for word in words:
+        for key, value in table.items():
+            if key in word:
+                word = word.replace(key, value)
+        restored.append(word)
+    return restored
+
+
+def _strip_redirections(words: list[str]) -> tuple[list[str], tuple[str, ...]]:
+    """``(argv, files_written)``. `2>&1` dups a descriptor, it writes nothing."""
+    argv: list[str] = []
+    written: list[str] = []
+    expect_target = False
+    writing = False
+    for word in words:
+        if expect_target:
+            expect_target = False
+            if writing and not word.startswith("&"):
+                written.append(word)
+            continue
+        if word in _BARE_REDIRECT:
+            expect_target = True
+            writing = ">" in word
+            continue
+        if _REDIRECT_RE.match(word):
+            rest = _REDIRECT_RE.sub("", word, count=1)
+            if not rest:
+                expect_target = True
+                writing = ">" in word
+            elif ">" in word and not rest.startswith("&"):
+                written.append(rest)
+            continue
+        argv.append(word)
+    return argv, tuple(written)
+
+
+def _strip_wrappers(words: list[str]) -> tuple[list[str], tuple[str, ...]]:
+    """Peel env assignments and exec wrappers off a segment's head.
+
+    `FORCE_COLOR=1 timeout 200 cargo test ...` and `PYTHONPATH=... timeout 900
+    env CONTEXT=abs go test ...` are the two shapes the corpus uses most;
+    neither changes which tests the run attempted.
+    """
+    assignments: list[str] = []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        base = _runner_basename(word)
+        if _ENV_ASSIGN_RE.match(word):
+            assignments.append(word)
+            i += 1
+            continue
+        if base in _PLAIN_WRAPPERS:
+            i += 1
+            continue
+        if base == "timeout":
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                if words[i] in ("-k", "-s", "--signal", "--kill-after"):
+                    i += 1
+                i += 1
+            i += 1  # the duration
+            continue
+        if base == "env":
+            i += 1
+            while i < len(words):
+                if _ENV_ASSIGN_RE.match(words[i]):
+                    assignments.append(words[i])
+                    i += 1
+                elif words[i] == "-u" and i + 1 < len(words):
+                    i += 2
+                elif words[i] in ("-i", "--ignore-environment"):
+                    i += 1
+                else:
+                    break
+            continue
+        if base == "nice":
+            i += 1
+            if i < len(words) and words[i] == "-n":
+                i += 2
+            elif i < len(words) and re.fullmatch(r"-\d+", words[i]):
+                i += 1
+            continue
+        break
+    return words[i:], tuple(assignments)
+
+
+def _strip_run_options(words: list[str], hint: str) -> tuple[list[str], str]:
+    """Peel `uv run`'s own options off the program it is about to run.
+
+    `uv run --project /app pytest -q` (E2: the TB2 house style) hides the
+    runner behind two words that are not the runner's. `--project <dir>` is
+    also the only statement such a command makes about WHERE it ran.
+    """
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            i += 1
+            break
+        if not word.startswith("-"):
+            break
+        option, equals, inline = word.partition("=")
+        if option in ("--project", "--directory"):
+            if equals:
+                hint = hint or inline
+            elif i + 1 < len(words):
+                hint = hint or words[i + 1]
+        if option in _UV_RUN_VALUE_OPTIONS and not equals:
+            i += 1
+        i += 1
+    return words[i:], hint
+
+
+def _runner_call(
+    argv: list[str], assigns: dict[str, str]
+) -> tuple[str, list[str], list[str], str] | None:
+    """``(family, args_after_the_runner, runner_argv, cwd_hint)`` or None."""
+    words = list(argv)
+    hint = ""
+    for _ in range(6):
+        if not words:
+            return None
+        head = words[0]
+        if head.startswith("$"):
+            # `PY=/root/.../python && $PY -m pytest` - the interpreter is
+            # named in an earlier segment, so resolve it before giving up.
+            name = head.lstrip("$").strip("{}")
+            if name not in assigns:
+                return None
+            words = [assigns[name], *words[1:]]
+            continue
+        base = _runner_basename(head)
+        if base in _RUN_WRAPPERS and words[1:2] == ["run"]:
+            words, hint = _strip_run_options(words[2:], hint)
+            continue
+        if base in _EXEC_WRAPPERS:
+            words = words[1:]
+            continue
+        if base == "pnpm" and words[1:2] in (["exec"], ["dlx"]):
+            words = words[2:]
+            continue
+        if base == "yarn" and words[1:2] == ["dlx"]:
+            words = words[2:]
+            continue
+        # `yarn jest`, `pnpm vitest run`: the package manager is running a
+        # binary directly, not the package's `test` script.
+        if base in ("yarn", "pnpm", "bun") and _runner_basename(
+            words[1] if len(words) > 1 else ""
+        ) in _DIRECT_RUNNERS:
+            words = words[1:]
+            continue
+        break
+    if not words:
+        return None
+    base = _runner_basename(words[0])
+    rest = words[1:]
+    if base in _DIRECT_RUNNERS:
+        return _DIRECT_RUNNERS[base], rest, words, hint
+    if _INTERPRETER_RE.match(base):
+        # Flags the interpreter consumes before `-m`. `-c` and a bare script
+        # path END module resolution (python executes them instead), so they
+        # are deliberately absent - only flags that leave `-m` reachable skip.
+        i = 0
+        while i < len(rest):
+            if rest[i] in _INTERPRETER_NOARG_FLAGS:
+                i += 1
+            elif rest[i] in _INTERPRETER_VALUE_FLAGS and i + 1 < len(rest):
+                i += 2
+            else:
+                break
+        if rest[i:i + 1] == ["-m"] and len(rest) > i + 1:
+            module = rest[i + 1]
+            if module in ("pytest", "py.test"):
+                return "pytest", rest[i + 2:], words, hint
+            if module in ("unittest", "tox", "nox"):
+                return module, rest[i + 2:], words, hint
+        return None
+    if base == "cargo":
+        if rest[:1] == ["test"]:
+            return "cargo", rest[1:], words, hint
+        if rest[:2] == ["nextest", "run"]:
+            return "cargo", rest[2:], words, hint
+        return None
+    if base == "go":
+        return ("go", rest[1:], words, hint) if rest[:1] == ["test"] else None
+    if base in _SCRIPT_RUNNERS:
+        args = rest[1:] if rest[:1] == ["run"] else rest
+        if not args:
+            return None
+        script = args[0]
+        if script == "test" or script.startswith("test:"):
+            return "node", args[1:], words, hint
+        return None
+    if base in ("make", "gmake"):
+        skip_next = False
+        for i, arg in enumerate(rest):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                if arg in ("-f", "-C", "-j", "--file", "--directory", "--jobs"):
+                    skip_next = True
+                continue
+            if arg in ("test", "tests", "check"):
+                return "make", rest[i + 1:], words, hint
+            return None
+        return None
+    if base in ("mvn", "mvnw"):
+        return ("maven", rest, words, hint) if "test" in rest else None
+    if base in ("gradle", "gradlew"):
+        selects = any(arg == "test" or arg.endswith(":test") for arg in rest)
+        return ("gradle", rest, words, hint) if selects else None
+    if base == "dotnet":
+        return ("dotnet", rest[1:], words, hint) if rest[:1] == ["test"] else None
+    return None
+
+
+def _read_pytest(args: list[str], cwd: str) -> CommandShape:
+    del cwd
     paths: list[str] = []
     excluded: list[str] = []
     narrowed = False
@@ -472,11 +923,6 @@ def _parse_pytest_segment(words: list[str]) -> CommandCoverage:
     for i, arg in enumerate(args):
         if skip_next:
             skip_next = False
-            continue
-        if arg in _BARE_REDIRECT:
-            skip_next = True
-            continue
-        if _REDIRECT_RE.match(arg):
             continue
         if arg == "--":
             continue
@@ -497,57 +943,717 @@ def _parse_pytest_segment(words: list[str]) -> CommandCoverage:
         paths.append(arg)
     if any("::" in path for path in paths):
         narrowed = True
+    if any(_OPAQUE_PATH_RE.search(path) for path in paths):
+        narrowed = True
     scope = "scoped" if (paths or excluded or narrowed) else "suite"
-    return CommandCoverage(scope, tuple(paths), tuple(excluded), narrowed)
+    return CommandShape(scope, "pytest", tuple(paths), tuple(excluded), narrowed)
 
 
-def test_command_coverage(command: str) -> CommandCoverage:
-    """Classify a pytest invocation's coverage shape and extent.
+def _read_unittest(args: list[str], cwd: str) -> CommandShape:
+    """`python -m unittest` is the whole suite unless a module or -k narrows it."""
+    del cwd
+    targets: list[str] = []
+    narrowed = False
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-"):
+            if arg == "-k":
+                narrowed = True
+                skip_next = True
+            elif arg in ("-s", "--start-directory", "-t",
+                         "--top-level-directory", "-p", "--pattern"):
+                skip_next = True
+            continue
+        if arg == "discover":
+            continue
+        targets.append(arg)
+    scope = "scoped" if (targets or narrowed) else "suite"
+    return CommandShape(scope, "unittest", tuple(targets), (), narrowed)
+
+
+_CARGO_TARGET_OPTIONS = frozenset({
+    "--test", "--bin", "--example", "--bench", "--lib", "--bins", "--tests",
+    "--doc", "--benches", "--examples",
+})
+_CARGO_VALUE_OPTIONS = frozenset({
+    "--features", "--target", "--manifest-path", "--profile", "-j", "--jobs",
+    "--target-dir", "--message-format", "--config", "-Z",
+})
+_LIBTEST_VALUE_OPTIONS = frozenset({
+    "--test-threads", "--skip", "--format", "--logfile", "-Z", "--color",
+})
+
+
+def _read_cargo(args: list[str], cwd: str) -> CommandShape:
+    """`-p pkg` is the coverage statement; anything positional is a filter.
+
+    `cargo test -p pest_meta -- --test coalesce_is_final_top_down_pass` - the
+    single most common Rust shape in the corpus - is a NARROWED run of one
+    package: it may fold `coalesce_is_final_top_down_pass` but must never
+    promote the rest of pest_meta. `cargo test` and `cargo test --workspace`
+    are the suite.
+    """
+    del cwd
+    packages: list[str] = []
+    narrowed = False
+    targeted = False
+    after_dashdash = False
+    skip_next = False
+    for i, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            after_dashdash = True
+            continue
+        if arg.startswith("-") and arg != "-":
+            option, equals, inline = arg.partition("=")
+            if after_dashdash:
+                if option == "--skip":
+                    narrowed = True
+                if option in _LIBTEST_VALUE_OPTIONS and not equals:
+                    skip_next = True
+                continue
+            if option in ("-p", "--package", "--exclude"):
+                value = inline if equals else (
+                    args[i + 1] if i + 1 < len(args) else ""
+                )
+                if not equals:
+                    skip_next = True
+                if value:
+                    packages.append(value)
+                continue
+            if option in _CARGO_TARGET_OPTIONS:
+                targeted = True
+                if not equals and option in (
+                    "--test", "--bin", "--example", "--bench"
+                ):
+                    skip_next = True
+                continue
+            if option in ("--workspace", "--all"):
+                continue
+            if option in _CARGO_VALUE_OPTIONS and not equals:
+                skip_next = True
+            continue
+        # A bare word is a libtest name filter on either side of `--`.
+        narrowed = True
+    scope = "scoped" if (packages or targeted or narrowed) else "suite"
+    return CommandShape(scope, "cargo", tuple(packages), (), narrowed)
+
+
+_GO_VALUE_OPTIONS = frozenset({
+    "-count", "-timeout", "-tags", "-parallel", "-cpu", "-coverprofile",
+    "-covermode", "-o", "-ldflags", "-gcflags", "-exec", "-fuzztime",
+    "-shuffle", "-benchtime", "-blockprofile", "-cpuprofile", "-memprofile",
+    "-outputdir", "-coverpkg",
+})
+_GO_NARROWING_OPTIONS = frozenset({
+    "-run", "-bench", "-skip", "-fuzz", "-test.run",
+})
+
+
+def _read_go(args: list[str], cwd: str) -> CommandShape:
+    """`./...` is the suite; anything else is a package prefix.
+
+    A bare `go test` tests only the package in the working directory, so it
+    reads `scoped` on `.` - calling it `suite` is the one direction this
+    module is not allowed to be wrong in.
+    """
+    del cwd
+    paths: list[str] = []
+    narrowed = False
+    whole = False
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-"):
+            option, equals, _inline = arg.partition("=")
+            if option in _GO_NARROWING_OPTIONS:
+                narrowed = True
+                if not equals:
+                    skip_next = True
+                continue
+            if option in _GO_VALUE_OPTIONS and not equals:
+                skip_next = True
+            continue
+        if arg == "./...":
+            whole = True
+            continue
+        if _OPAQUE_PATH_RE.search(arg):
+            # ``go test `go list ./... | grep -v /js` `` - the package list is
+            # computed at run time, so its extent is not knowable here.
+            narrowed = True
+            paths.append(arg)
+            continue
+        trimmed = arg[2:] if arg.startswith("./") else arg
+        if trimmed.endswith("/..."):
+            trimmed = trimmed[:-4]
+        paths.append(trimmed or ".")
+    if paths or narrowed:
+        scope = "scoped"
+    elif whole:
+        scope = "suite"
+    else:
+        scope = "scoped"
+        paths = ["."]
+    return CommandShape(scope, "go", tuple(paths), (), narrowed)
+
+
+_NODE_NARROWING_OPTIONS = frozenset({
+    "-t", "--testNamePattern", "--test-name-pattern", "--grep", "-g",
+    "--fgrep", "-f", "--testPathPattern", "--testPathPatterns",
+})
+_NODE_VALUE_OPTIONS = frozenset({
+    "--reporter", "--reporters", "--config", "-c", "--maxWorkers", "--shard",
+    "--coverageDirectory", "--outputFile", "--timeout", "--retries",
+    "--require", "-r", "--ui", "--project", "--projects", "--environment",
+    "--root", "--dir", "--maxConcurrency", "--pool", "--testTimeout",
+})
+
+
+def _read_node(args: list[str], cwd: str, family: str) -> CommandShape:
+    """jest/vitest/mocha argv, reached directly or through an npm script.
+
+    `cd ark/json-schema && pnpm test` is the WHOLE suite of that package, so
+    the scope is `suite` and the package directory is its coverage statement.
+    """
+    paths: list[str] = []
+    narrowed = False
+    skip_next = False
+    if family == "vitest" and args[:1] in (["run"], ["watch"], ["related"]):
+        args = args[1:]
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            continue
+        if arg.startswith("-") and arg != "-":
+            option, equals, _inline = arg.partition("=")
+            if option in _NODE_NARROWING_OPTIONS:
+                narrowed = True
+                if not equals:
+                    skip_next = True
+                continue
+            if option in _NODE_VALUE_OPTIONS and not equals:
+                skip_next = True
+            continue
+        if _OPAQUE_PATH_RE.search(arg):
+            narrowed = True
+        paths.append(arg)
+    if paths or narrowed:
+        return CommandShape("scoped", family, tuple(paths), (), narrowed)
+    package = (cwd,) if cwd and not _OPAQUE_PATH_RE.search(cwd) else ()
+    return CommandShape("suite", family, package, (), False)
+
+
+def _read_make(args: list[str], cwd: str) -> CommandShape:
+    """`make test` is the suite; extra targets narrow it to whatever they name."""
+    del cwd
+    targets = [arg for arg in args if not arg.startswith("-")]
+    if targets:
+        return CommandShape("scoped", "make", tuple(targets), (), True)
+    return CommandShape("suite", "make", (), (), False)
+
+
+def _read_tox(args: list[str], cwd: str, family: str) -> CommandShape:
+    """`-e py311` selects an ENVIRONMENT, not a subset of tests."""
+    del cwd
+    positionals: list[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            continue
+        if arg.startswith("-"):
+            option, equals, _inline = arg.partition("=")
+            if option in ("-e", "-c", "-s", "--result-json", "-f", "-k") \
+                    and not equals:
+                skip_next = True
+            continue
+        positionals.append(arg)
+    if positionals:
+        return CommandShape("scoped", family, tuple(positionals), (), True)
+    return CommandShape("suite", family, (), (), False)
+
+
+def _read_filtered(
+    args: list[str], cwd: str, family: str, filters: frozenset[str]
+) -> CommandShape:
+    """ctest / dotnet / maven / gradle: suite unless an obvious filter narrows."""
+    del cwd
+    narrowed = False
+    selected: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        option, equals, inline = arg.partition("=")
+        if option in filters:
+            narrowed = True
+            if equals:
+                if inline:
+                    selected.append(inline)
+            elif i + 1 < len(args):
+                selected.append(args[i + 1])
+                skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        if arg == "test" or arg.endswith(":test"):
+            continue
+        selected.append(arg)
+    if narrowed or selected:
+        return CommandShape("scoped", family, tuple(selected), (), narrowed)
+    return CommandShape("suite", family, (), (), False)
+
+
+_CTEST_FILTERS = frozenset({"-R", "--tests-regex", "-L", "--label-regex"})
+_DOTNET_FILTERS = frozenset({"--filter"})
+_MAVEN_FILTERS = frozenset({"-Dtest", "-Dit.test"})
+_GRADLE_FILTERS = frozenset({"--tests"})
+
+_FAMILY_READERS = {
+    "pytest": _read_pytest,
+    "unittest": _read_unittest,
+    "cargo": _read_cargo,
+    "go": _read_go,
+    "node": lambda args, cwd: _read_node(args, cwd, "node"),
+    "jest": lambda args, cwd: _read_node(args, cwd, "jest"),
+    "vitest": lambda args, cwd: _read_node(args, cwd, "vitest"),
+    "mocha": lambda args, cwd: _read_node(args, cwd, "mocha"),
+    "make": _read_make,
+    "tox": lambda args, cwd: _read_tox(args, cwd, "tox"),
+    "nox": lambda args, cwd: _read_tox(args, cwd, "nox"),
+    "ctest": lambda args, cwd: _read_filtered(args, cwd, "ctest", _CTEST_FILTERS),
+    "dotnet": lambda args, cwd: _read_filtered(args, cwd, "dotnet", _DOTNET_FILTERS),
+    "maven": lambda args, cwd: _read_filtered(args, cwd, "maven", _MAVEN_FILTERS),
+    "gradle": lambda args, cwd: _read_filtered(args, cwd, "gradle", _GRADLE_FILTERS),
+}
+
+
+@dataclass(frozen=True)
+class _Segment:
+    operator: str
+    argv: tuple[str, ...]
+    written: tuple[str, ...]
+
+
+def _parse_segments(command: str, depth: int = 0) -> list[_Segment] | None:
+    """Tokenize, strip redirections, and inline one level of `bash -c`."""
+    raw_segments = _split_segments(command)
+    if not raw_segments:
+        return None
+    out: list[_Segment] = []
+    for operator, raw in raw_segments:
+        words = _shell_words(raw)
+        if words is None:
+            return None
+        argv, written = _strip_redirections(words)
+        stripped, _env = _strip_wrappers(argv)
+        if (
+            depth < 2
+            and len(stripped) == 3
+            and _basename(stripped[0]) in ("bash", "sh", "zsh")
+            and stripped[1] == "-c"
+        ):
+            inner = _parse_segments(stripped[2], depth + 1)
+            if inner is None:
+                return None
+            for i, segment in enumerate(inner):
+                out.append(_Segment(
+                    operator if i == 0 else segment.operator,
+                    segment.argv,
+                    segment.written if i else segment.written + written,
+                ))
+            continue
+        out.append(_Segment(operator, tuple(argv), written))
+    return out
+
+
+def _is_benign_git(args: tuple[str, ...]) -> bool:
+    if not args:
+        return False
+    if args[0] in _BENIGN_GIT:
+        return True
+    if args[:2] == ("worktree", "add"):
+        return True
+    # `git checkout <path>` restores one file; `git checkout <branch>` moves
+    # the whole tree under the runner, so only a path form is benign.
+    if args[0] in ("checkout", "restore") and len(args) > 1:
+        return any(
+            "/" in arg or arg.startswith(".") or "." in _basename(arg)
+            for arg in args[1:] if not arg.startswith("-")
+        )
+    return False
+
+
+def _is_benign(segment: _Segment, *, allow_stash: bool) -> bool:
+    argv = list(segment.argv)
+    if not argv:
+        return True
+    head = argv[0]
+    if head.startswith("#"):
+        return True  # a comment line inside a multi-line command
+    if _ENV_ASSIGN_RE.match(head):
+        return all(_ENV_ASSIGN_RE.match(word) for word in argv)
+    # A non-runner segment that WRITES a file can change what the runner
+    # collects; only the runner's own `> /tmp/log` is harmless.
+    if any(target != "/dev/null" for target in segment.written):
+        return False
+    base = _basename(head)
+    if base == "export":
+        return all(_ENV_ASSIGN_RE.match(word) for word in argv[1:])
+    if base == "git":
+        if allow_stash and argv[1:2] == ["stash"]:
+            return True
+        return _is_benign_git(tuple(argv[1:]))
+    if base == "cd":
+        return len(argv) <= 2
+    if base == "rm":
+        flags = [word for word in argv[1:] if word.startswith("-")]
+        operands = [word for word in argv[1:] if not word.startswith("-")]
+        return bool(operands) and all(set(flag[1:]) <= {"f"} for flag in flags)
+    return base in _BENIGN_COMMANDS or base in _OUTPUT_FILTERS
+
+
+def _is_stash(argv: tuple[str, ...]) -> bool:
+    return argv[:2] == ("git", "stash") and argv[2:3] != ("pop",)
+
+
+def _is_stash_pop(argv: tuple[str, ...]) -> bool:
+    return argv[:3] == ("git", "stash", "pop")
+
+
+def _locate_runner(
+    segments: list[_Segment],
+) -> tuple[int, tuple[str, list[str], list[str], str]] | None:
+    """The single runner segment, or None when there are none or several."""
+    assigns: dict[str, str] = {}
+    for segment in segments:
+        for word in segment.argv:
+            if _ENV_ASSIGN_RE.match(word):
+                key, _eq, value = word.partition("=")
+                assigns.setdefault(key, value)
+    found: tuple[int, tuple[str, list[str], list[str], str]] | None = None
+    for index, segment in enumerate(segments):
+        stripped, _env = _strip_wrappers(list(segment.argv))
+        call = _runner_call(stripped, assigns)
+        if call is None:
+            continue
+        if found is not None:
+            # `pytest a | tail -2 && pytest b`: two runs, one byte stream, and
+            # no way to say which run the parsed names came from.
+            return None
+        found = (index, call)
+    return found
+
+
+def _probe_indices(
+    segments: list[_Segment], runner_at: int | None = None
+) -> tuple[int, int, int] | None:
+    """``(stash, runner, pop)`` when the command is a pristine-tree probe."""
+    stash_at = pop_at = found_runner = None
+    for index, segment in enumerate(segments):
+        if _is_stash_pop(segment.argv):
+            if pop_at is None:
+                pop_at = index
+            continue
+        if _is_stash(segment.argv):
+            if stash_at is None:
+                stash_at = index
+            continue
+        if found_runner is None:
+            stripped, _env = _strip_wrappers(list(segment.argv))
+            if _runner_call(stripped, {}) is not None:
+                found_runner = index
+    if runner_at is not None:
+        found_runner = runner_at
+    if stash_at is None or pop_at is None or found_runner is None:
+        return None
+    if not stash_at < found_runner < pop_at:
+        return None
+    return stash_at, found_runner, pop_at
+
+
+def test_command_shape(command: str) -> CommandShape:
+    """Read one shell command as at most one test-runner invocation.
+
+    See the E1 note above for the corpus this is measured against. The scope
+    is ``unknown`` whenever the command cannot be read as exactly one runner
+    run surrounded by benign segments - an abstention, never a guess.
+    """
+    text = command or ""
+    if _HEREDOC_RE.search(text):
+        return _UNKNOWN_SHAPE
+    segments = _parse_segments(text)
+    if not segments:
+        return _UNKNOWN_SHAPE
+    if any(segment.operator == "&" for segment in segments):
+        # A backgrounded runner's output never lands in this command's bytes.
+        return _UNKNOWN_SHAPE
+    located = _locate_runner(segments)
+    if located is None:
+        return _UNKNOWN_SHAPE
+    runner_at, (family, args, runner_argv, cwd_hint) = located
+    allow_stash = _probe_indices(segments, runner_at) is not None
+    # `uv run --project <dir>` names the package directory itself; a leading
+    # `cd <dir>` is the fallback statement of where the run happened.
+    cwd = cwd_hint
+    for index, segment in enumerate(segments):
+        if index == runner_at:
+            continue
+        if (
+            index < runner_at
+            and segment.argv[:1] == ("cd",)
+            and len(segment.argv) == 2
+        ):
+            cwd = cwd_hint or segment.argv[1]
+        if not _is_benign(segment, allow_stash=allow_stash):
+            return _UNKNOWN_SHAPE
+    reader = _FAMILY_READERS.get(family)
+    if reader is None:
+        return _UNKNOWN_SHAPE
+    shape = reader(list(args), cwd)
+    return replace(shape, runner_segment=tuple(runner_argv))
+
+
+def test_command_coverage(command: str) -> CommandShape:
+    """Classify a test invocation's coverage shape and extent.
 
     ``suite``   - no positional selection; coverage is the whole collection
-    ``scoped``  - positional path/nodeid args or filters narrow coverage
-    ``unknown`` - anything else (compound, non-pytest, unparseable)
+    ``scoped``  - positional path/package args or filters narrow coverage
+    ``unknown`` - anything else (compound, non-runner, unparseable)
 
     Conservative direction: an ambiguous suite reads ``scoped`` and loses only
     a ledger-promotion opportunity; a scoped run must never read ``suite``.
     """
-    words = _shell_words(command)
-    if not words:
-        return CommandCoverage("unknown")
-    segments = _shell_segments(words)
-    if not segments:
-        return CommandCoverage("unknown")
-    runner_at = None
-    for i, (_operator, segment) in enumerate(segments):
-        if _pytest_index(segment) is None:
-            continue
-        if runner_at is not None:
-            return CommandCoverage("unknown")
-        runner_at = i
-    if runner_at is None:
-        return CommandCoverage("unknown")
-    for i, (operator, segment) in enumerate(segments):
-        if i == runner_at:
-            continue
-        if i < runner_at:
-            # Prefix segments must be setup joined by `&&`; anything else can
-            # change what the runner sees.
-            if not _is_setup_prefix(segment):
-                return CommandCoverage("unknown")
-            if segments[i + 1][0] != "&&":
-                return CommandCoverage("unknown")
-            continue
-        if operator == "|" and _is_output_filter(segment):
-            continue
-        if operator in (";", "&&") and _is_stash_pop(segment):
-            continue
-        return CommandCoverage("unknown")
-    return _parse_pytest_segment(segments[runner_at][1])
+    return test_command_shape(command)
 
 
 def test_command_scope(command: str) -> str:
     """The coverage shape alone - ``suite`` | ``scoped`` | ``unknown``."""
-    return test_command_coverage(command).scope
+    return test_command_shape(command).scope
+
+
+def wrapper_stripped_command(command: str) -> str:
+    """The command with env prefixes and exec wrappers peeled off the runner.
+
+    E2: the pinned wheel's runner detection never learned `uvx`, so
+    `uvx pytest -q` produced no `kind == "test"` evidence row on 82 of the 89
+    TB2 tasks and every downstream gate that keys on a test boundary was dead
+    there. The wheel is certified and pinned, so the stripping happens HERE
+    and the wheel is handed a command it already understands. Returns the
+    input unchanged when no runner segment can be found, so a caller can
+    always use the result.
+    """
+    text = command or ""
+    if _HEREDOC_RE.search(text):
+        return text
+    segments = _parse_segments(text)
+    if not segments:
+        return text
+    located = _locate_runner(segments)
+    if located is None:
+        return text
+    _runner_at, (_family, _args, runner_argv, _hint) = located
+    return shlex.join(runner_argv)
+
+
+_PROGRAM_PREFIXES = frozenset({
+    # Words after which the NEXT word is still the program the segment runs:
+    # exec wrappers, shell keywords and negation. `time`/`nice`/`sudo`-class
+    # flags keep the position open too (handled by the flag/assignment rules
+    # in the scanner, not by this set).
+    "builtin", "command", "do", "elif", "else", "env", "exec", "if", "nice",
+    "nohup", "stdbuf", "sudo", "then", "time", "until", "while", "xargs", "!",
+    "{",
+})
+_ASSIGN_WORD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ASSIGN_PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=$")
+# The characters a program word may keep on the surface. Everything else -
+# every shell metacharacter, quote and whitespace - flattens to ``_`` so a
+# quoted name can never mint a boundary the shell did not parse.
+_PROGRAM_SAFE_RE = re.compile(r"[^A-Za-z0-9_./:@%+-]")
+
+
+def _program_word_surface(content: str) -> str:
+    """A quoted program word as readable surface text.
+
+    The program word is invocation surface, not payload: ``"pytest" -q`` and
+    ``"C:\\tools\\python.exe" -m unittest`` still run the runner, and masking
+    the name makes a real test execution read as no evidence at all. Shell
+    metacharacters inside a quoted program name are literal filename bytes
+    the shell never parsed, so they flatten to ``_`` - ``"x;nox"`` names one
+    weird executable, it does not open a segment - and backslashes normalize
+    to ``/`` so a quoted Windows path keeps a parseable basename.
+    """
+    return _PROGRAM_SAFE_RE.sub("_", content.replace("\\", "/"))
+
+
+def _unquoted_command_surface(command: str) -> str:
+    """The command with quoted payloads and backslash escapes made opaque.
+
+    Shell quoting protects a boundary the way nothing else can:
+    ``git commit -m 'x;pytest tests/'`` never split at that ``;`` and
+    ``echo \\;pytest`` never separated at it. The canonical runner regex
+    reads raw text, so the ``;`` inside a message still matches a boundary
+    the shell never created - a commit message minted ``kind == "test"``
+    execution evidence, and the churn governor read the same raw text and
+    reset its verification-failure streak on it.
+
+    Quoted ARGUMENT spans survive here as ``Q<digest>`` placeholders:
+    distinct payloads stay distinct for repeat detection, but no quoted
+    ``;``, ``|``, ``&`` or runner name can reach a classifier. Command
+    substitution, real operators and heredoc markers are left intact -
+    ``$(...)`` outside quotes really does run.
+
+    A quoted span in PROGRAM position is the exception: it is the
+    executable the segment runs, not payload. CI templates and Windows
+    interpreters are routinely quoted (``"C:\\...\\python.exe" -m
+    unittest``); masking the name blinded both the runner parser and the
+    wheel's fallback grammar, so a real suite produced no test evidence.
+    Program words are emitted as metacharacter-free literals instead -
+    readable basename, no boundary syntax - while argument payloads keep
+    the opaque ``Q<digest>`` treatment.
+    """
+    text = command or ""
+    out: list[str] = []
+    i, n = 0, len(text)
+    expecting_program = True
+    wrapper_args = False          # env/nice/sudo flags still precede the program
+    in_backtick = False
+    word: list[str] = []          # the word in progress, quoted spans as 'Q'
+
+    def end_word() -> None:
+        nonlocal expecting_program, wrapper_args
+        w = "".join(word)
+        word.clear()
+        if not expecting_program or not w:
+            return
+        if _ASSIGN_WORD_RE.match(w):
+            return                     # VAR=x keeps program position open
+        if wrapper_args and w.startswith("-"):
+            return                     # a wrapper flag, not the program yet
+        if w[:1] in "><" or re.match(r"^\d+[><]", w):
+            return                     # a redirection word, not the program
+        if _runner_basename(w) in _PROGRAM_PREFIXES:
+            wrapper_args = True        # env/sudo/if/... wrap the real program
+            return
+        expecting_program = False
+        wrapper_args = False
+
+    while i < n:
+        char = text[i]
+        if char == "\\" and i + 1 < n:
+            # An escaped character is a literal inside the word - never
+            # syntax. `\;pytest` is one word, not a separator plus a runner.
+            out.append("  ")
+            word.append("x")           # literal word char for shape tracking
+            i += 2
+            continue
+        if char in "'\"":
+            end = _closing_quote(text, i)
+            stop = n if end is None else end
+            content = text[i + 1:stop]
+            if expecting_program and not _ASSIGN_PREFIX_RE.match("".join(word)):
+                # Program position: the executable name stays readable, and
+                # the tracker keeps it so a quoted `env`/`sudo` still wraps
+                # the program word that follows it.
+                safe = _program_word_surface(content)
+                out.append(safe if safe else "Q")
+                word.append(safe or "Q")
+            else:
+                # Payload (incl. a VAR="..." assignment value): opaque.
+                digest = hashlib.sha256(
+                    content.encode("utf-8", "replace")
+                ).hexdigest()[:8]
+                out.append(f"{char}Q{digest}{char if end is not None else ''}")
+                word.append("Q")
+            i = (stop + 1) if end is not None else n
+            continue
+        if char == "`":
+            end_word()
+            in_backtick = not in_backtick
+            expecting_program = in_backtick   # a substitution's first word runs
+            out.append(char)
+            i += 1
+            continue
+        if text.startswith("$(", i) or text.startswith("${", i):
+            end_word()
+            out.append(text[i:i + 2])
+            expecting_program = True    # $( begins a nested command line
+            i += 2
+            continue
+        if char == "&" and (
+            (word and "".join(word).rstrip()[-1:] == ">")
+            or text[i + 1:i + 2] == ">"
+        ):
+            # `2>&1` / `&>out`: a descriptor operation, not a boundary.
+            out.append(char)
+            word.append(char)
+            i += 1
+            continue
+        if char in ";|&\n":
+            end_word()
+            out.append(char)
+            expecting_program = True
+            wrapper_args = False
+            i += 1
+            continue
+        if char == "(":
+            end_word()
+            out.append(char)
+            expecting_program = True    # subshell opens on a program word
+            i += 1
+            continue
+        if char in ")}":
+            end_word()
+            out.append(char)
+            expecting_program = False
+            i += 1
+            continue
+        if char.isspace():
+            end_word()
+            out.append(char)
+            i += 1
+            continue
+        out.append(char)
+        word.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _classification_command(command: str) -> str:
+    """The invocation the shell actually parsed, for outcome classification.
+
+    Two directions the raw command string lies about:
+
+    * quoted payload - ``git commit -m 'x;pytest'`` mints a runner boundary
+      that never existed (the wheel regex reads raw text), and
+    * exec wrappers - ``uv run --project foo pytest`` hides a real boundary
+      behind option words the wheel never learned (E2's TB2 house style).
+
+    Heredoc data bodies are dropped first - ``cat <<EOF\\npytest\\nEOF``
+    writes bytes, it does not run them - then quoted spans go opaque, then
+    the segment parser's own canonical runner argv is what the classifier
+    sees. When no runner is located the masked surface is returned, which
+    is still the command the shell ran.
+    """
+    text = command or ""
+    if _HEREDOC_RE.search(text):
+        from .bridge import _without_heredoc_bodies
+
+        text = _without_heredoc_bodies(text)
+    return wrapper_stripped_command(_unquoted_command_surface(text))
 
 
 def is_pristine_tree_probe(command: str) -> bool:
@@ -561,23 +1667,12 @@ def is_pristine_tree_probe(command: str) -> bool:
     and the pop must be present and the runner must sit between them, because
     a run whose stash never popped is not a probe, it is a lost workspace.
     """
-    words = _shell_words(command)
-    if not words:
+    if _HEREDOC_RE.search(command or ""):
         return False
-    stash_at = pop_at = runner_at = None
-    for i, (_operator, segment) in enumerate(_shell_segments(words)):
-        if _is_stash_pop(segment):
-            if pop_at is None:
-                pop_at = i
-        elif segment == ["git", "stash"]:
-            if stash_at is None:
-                stash_at = i
-        elif _pytest_index(segment) is not None and runner_at is None:
-            runner_at = i
-    return (
-        stash_at is not None and pop_at is not None and runner_at is not None
-        and stash_at < runner_at < pop_at
-    )
+    segments = _parse_segments(command or "")
+    if not segments:
+        return False
+    return _probe_indices(segments) is not None
 
 
 # --- run aggregates -----------------------------------------------------
@@ -615,6 +1710,77 @@ def _name_covered(
     return _matches_any(name, prefixes)
 
 
+# Directories that are never the repository's own suite: VCS, caches, build
+# output, installed dependencies. Dependency test files (vendor/, node_modules)
+# do not count toward suite completeness - the agent's suite is the repo's own.
+_INVENTORY_SKIP_DIRS = frozenset({
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    "env", ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".next", ".nuxt", "dist", "build", "target", "out", "coverage",
+    "site-packages", "vendor", "third_party", "deps", "external",
+    ".idea", ".vscode", ".terraform", "bower_components",
+})
+
+_INVENTORY_MAX = 50_000
+
+
+def _is_test_filename(name: str, under_tests_dir: bool) -> bool:
+    """Filename-level test conventions for the cohort languages."""
+    if name.startswith("test_") and name.endswith(".py"):
+        return True
+    if name.endswith("_test.py") or name.endswith("_test.go"):
+        return True
+    if re.search(r"\.(?:test|spec)\.[cm]?[jt]sx?$", name):
+        return True
+    if name.endswith("Test.java") or name.endswith("Tests.java"):
+        return True
+    # Rust integration tests live as tests/*.rs; unit tests are inline
+    # #[cfg(test)] and invisible to a filename scan, which is conservative.
+    if under_tests_dir and name.endswith(".rs"):
+        return True
+    return False
+
+
+def repo_test_inventory(root: str | Path) -> frozenset[str] | None:
+    """Repo-relative paths of the repository's own test files.
+
+    This is the suite-extent ground truth ``covers_known_suite`` was missing:
+    the observed-name universe only contains names a run happened to print,
+    so ``pytest tests/unit/`` covering every known name claimed whole-suite
+    truth while ``tests/integration/`` sat unobserved. A directory-scoped run
+    is suite-equivalent only when its coverage contains every inventoried
+    file - ``pytest tests/`` still qualifies on a tests/-rooted layout.
+
+    Returns ``None`` when the root is missing or unenumerable (unknown never
+    authorises a whole-suite claim); an empty frozenset is a completed scan
+    that found no test files.
+    """
+    base = Path(root or "")
+    if not base.is_dir():
+        return None
+    found: set[str] = set()
+    try:
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d not in _INVENTORY_SKIP_DIRS
+            ]
+            rel_dir = os.path.relpath(dirpath, base)
+            under_tests = any(
+                part in ("tests", "test") for part in Path(rel_dir).parts
+            )
+            for name in filenames:
+                if not _is_test_filename(name, under_tests):
+                    continue
+                rel = name if rel_dir == "." else f"{rel_dir.replace(os.sep, '/')}/{name}"
+                found.add(rel)
+                if len(found) >= _INVENTORY_MAX:
+                    return frozenset(found)
+    except OSError:
+        return None
+    return frozenset(found)
+
+
 def _matches_any(name: str, prefixes: tuple[str, ...]) -> bool:
     file_part = name.split("::", 1)[0]
     for prefix in prefixes:
@@ -622,6 +1788,15 @@ def _matches_any(name: str, prefixes: tuple[str, ...]) -> bool:
             if name == prefix:
                 return True
         elif file_part == prefix or file_part.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def _dir_covered(path: str, directories: tuple[str, ...]) -> bool:
+    """Whether a repo-relative path sits under a covered directory."""
+    for prefix in directories:
+        d = prefix.rstrip("/")
+        if d in (".", "") or path == d or path.startswith(d + "/"):
             return True
     return False
 
@@ -645,6 +1820,11 @@ class SuiteVerdictLedger:
     baseline_passing: tuple[str, ...] = ()
     baseline_failing: tuple[str, ...] = ()
     basis: str = "baseline"
+    # The baseline capture command's own declared scope: "suite" when the
+    # baseline ran unrestricted, "scoped" with ``baseline_scope_paths`` when
+    # it named directories, "unknown" when its shape is unreadable.
+    baseline_scope: str = "unknown"
+    baseline_scope_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.baseline_passing = frozenset(self.baseline_passing)
@@ -656,6 +1836,7 @@ class SuiteVerdictLedger:
         self._probe_failing: set[str] = set()
         self._last_run_failing: frozenset[str] = frozenset()
         self._whole_suite_green = False
+        self._repo_inventory: frozenset[str] | None = None
 
     def suite_verdict(self, name: str) -> str | None:
         return self._suite.get(name)
@@ -686,35 +1867,52 @@ class SuiteVerdictLedger:
         last edit. The advisory may not describe a run that never happened."""
         return self._whole_suite_green
 
+    def note_repo_test_inventory(self, paths: Iterable[str]) -> None:
+        """Feed the suite-extent ground truth used by ``covers_known_suite``."""
+        self._repo_inventory = frozenset(paths)
+
     def covers_known_suite(
         self, prefixes: Iterable[str], excluded: Iterable[str] = ()
     ) -> bool:
-        """Whether a scoped run's positional paths cover the known suite.
+        """Whether a scoped run's positional paths cover the WHOLE suite.
 
-        `pytest tests/` IS the full suite when every test file ever observed
-        - baseline capture, pristine probe, or an earlier run - sits under a
-        covered directory. Run 35016130850 ran exactly that on dynaconf and
-        the scope classifier still read `scoped`, so no suite verdict was
-        recorded and the submit-window advisory never fired. Directory
-        prefixes only: a file or ::nodeid path is narrower than a suite by
-        construction, exclusions (--ignore/--deselect) defeat completeness,
-        and an empty known universe proves nothing about the suite's extent.
+        `pytest tests/` IS the full suite when every test file the repo
+        actually has sits under a covered directory - the observed-name
+        universe cannot prove that, because it only contains names some run
+        already printed: ``pytest tests/unit/`` covering every known name
+        still claims whole-suite truth while ``tests/integration/`` sits
+        unobserved (partial-inventory overclaim).
+
+        Ground truth sources, in order: the repository test inventory, then
+        the baseline command's own declared scope. Directory prefixes only -
+        a file or ::nodeid path is narrower than a suite by construction,
+        exclusions (--ignore/--deselect) defeat completeness, and with
+        neither source the suite's extent is unknown, which never authorises
+        a whole-suite claim.
         """
         directories = tuple(
-            p for p in prefixes if "::" not in p and not p.endswith(".py")
+            p for p in prefixes
+            if "::" not in p and not Path(p).suffix
         )
         if not directories or tuple(excluded):
             return False
-        known = (
-            set(self._observed)
-            | set(self.baseline_passing)
-            | set(self.baseline_failing)
-            | set(self._probe_passing)
-            | set(self._probe_failing)
-        )
-        if not known:
+        inventory = self._repo_inventory
+        if inventory is not None:
+            if not inventory:
+                return False
+            return all(
+                _dir_covered(path.rstrip("/"), directories) for path in inventory
+            )
+        if self.baseline_scope == "suite":
+            # The baseline itself ran unrestricted: any directory-scoped run
+            # is narrower than the suite by construction.
             return False
-        return all(_name_covered(name, directories) for name in known)
+        if self.baseline_scope == "scoped" and self.baseline_scope_paths:
+            return all(
+                _dir_covered(declared.rstrip("/"), directories)
+                for declared in self.baseline_scope_paths
+            )
+        return False
 
     def _passed_before(self, name: str) -> bool:
         return name in self.baseline_passing or name in self._probe_passing
@@ -801,25 +1999,26 @@ class SuiteVerdictLedger:
             bool(passing) and passed_count is not None
             and passed_count == len(passing)
         )
-        if named_all:
-            return
         # "Unrestricted" covers two shapes: the bare `pytest` run and a
         # scoped-looking command whose directory args cover every known test
         # (`pytest tests/` on a tests/-rooted layout).
         unrestricted = not prefixes or self.covers_known_suite(prefixes, excluded)
-        candidates = set(self._observed)
-        if (
-            unrestricted
-            and passed_count is not None
-            and passed_count >= len(self.baseline_passing)
-        ):
-            candidates |= set(self.baseline_passing) | set(self.baseline_failing)
-        for name in candidates:
-            if _name_covered(name, prefixes, excluded):
-                self._write(name, "pass")
+        if not named_all:
+            candidates = set(self._observed)
+            if (
+                unrestricted
+                and passed_count is not None
+                and passed_count >= len(self.baseline_passing)
+            ):
+                candidates |= set(self.baseline_passing) | set(self.baseline_failing)
+            for name in candidates:
+                if _name_covered(name, prefixes, excluded):
+                    self._write(name, "pass")
         if unrestricted and not excluded and suite_scope:
-            # A green whole-suite run supersedes every verdict taken before the
-            # last edit, including the ones it did not name.
+            # A green whole-suite run supersedes every verdict taken before
+            # the last edit, including the ones it did not name - verbose or
+            # not. `named_all` only bounds name promotion; it is not a
+            # reason to withhold the run's own completeness.
             self._stale.clear()
             self._whole_suite_green = True
 
@@ -1110,19 +2309,23 @@ def compile_execution_evidence(
     test_outcome, test_protocol = _classify_test_output(
         command, output, returncode, output_artifact=output_artifact
     )
+    # Kind, protocol and exit-code attribution all read the invocation
+    # surface: a `;nox`/`| make` inside a quoted payload is message text,
+    # not a runner segment, and a quoted `;` is not a compound command.
+    surface = _unquoted_command_surface(command)
     kind = (
-        "test" if test_protocol or _ADDITIONAL_TEST_RE.search(command)
-        else "build" if _BUILD_RE.search(command) else ""
+        "test" if test_protocol or _ADDITIONAL_TEST_RE.search(surface)
+        else "build" if _BUILD_RE.search(surface) else ""
     )
     if not kind:
         return None
     outcome = "timeout" if timed_out else (
-        _execution_outcome_guard(command, returncode, kind=kind) or test_outcome or "unknown"
+        _execution_outcome_guard(surface, returncode, kind=kind) or test_outcome or "unknown"
     )
     return ExecutionEvidence(
         action_id=action_id,
         kind=kind,
-        protocol="native" if test_protocol == "native" else _protocol(command),
+        protocol="native" if test_protocol == "native" else _protocol(surface),
         outcome=outcome,
         command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest(),
         returncode=returncode,
@@ -1202,11 +2405,18 @@ def _classify_test_output(
     *,
     output_artifact: dict | None = None,
 ) -> tuple[str, str]:
+    # The certified classifier matches the runner grammar against raw text:
+    # `;pytest` inside a quoted commit message is a boundary it cannot know
+    # the shell never made, and `uv run --project foo pytest` is a real
+    # boundary its wrapper list never learned. Hand it the invocation the
+    # shell actually parsed - quoted spans opaque, wrappers peeled to the
+    # runner argv - which the segment parser above computes either way.
+    classify_as = _classification_command(command)
     try:
         if output_artifact is None:
             from groundtruth.runtime.patterns import classify_test_observation
 
-            return classify_test_observation(command, output, returncode)
+            return classify_test_observation(classify_as, output, returncode)
 
         from groundtruth.runtime.patterns import classify_test_observation_stream
 
@@ -1232,7 +2442,7 @@ def _classify_test_output(
             expected_encoding=encoding,
         )
         result = classify_test_observation_stream(
-            command, chunks, returncode, encoding="utf-8", errors="replace"
+            classify_as, chunks, returncode, encoding="utf-8", errors="replace"
         )
         # The canonical implementation consumes every chunk, but keep the
         # trust boundary explicit: no derived result leaves this function until

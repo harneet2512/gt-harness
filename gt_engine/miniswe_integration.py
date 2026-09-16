@@ -602,10 +602,16 @@ class MiniSweAdapter(GroundtruthController):
 
         Correct-or-quiet: a pin that cannot be written costs the receipt, not
         the run, and the run must not die trying to protect its own paperwork.
+
+        The adopted graph can live under ``enrichments/`` as well as
+        ``revisions/``: certify_lsp_candidate publishes a candidate in place,
+        so an advisory ranked from a promoted enrichment names an enrichment
+        directory. Refusing to pin those left delivered artifacts without
+        protection against the orphan sweep.
         """
         try:
             revision = Path(graph_path).resolve().parent
-            if revision.parent.name != "revisions" or not revision.is_dir():
+            if revision.parent.name not in ("revisions", "enrichments") or not revision.is_dir():
                 return
             marker = revision / "pinned.json"
             if marker.exists():
@@ -3013,6 +3019,28 @@ class MiniSweAdapter(GroundtruthController):
                 baseline_failing=tuple(baseline.failing_names),
                 basis="baseline",
             )
+        # Suite extent must come from evidence wider than the observed-name
+        # universe: the repository's own test files first, then the baseline
+        # capture command's declared scope. Without either, a directory run
+        # can never claim whole-suite truth (partial-inventory overclaim).
+        from .runtime_observation import repo_test_inventory, test_command_coverage
+
+        inventory = repo_test_inventory(self.repo_root) if self.repo_root else None
+        if inventory is not None:
+            ledger.note_repo_test_inventory(inventory)
+        command = tuple(getattr(baseline, "command", ()) or ())
+        if command:
+            declared = test_command_coverage(" ".join(command))
+            paths = []
+            for path in declared.paths:
+                if os.path.isabs(path) and self.repo_root:
+                    try:
+                        path = os.path.relpath(path, self.repo_root)
+                    except ValueError:
+                        continue
+                paths.append(path.replace(os.sep, "/"))
+            ledger.baseline_scope = declared.scope
+            ledger.baseline_scope_paths = tuple(paths)
         self._suite_verdict_ledger = ledger
         return ledger
 
@@ -4180,19 +4208,87 @@ class MiniSweAdapter(GroundtruthController):
         for a catastrophic mistake, so the live directory is excluded by name as
         well. It is also why the tempting one-liner, excluding enrichments/ from
         the artifact upload, is wrong: it would drop the live graph.
+
+        Two further protections beyond mtime and the live path:
+
+        - ``pinned.json``: a delivered artifact named this directory and
+          ``verify_runtime_receipt`` can still demand it -- identical to a
+          pinned revision.
+        - Derivation references: a surviving manifest (anywhere under the
+          graph root) can cite a pre-process directory as its base. Deleting a
+          cited base re-creates run 35016130850's
+          ``derivation_base_manifest_unreadable`` one namespace up. References
+          reprieve transitively -- a reprieved directory's own manifest still
+          cites its own bases -- while a condemned directory's manifest dies
+          with it and protects nothing. Anything unauditable freezes the
+          sweep: unknown never authorises a delete.
         """
         live = getattr(self.engine_state, "graph_path", "")
         live_dir = Path(live).parent.resolve() if live else None
-        for entry in sorted(namespace.glob("lsp-*")):
+        condemned: dict[Path, Path] = {}
+        try:
+            entries = sorted(namespace.glob("lsp-*"))
+        except OSError:
+            return
+        for entry in entries:
             try:
                 if not entry.is_dir() or entry.stat().st_mtime >= self._PROCESS_START:
                     continue
                 if live_dir is not None and entry.resolve() == live_dir:
                     continue
-                shutil.rmtree(entry, ignore_errors=True)
+                if (entry / "pinned.json").exists():
+                    continue
+                condemned[entry.resolve()] = entry
             except OSError:
+                continue
+        if not condemned:
+            return
+        reprieved: set[Path] = set()
+        try:
+            manifests = list(namespace.parent.rglob("graph.manifest.json"))
+        except OSError:
+            return
+        while True:
+            newly: set[Path] = set()
+            for manifest in manifests:
+                try:
+                    holder = manifest.parent.resolve()
+                except OSError:
+                    return
+                if holder in condemned and holder not in reprieved:
+                    continue
+                try:
+                    body = json.loads(manifest.read_text(encoding="utf-8"))
+                    if not isinstance(body, dict):
+                        return
+                    derivation = body.get("derivation")
+                except (OSError, ValueError):
+                    return
+                if not isinstance(derivation, dict):
+                    continue
+                for key in ("base_graph", "base_manifest", "base_resource", "terminal_receipt"):
+                    reference = str(derivation.get(key) or "")
+                    if not reference or "/" not in reference:
+                        continue
+                    try:
+                        target = (manifest.parent / reference).resolve()
+                    except OSError:
+                        return
+                    for ancestor in (target, *target.parents):
+                        if ancestor in condemned and ancestor not in reprieved:
+                            newly.add(ancestor)
+                            break
+            if not newly:
+                break
+            reprieved |= newly
+        for resolved, entry in condemned.items():
+            if resolved in reprieved:
+                continue
+            try:
                 # Sweeping is an optimisation; failing it must never stop an
                 # enrichment from being scheduled.
+                shutil.rmtree(entry, ignore_errors=True)
+            except OSError:
                 continue
 
     def _schedule_lsp_candidate(self, request: FrozenBuildInput, base: GraphBuildArtifact) -> Any:
@@ -5903,7 +5999,28 @@ class MiniSweAdapter(GroundtruthController):
         return drift != self._localization_drift_at_render
 
     def task_start_localization(self, *, commit: bool = True) -> str:
-        """Resolve the localization query now; legacy callers may admit."""
+        """Resolve the localization query now; legacy callers may admit.
+
+        ``commit=False`` is a PEEK: ``prepare_select_catalog`` reads the
+        resolved localization to build its catalog item, and the shadow path
+        logs it. A peek must not consume the pending-resolution markers --
+        ``_render_localization_now`` records ``_localization_render_revision``
+        and ``_localization_drift_at_render`` on every attempt, and when a
+        peek left them set, ``localization_resolution_pending()`` reported
+        False forever after while ``_task_start_shipped`` could never latch,
+        so the ranked localization and every later drift re-rank were dead on
+        any run whose catalog was merely prepared. Restore the markers so the
+        agent-facing admission still resolves and ships the answer itself.
+        """
+        if not commit:
+            render_revision = self._localization_render_revision
+            drift_at_render = self._localization_drift_at_render
+            resolved = self.resolve_delivery_recipe(
+                {"kind": "localization", "params": {"origin": "task_start"}}
+            )
+            self._localization_render_revision = render_revision
+            self._localization_drift_at_render = drift_at_render
+            return resolved[0] if resolved else ""
         resolved = self.resolve_delivery_recipe(
             {"kind": "localization", "params": {"origin": "task_start"}}
         )

@@ -18,12 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.feature_accounting import account, render  # noqa: E402
 
 
-def delivery(unit: str, *, evidence_type: str = "", supersession: str = "") -> list[dict]:
-    """The two rows the producer writes for one delivery, from both sides.
+def delivery(unit: str, *, evidence_type: str = "", supersession: str = "",
+             bound: bool = True) -> list[dict]:
+    """The rows the producer writes for one delivery, from all three sides.
 
     `decision_context_unit_prepared` carries `supersession_key` (what the
     delivery IS); `delivery_prepared` carries `evidence_type` (the prompt-lane
-    KIND its bytes are budgeted as). Both carry `delivery_identity`.
+    KIND its bytes are budgeted as). Both carry `delivery_identity` and both
+    are STAGING: the unit only counts as model exposure once a
+    `provider_delivery` row binds it to a real request (`bound=True`, the
+    production shape - run 35016130850 bound 74/74 prepared identities).
     """
     rows = []
     if supersession:
@@ -37,6 +41,11 @@ def delivery(unit: str, *, evidence_type: str = "", supersession: str = "") -> l
             "event": "delivery_prepared",
             "delivery_identity": unit,
             "evidence_type": evidence_type,
+        })
+    if bound and rows:
+        rows.append({
+            "event": "provider_delivery",
+            "delivery_ids": [unit],
         })
     return rows
 
