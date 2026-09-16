@@ -1245,6 +1245,7 @@
     "gt_engine/runtime_observation.py",
     "gt_engine/scoped_merge.py",
     "gt_engine/task_contract.py",
+    "gt_engine/test_names.py",
     "gt_engine/tool_outcomes.py",
     "gt_engine/trust_calibration_report.py",
     "gt_engine/utility.py",
