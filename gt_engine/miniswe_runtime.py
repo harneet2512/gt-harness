@@ -67,6 +67,63 @@ from .runtime_observation import (
 # The marker that makes the plan block idempotent in the durable task
 # message: appended once, never twice, even if the bootstrap were re-entered.
 PLAN_BLOCK_TAG = "[GT_PERSISTENT_PLAN]"
+
+
+def _plan_block_pointer(adapter: Any) -> str:
+    """The stable wire pointer that replaces the plan block after first send.
+
+    The plan is a record, not a message: it lives in the journal, the
+    plan/current.json state file and the checkpoint blob, and the agent follows
+    it through [GT_PLAN_CURSOR] steering and `gt-plan show`. Paying the full
+    rendering on every request is the +956% uncached-token regime's real mass;
+    the durable task message keeps the full text for the record while the wire
+    carries this pointer. The text is immutable per rendering so it stays
+    prefix-stable under caching regimes exactly as the block did.
+    """
+    receipt = getattr(adapter, "plan_rendering_receipt", None) or {}
+    sha8 = str(receipt.get("rendered_sha256") or "")[:8] or "unknown"
+    return (
+        f"{PLAN_BLOCK_TAG} sha256:{sha8} contract delivered once; live row "
+        "state follows via [GT_PLAN_CURSOR]; re-read the record with "
+        "`gt-plan show` (all rows) or `gt-plan show <row_id>`."
+    )
+
+
+def _compact_plan_block_for_wire(
+    messages: list[dict], adapter: Any
+) -> list[dict]:
+    """Swap the durable plan block for its pointer in the outgoing view only.
+
+    ``messages`` may share dict objects with the agent's durable history, so
+    the rewritten message is a copy -- the record keeps the full text. The
+    rewrite is confined to the exact block string GT injected, the same
+    discipline ``collapse_superseded_context_units`` uses; anything appended
+    after the block is preserved verbatim.
+    """
+    block = getattr(adapter, "_plan_block_text", None)
+    if not block:
+        receipt = getattr(adapter, "plan_rendering_receipt", None) or {}
+        sha = str(receipt.get("rendered_sha256") or "")
+        if len(sha) == 64:
+            blob = Path(adapter.store.root) / "plan_renderings" / f"{sha}.json"
+            try:
+                block = blob.read_bytes().decode("utf-8", "surrogatepass")
+            except OSError:
+                block = ""
+        if not block:
+            return messages
+        adapter._plan_block_text = block
+    pointer = _plan_block_pointer(adapter)
+    out: list[dict] = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str) and block in content:
+            out.append({**message, "content": content.replace(block, pointer)})
+        else:
+            out.append(message)
+    return out
+
+
 # Fallback when the run declares no output reservation of its own.
 # Measured on the first production run, on every task: the planning call spent
 # its entire 16,384-token output budget on reasoning (14,832 of it on the task
@@ -1189,6 +1246,8 @@ def install_runtime_hooks(
             churn_steer = adapter.prepare_churn_steer_delivery()
             if churn_steer:
                 messages = [*messages, {"role": "user", "content": churn_steer}]
+        if not internal_request and getattr(adapter, "_plan_block_wire_sent", None) is True:
+            messages = _compact_plan_block_for_wire(messages, adapter)
         context_window = int(os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "0") or 0)
         reserved_output = int(
             os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
@@ -1371,6 +1430,21 @@ def install_runtime_hooks(
                 pass
             _pace_provider_retry(adapter, exc, pacing)
             raise
+        if (
+            not internal_request
+            and getattr(adapter, "_plan_block_wire_sent", None) is False
+        ):
+            # The wire provably carried the full block once. From here the
+            # provider view carries the stable pointer; the durable task
+            # message keeps the contract text for the record.
+            adapter._plan_block_wire_sent = True
+            adapter.store.append(
+                "persistent_plan_wire_compacted",
+                rendered_sha256=str(
+                    (getattr(adapter, "plan_rendering_receipt", None) or {})
+                    .get("rendered_sha256") or ""
+                ),
+            )
         if delivery is None:
             try:
                 delivery = adapter.bind_provider_payload(payload)
@@ -1638,6 +1712,8 @@ def install_runtime_hooks(
                         rendered_sha = rendering_receipt["rendered_sha256"]
                         adapter.store.put_blob("plan_renderings", rendered_sha, block.encode("utf-8"))
                         task_message["content"] = f"{content}\n\n{block}"
+                        adapter._plan_block_text = block
+                        adapter._plan_block_wire_sent = False
                         adapter.store.append(
                             "persistent_plan_delivered",
                             rendered_blob=f"plan_renderings/{rendered_sha}.json",

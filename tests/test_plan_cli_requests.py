@@ -246,3 +246,19 @@ def test_a_rejected_request_is_surfaced_in_the_next_batch(adapter):
     joined = "\n".join(batch.context_additions)
     assert "GT_PLAN_REQUEST_REJECTED" in joined
     assert "unsupported plan operation" in joined
+
+
+def test_bare_show_re_reads_the_whole_record(adapter, tmp_path, monkeypatch, capsys):
+    """The wire pointer names `gt-plan show` as the re-read path, so a bare
+    show must print the whole published state -- every row with its current
+    state -- not error demanding a row id."""
+    from gt_engine.persistent_plan.cli import main
+
+    monkeypatch.setenv("GT_PLAN_ROOT", str(adapter.store.root / "plan"))
+    assert main(["show"]) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state["plan_digest"] == _published_digest(adapter)
+    assert [row["row_id"] for row in state["rows"]] == [
+        row.row_id for row in adapter.persistent_plan.rows
+    ]
+    assert all("state" in row for row in state["rows"])

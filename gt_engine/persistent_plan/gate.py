@@ -7,12 +7,17 @@ runs ``--gt-mode advisory``, so ``GTSession.can_enforce`` is False and the
 existing enforcing gate is simply unreachable.
 
 This module supplies the decision for a plan-scoped gate that works in advisory
-mode, with three properties that keep it honest:
+mode. The contract it enforces is model-agnostic: a submission over blocking
+evidence is a certain attestation failure wherever it ships, so shipping it is
+never better than refusing it. Earlier revisions conceded on budget and on
+stalled refusals, reasoning that a dirty submit still had a chance to score --
+both free runs proved the opposite: union-alpha submitted inside the reserve
+with rows unmet and the run was scored a product failure either way, while the
+concession let the model off the contract it was told to satisfy.
 
-* It bounds consecutive refusals without progress and escapes on budget.
-* It escapes on budget. A gate that turns a near-miss into a timeout converts a
-  partial score into a zero, and four of the measured losses were one or two
-  tests short. Time and steps are checked BEFORE any refusal.
+* It refuses while blocking evidence exists -- unconditionally. Budget and
+  stall facts are journaled as evidence of the pressure the run was under;
+  they no longer buy an accept.
 * It never blocks on its own ignorance. An unmet row blocks; an unknown
   baseline, a failed probe or a missing plan does not.
 """
@@ -20,30 +25,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Refusing with less than this left converts a near-miss into a timeout, which
-# scores the same as a wrong answer. The agent needs room to act on the refusal.
+# Inside this reserve the drain and baseline recheck are skipped -- a check
+# that cannot finish before the deadline cannot change the decision. The
+# refusal itself never checks the reserve: a submit over blocking evidence
+# fails attestation whether it ships early or late.
 MIN_REMAINING_SECONDS = 600.0
 MIN_REMAINING_STEPS = 20
 MAX_LISTED_ROWS = 12
 
-# How many refusals may pass without the agent proving a single new row.
-#
-# Refusing exactly once made the gate a formality. Measured on run
-# 34374028796, task claude-code: the gate refused with rows unmet, and accepted
-# the very next attempt 34 seconds later with 4,260 seconds and 142 steps still
-# available and the same rows still unproven. Seventy-one minutes went unused
-# because a counter said "you have had your turn". awilix was the same, 1,647
-# seconds and 108 steps left.
-#
-# A plan that yields the moment it is ignored is advice, and thirteen surveyed
-# coding agents already ship advice. So refusal now persists while the budget is
-# healthy AND refusals are still converting into evidence.
-#
-# The stall counter is the safety catch. A gate that refuses forever turns a
-# partial score into a zero, which is worse than submitting an incomplete patch,
-# so when this many consecutive refusals produce no newly proven row the gate
-# concedes and says so. Progress resets it: an agent that keeps proving rows is
-# never cut off.
+# Journaled evidence only: how many consecutive refusals passed without the
+# agent proving a single new row. Refusing exactly once made the gate a
+# formality (run 34374028796, task claude-code: refused with rows unmet,
+# accepted the next attempt 34 seconds later with 4,260 seconds and 142 steps
+# still available and the same rows still unproven -- seventy-one minutes went
+# unused). The count still records that history, but the stall limit no longer
+# concedes: a model that ignores the gate does not earn the right to ship the
+# defective submission the gate exists to stop.
 MAX_REFUSALS_WITHOUT_PROGRESS = 3
 
 
@@ -165,23 +162,19 @@ def decide(
     }
     if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on
         return GateDecision(accepted=True, reason="no_plan", **common)
-    # Callers that predate the stall counter get the old shape, where every
-    # refusal counted as a stall, so their behaviour is unchanged.
-    stalled = refusals if refusals_without_progress is None else refusals_without_progress
-    if stalled >= MAX_REFUSALS_WITHOUT_PROGRESS:
-        return GateDecision(
-            accepted=True, reason="refusals_without_progress",
-            unmet_rows=unmet_rows, regressions=regressions, **common,
-        )
     blocking = tuple(unmet_rows) + tuple(regressions)
     if not blocking:
         return GateDecision(accepted=True, reason="no_blocking_evidence", **common)
+    # A submission over blocking evidence is refused, unconditionally. The
+    # escapes that used to ship it anyway (stalled refusals, near-deadline
+    # budget) are journaled below as evidence of the pressure the run was
+    # under, not as concessions: a dirty submit fails the same attestation a
+    # refused one does, and only refusal leaves the model room to comply.
     allowed, escape = budget_allows_refusal(remaining_seconds, remaining_steps)
-    if not allowed:
-        return GateDecision(
-            accepted=True, reason="budget_escape", escaped=escape,
-            unmet_rows=unmet_rows, regressions=regressions, **common,
-        )
+    stalled = refusals if refusals_without_progress is None else refusals_without_progress
+    details["budget_allows_refusal"] = allowed
+    details["escape_available"] = escape
+    details["stalled_refusals"] = stalled
     return GateDecision(
         accepted=False,
         reason="unmet_plan_rows" if unmet_rows else "baseline_regression",
@@ -198,13 +191,15 @@ def render_directive(
     """What the agent is told when the gate refuses.
 
     Names outstanding rows and proposed checks without asserting that executing
-    a check proves its requirement. Retries follow the bounded stall policy.
+    a check proves its requirement. The refusal stands while evidence is
+    missing -- there is no retry count that discharges it.
     """
     lines = [
         "GT PLAN GATE: submission was not executed. The plan built before the "
         "first edit still has requirements with no evidence. You may run any "
         "command, edit any file, or disagree. A later submission is reassessed "
-        "against current evidence, remaining budget, and the bounded stall limit.",
+        "against current evidence, and will not be executed while these "
+        "requirements stay unproven.",
     ]
     if unmet_rows:
         lines.append("Requirements with no evidence yet:")

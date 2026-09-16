@@ -454,6 +454,66 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     assert _native_feature_projection(rows, plan_projection=projection)["persistent_plan"]["status"] == "WITNESSED"
 
 
+def test_persistent_plan_block_is_paid_once_then_carried_as_pointer(
+    tmp_path, monkeypatch
+):
+    """The plan is a record, not a retransmission: the durable task message
+    keeps the full contract text, the wire carries it in full exactly once,
+    and later requests admit a stable pointer instead.
+
+    Live run 35141054074 re-sent the 2.5KB block on every one of 30 turns;
+    under a no-cache route that mass is billed every time, and under a cached
+    route it still counts toward input. The record (journal, plan/current.json,
+    `gt-plan show`) stays authoritative; the cursor carries live state."""
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    task = "The widget must preserve behavior."
+    adapter = MiniSweAdapter(
+        task_id="plan-wire", repo_root=str(tmp_path),
+        state_dir=tmp_path / "state", predicates=[], issue_text=task,
+    )
+    adapter.plan_inputs = build_plan_inputs(
+        task, repo_root=str(tmp_path), capture_baseline=False
+    )
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    agent.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": task},
+    ]
+    install_runtime_hooks(agent, _session(adapter))
+
+    agent.model.query(agent.messages)
+    durable_task = agent.messages[1]["content"]
+    assert "[GT_PERSISTENT_PLAN]" in durable_task
+    block_sha = adapter.plan_rendering_receipt["rendered_sha256"][:8]
+    first_wire = agent.model.calls[-1]
+    assert "[GT_PERSISTENT_PLAN]" in first_wire[1]["content"]
+    assert "Requirement index:" in first_wire[1]["content"]
+
+    agent.model.query(agent.messages)
+    second_wire = agent.model.calls[-1]
+    assert "Requirement index:" not in second_wire[1]["content"]
+    pointer_line = second_wire[1]["content"].split("[GT_PERSISTENT_PLAN]")[-1]
+    assert pointer_line.startswith(f" sha256:{block_sha}")
+    assert "gt-plan show" in pointer_line
+    # The record kept the contract; only the wire view compacted.
+    assert agent.messages[1]["content"] == durable_task
+    assert len(second_wire[1]["content"]) < len(durable_task)
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    compacted = [row for row in rows if row.get("event") == "persistent_plan_wire_compacted"]
+    assert len(compacted) == 1
+    assert compacted[0]["rendered_sha256"] == adapter.plan_rendering_receipt["rendered_sha256"]
+    from gt_engine.event_journal import verify_event_journal
+
+    assert verify_event_journal(adapter.store.path).valid
+
+
 def test_persistent_plan_retry_attempts_share_one_provider_request_id(
     tmp_path, monkeypatch
 ):

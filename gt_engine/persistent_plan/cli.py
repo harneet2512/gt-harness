@@ -32,6 +32,12 @@ def main(argv=None) -> int:
                               "unclassified_spans": state.get("unclassified_spans", []),
                               "source_available": "source_spans" in state}, ensure_ascii=False, sort_keys=True))
             return 0
+        if args.operation == "show" and args.row_id is None:
+            # The record is the bible: a bare `gt-plan show` re-reads the whole
+            # current state, so the wire only ever carries the pointer.
+            print(json.dumps({"plan_digest": state["plan_digest"],
+                              "rows": state["rows"]}, ensure_ascii=False, sort_keys=True))
+            return 0
         row = next((r for r in state["rows"] if r["row_id"] == args.row_id), None)
         if row is None:
             raise ValueError("unknown plan row")

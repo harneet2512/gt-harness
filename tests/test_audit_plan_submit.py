@@ -686,12 +686,12 @@ class TestSealAndGate:
         assert decision["baseline_status"] == "not_attempted"
         assert decision["completion_proven"] is False
 
-    def test_gate_refusal_is_the_delivery_and_is_bounded(
+    def test_gate_refusal_is_the_delivery_and_is_unconditional(
             self, tmp_path, monkeypatch) -> None:
         """A refused submission goes back to IMPLEMENT with a directive that
         advertises the row and its proposed check; the suppression row is the
-        delivery the feature census counts; three refusals without progress
-        concede."""
+        delivery the feature census counts; refusals without progress are
+        journaled but never concede."""
         monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
         adapter, inputs, _contract, repo = _build(tmp_path)
         adapter.start_task()
@@ -725,7 +725,9 @@ class TestSealAndGate:
         assert len(suppressed_rows) == 1
         assert suppressed_rows[0]["executed"] is False
 
-        # Three consecutive refusals with no progress concede on the fourth.
+        # Consecutive refusals without progress are journaled as stalls -- and
+        # still refuse: a blocking-evidence submit fails attestation wherever
+        # it ships, so the gate never spends it.
         adapter.begin_verify()
         adapter.begin_submit()
         assert session.plan_submit_gate() is False
@@ -736,10 +738,11 @@ class TestSealAndGate:
         adapter.begin_implement()
         adapter.begin_verify()
         adapter.begin_submit()
-        assert session.plan_submit_gate() is True
+        assert session.plan_submit_gate() is False
         last = _rows(adapter, "plan_gate_decision")[-1]
-        assert last["reason"] == "refusals_without_progress"
-        assert last["accepted"] is True
+        assert last["reason"] == "unmet_plan_rows"
+        assert last["accepted"] is False
+        assert last["evidence"]["stalled_refusals"] >= 3
 
         report = account(_journal(adapter))
         by_feature = {row["feature"]: row for row in report["rows"]}
@@ -750,10 +753,11 @@ class TestSealAndGate:
             assert by_feature[alias]["state"] == "DELIVERED"
         assert verify_event_journal(adapter.store.path).valid
 
-    def test_budget_escape_accepts_instead_of_timing_out(
+    def test_low_budget_refuses_and_journals_the_escape_available(
             self, tmp_path, monkeypatch) -> None:
-        """With no room to act on a refusal the gate accepts the near miss
-        rather than converting it into a zero."""
+        """Inside the reserve the old policy shipped the dirty submit and the
+        run failed attestation anyway. The contract refuses; the escape that
+        would have applied is journaled as evidence, not spent."""
         monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
         adapter, inputs, _contract, repo = _build(tmp_path)
         adapter.start_task()
@@ -762,13 +766,14 @@ class TestSealAndGate:
         session = self._session(adapter, repo, monkeypatch, budget=(60.0, 5))
         adapter.begin_verify()
         adapter.begin_submit()
-        assert session.plan_submit_gate() is True
+        assert session.plan_submit_gate() is False
         decision = _rows(adapter, "plan_gate_decision")[-1]
-        assert decision["accepted"] is True
-        assert decision["reason"] == "budget_escape"
-        assert decision["escaped"] in {"time", "steps"}
+        assert decision["accepted"] is False
+        assert decision["reason"] == "unmet_plan_rows"
+        assert decision["escaped"] == ""
+        assert decision["evidence"]["escape_available"] in {"time", "steps"}
         assert decision["unmet_rows"]
-        assert adapter.pending_directives == []
+        assert adapter.pending_directives != []
 
     def test_baseline_regression_refuses_even_when_rows_pass(
             self, tmp_path, monkeypatch) -> None:

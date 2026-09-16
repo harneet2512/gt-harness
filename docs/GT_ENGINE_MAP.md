@@ -391,12 +391,24 @@ requirements and 19 of 24 modes. Call edges alone reached only 18 and 10.
 | where | what | size | when |
 |---|---|---|---|
 | durable task message | `[GT_PERSISTENT_PLAN]` block | ≤8,000 chars, ~1,555 tokens | once, before the first main call |
+| provider view | `[GT_PERSISTENT_PLAN]` pointer | ~200 chars | replaces the block in the outgoing view after its first wire send |
 | request tail | `[GT_PLAN_CURSOR]` | ~80 tokens | when a row's evidence changes |
 | request tail | `[GT_OBLIGATION_DELTA]` | bounded | when obligation status changes |
 
+The plan is a durable record, not a retransmission: the full block lives in
+`plan/current.json` and the `plan_renderings/` blob; the model consults it on
+demand through `gt-plan show [row_id]` (bare `show` dumps the whole record).
+The provider pays the full block exactly once — after that wire send,
+`_compact_plan_block_for_wire` swaps it for a pointer naming the record path
+and the read tool, using the same exact-string rewrite discipline as
+`collapse_superseded_context_units`. Durable history is untouched; the
+compaction is journaled once as `persistent_plan_wire_compacted`.
+
 The block is 1.94% of a median 80,169-token request and is cached after the
 first call. The cursor across 161 turns is 12,880 tokens, **0.057%** of that
-task's 22.7M prompt tokens. Token cost has never been the constraint here.
+task's 22.7M prompt tokens. Token cost has never been the constraint here —
+but on uncached routes the retransmission bills every turn, which is what the
+pointer swap removes.
 
 **The cursor must never claim completion.** Its first version reported
 progress -- "9/12 requirements proven", naming the satisfied rows. Measured on
@@ -426,15 +438,17 @@ not one that verifies a checked box against execution evidence.
 
 | constant | value | why |
 |---|---|---|
-| `MIN_REMAINING_SECONDS` | 600 | refusing later turns a near-miss into a zero |
+| `MIN_REMAINING_SECONDS` | 600 | bounds the baseline recheck, not the refusal |
 | `MIN_REMAINING_STEPS` | 20 | same, in steps |
-| `MAX_REFUSALS_WITHOUT_PROGRESS` | 3 | the stall catch |
+| `MAX_REFUSALS_WITHOUT_PROGRESS` | 3 | journaled evidence, not a concede limit |
 
-The gate refuses while rows are unproven **and** the budget is healthy **and**
-refusals are still converting into proven rows. Progress resets the stall
-counter, so an agent that keeps proving rows is never cut off. Three refusals
-that prove nothing and the gate concedes, recording `refusals_without_progress`,
-because a gate that refuses forever scores zero and an incomplete patch does not.
+The gate refuses while rows are unproven — unconditionally. Progress resets
+the stall counter and the journaled `stalled_refusals` count records how hard
+the gate pushed back, but no count of ignored refusals and no deadline ever
+buys an accept: a submission over blocking evidence fails attestation wherever
+it ships, so the contract keeps it off the wire. The budget facts still bound
+the *checks* — the drain and baseline recheck skip themselves only when a
+submission could not follow anyway.
 
 It previously refused exactly once. On run 34374028796 that meant refusing with
 rows unmet and accepting 34 seconds later with 4,260 seconds and 142 steps still

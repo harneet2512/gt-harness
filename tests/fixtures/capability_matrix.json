@@ -165,12 +165,14 @@
      "status": "covered - run 34932393298 refuted the signature"
     },
     {
-     "id": "budget_escape_by_design",
-     "observed": "smoke20 claude-code: gate wanted refuse, escaped time at <600s - designed trade-off",
+     "id": "blocking_evidence_refuses_unconditionally",
+     "observed": "smoke20 claude-code + union-alpha 35141054074: gate wanted refuse, conceded on budget/stall, dirty submit shipped and failed attestation anyway - concession removed; budget/stall facts are journaled as evidence (budget_allows_refusal, escape_available, stalled_refusals), never spent",
      "covering_tests": [
-      "tests/test_persistent_plan_gate.py"
+      "tests/test_persistent_plan_gate.py",
+      "tests/test_audit_plan_submit.py",
+      "tests/test_persistent_plan_integration.py"
      ],
-     "status": "covered-by-design"
+     "status": "covered - contract-first redesign"
     },
     {
      "id": "behavioral_program_checks_unbindable",

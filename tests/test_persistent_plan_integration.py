@@ -230,16 +230,20 @@ def test_the_gate_keeps_refusing_until_refusals_stop_buying_evidence(tmp_path, g
     # and 142 steps still available.
     assert session.plan_submit_gate() is False
 
-    # ...but it concedes rather than run the task into the deadline with no
-    # submission at all, once refusals have stopped buying evidence.
+    # ...and it never concedes while evidence is missing. The stall count is
+    # journaled evidence of a non-compliant submitter, not a limit that ships
+    # the defective submission the gate exists to stop.
     from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
 
     for _ in range(MAX_REFUSALS_WITHOUT_PROGRESS):
         session.plan_submit_gate()
-    assert session.plan_submit_gate() is True
+    assert session.plan_submit_gate() is False
+    last = [row for row in _journal(adapter) if row["event"] == "plan_gate_decision"][-1]
+    assert last["reason"] == "unmet_plan_rows"
+    assert last["evidence"]["stalled_refusals"] >= MAX_REFUSALS_WITHOUT_PROGRESS
 
 
-def test_the_gate_escapes_when_the_budget_is_nearly_gone(tmp_path, graph):
+def test_the_gate_refuses_when_the_budget_is_nearly_gone(tmp_path, graph):
     adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
     _plan_for(inputs, adapter)
     session = GTSession(
@@ -259,10 +263,14 @@ def test_the_gate_escapes_when_the_budget_is_nearly_gone(tmp_path, graph):
     adapter.start_task()
     adapter.begin_verify()
     adapter.begin_submit()
-    assert session.plan_submit_gate() is True
+    # ~5s remain: inside the reserve the old policy shipped the dirty submit.
+    # The contract refuses; the escape that was available is journaled as
+    # evidence instead of spent.
+    assert session.plan_submit_gate() is False
     rows = _journal(adapter)
     decision = [row for row in rows if row["event"] == "plan_gate_decision"][-1]
-    assert decision["escaped"] == "time"
+    assert decision["escaped"] == ""
+    assert decision["evidence"]["escape_available"] == "time"
 
 
 def _journal(adapter) -> list[dict]:
@@ -286,11 +294,15 @@ def test_gate_rereads_budget_consumed_by_queued_checks(tmp_path, graph, monkeypa
 
     monkeypatch.setattr(adapter, "drain_plan_checks", drain)
     monkeypatch.setattr(session, "_plan_baseline_check", lambda: ((), "unknown"))
-    assert session.plan_submit_gate() is True
-    assert allowances == [3.0]
+    # The drain still runs inside the reserve -- it can close rows and convert
+    # the refusal into a clean accept -- but the submit itself refuses on the
+    # unmet rows that remain, and the escape is journaled, not spent.
+    assert session.plan_submit_gate() is False
+    assert allowances == [30.0]
     event = next(row for row in reversed(_journal(adapter)) if row["event"] == "plan_gate_decision")
-    assert event["reason"] == "budget_escape"
+    assert event["reason"] == "unmet_plan_rows"
     assert event["remaining_seconds"] == 599.0
+    assert event["evidence"]["escape_available"] == "time"
     assert event["completion_proven"] is False
 
 
@@ -313,9 +325,13 @@ def test_gate_progress_is_applied_before_reached_stall_limit(tmp_path, graph, mo
     assert session._plan_gate_stalled_refusals == 1
     assert session.plan_submit_gate() is False
     assert session.plan_submit_gate() is False
-    assert session.plan_submit_gate() is True
+    # Progress reset the stall counter once; the stalls after it reach the
+    # journaled count again -- and the gate still refuses, because a dirty
+    # submit fails the same attestation an unverified run does.
+    assert session.plan_submit_gate() is False
     event = next(row for row in reversed(_journal(adapter)) if row["event"] == "plan_gate_decision")
-    assert event["reason"] == "refusals_without_progress"
+    assert event["reason"] == "unmet_plan_rows"
+    assert event["evidence"]["stalled_refusals"] == 3
     assert event["completion_proven"] is False
 
 

@@ -49,6 +49,11 @@ from .run_diagnostics import CapabilityState, DiagnosticCode, DiagnosticEvent
 # stage colliding with one of these would be reported as normal and silent.
 CONFIGURED_OFF_STAGES = ("off", "global_kill_switch")
 
+# Below this much wall clock, the submit gate skips the drain and baseline
+# recheck: neither can finish and still leave room for the submission they are
+# trying to make clean. The refusal itself has no floor.
+_SUBMIT_ROOM_SECONDS = 120.0
+
 # Every stage GTSession.degrade() is called with, across gt_engine, scripts and
 # eval. Used to constrain what a journal row may put into a capability evidence
 # string: the journal lives inside the task container and the benchmarked agent
@@ -812,8 +817,6 @@ class GTSession:
             candidates.append(finalization)
         contract_candidate: tuple[str, str] | None = None
         contract_unit_id = ""
-        localization_candidate = ""
-        localization_unit_id = ""
         contract_was_shipped = bool(self._engine.contract_shipped)
         contract_kind = "context_delta" if contract_was_shipped else "context_contract"
         delta = self._engine.next_contract_delta(
@@ -1528,7 +1531,8 @@ class GTSession:
         consulted after the fact would journal a refusal and change nothing,
         which is worse than no gate because it would read as working.
 
-        Refusals are bounded by remaining budget and consecutive lack of progress.
+        Refusals are unconditional while blocking evidence exists: budget and
+        stall facts reach the journal as evidence, never as an accept.
         Acceptance is permission to submit, not a correctness certificate.
         """
         if self._engine is None or self.disabled:
@@ -1536,20 +1540,23 @@ class GTSession:
         plan = getattr(self._engine, "persistent_plan", None)
         if plan is None or not getattr(plan, "rows", ()):
             return True
-        from .persistent_plan.gate import budget_allows_refusal, decide
+        from .persistent_plan.gate import decide
 
         remaining_seconds, remaining_steps = self.plan_gate_budget()
         try:
             unmet = self._engine.unmet_plan_rows()
         except Exception:  # noqa: BLE001 - a gate fault must never block
             return True
-        # Do not spend the submission reserve on a check whose result cannot
-        # justify a refusal. Re-read the clock after any verification work.
-        if budget_allows_refusal(remaining_seconds, remaining_steps)[0]:
+        # The drain and baseline recheck can still close outstanding rows and
+        # turn this refusal path into a clean accepted submission -- the only
+        # way a refused run recovers. They run whenever enough wall clock
+        # remains to submit afterward; the refusal itself never checks the
+        # reserve. Re-read the clock after any verification work.
+        if remaining_seconds > _SUBMIT_ROOM_SECONDS:
             drain = getattr(self._engine, "drain_plan_checks", None)
             environment = getattr(self._plan_agent, "env", None)
             if callable(drain) and environment is not None:
-                drain(environment, budget_seconds=min(30, max(0, remaining_seconds - 600)))
+                drain(environment, budget_seconds=min(30, max(0, remaining_seconds - _SUBMIT_ROOM_SECONDS)))
             regressions, baseline_status = self._plan_baseline_check()
             remaining_seconds, remaining_steps = self.plan_gate_budget()
             unmet = self._engine.unmet_plan_rows()
@@ -1576,10 +1583,9 @@ class GTSession:
             return True
         self._plan_gate_refusals += 1
         # Did the previous refusal actually buy anything? A row that has left
-        # the unmet set since then is evidence the agent is acting on the gate,
-        # and it earns another refusal. A refusal that changed nothing counts
-        # toward the stall limit, so the gate concedes rather than run the task
-        # into the deadline with no submission at all.
+        # the unmet set since then is evidence the agent is acting on the gate.
+        # A refusal that changed nothing adds to the journaled stall count --
+        # evidence of a non-compliant submitter, never a concession.
         self._plan_gate_stalled_refusals += 1
         self._plan_gate_last_unmet = tuple(unmet)
         self._engine.pending_directives.append(decision.directive)

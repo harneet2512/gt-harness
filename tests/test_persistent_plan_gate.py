@@ -1,4 +1,4 @@
-"""The completion gate: refuses once, escapes on budget, never blocks blindly."""
+"""The completion gate: refuses while blocking evidence exists, unconditionally."""
 from __future__ import annotations
 
 import pytest
@@ -174,8 +174,9 @@ def test_a_second_submit_is_refused_while_budget_and_progress_remain():
     assert decision.reason == "unmet_plan_rows"
 
 
-def test_the_gate_concedes_once_refusals_stop_buying_evidence():
-    """A gate that refuses forever turns a partial score into a zero."""
+def test_the_gate_never_concedes_while_evidence_is_missing():
+    """A blocking-evidence submission is a certain attestation failure, not a
+    partial score: the stall count is journaled but never concedes."""
     from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
 
     decision = decide(
@@ -183,8 +184,11 @@ def test_the_gate_concedes_once_refusals_stop_buying_evidence():
         refusals=MAX_REFUSALS_WITHOUT_PROGRESS,
         refusals_without_progress=MAX_REFUSALS_WITHOUT_PROGRESS, **AMPLE
     )
-    assert decision.accepted
-    assert decision.reason == "refusals_without_progress"
+    assert not decision.accepted
+    assert decision.reason == "unmet_plan_rows"
+    assert decision.escaped == ""
+    evidence = decision.as_row()["evidence"]
+    assert evidence["stalled_refusals"] == MAX_REFUSALS_WITHOUT_PROGRESS
 
 
 def test_progress_earns_another_refusal():
@@ -199,36 +203,43 @@ def test_progress_earns_another_refusal():
     assert not decision.accepted
 
 
-def test_a_caller_that_omits_the_stall_counter_keeps_the_old_shape():
-    """Backward compatible: without the counter every refusal is a stall."""
+def test_a_caller_that_omits_the_stall_counter_still_refuses():
+    """Backward compatible: the counter argument is still accepted, but the
+    count no longer buys an accept."""
     from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
 
     decision = decide(
         plan=_plan(), unmet_rows=("req-a",), regressions=(),
         refusals=MAX_REFUSALS_WITHOUT_PROGRESS, **AMPLE
     )
-    assert decision.accepted
-    assert decision.reason == "refusals_without_progress"
+    assert not decision.accepted
+    assert decision.reason == "unmet_plan_rows"
 
 
-def test_low_time_escapes_rather_than_forcing_a_timeout():
-    """A refusal near the deadline converts a near-miss into a zero."""
+def test_low_time_refuses_and_journals_the_escape_that_was_available():
+    """A blocking-evidence submit inside the reserve still refuses; the
+    journaled evidence records that a budget escape would have applied."""
     decision = decide(
         plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=0,
         remaining_seconds=MIN_REMAINING_SECONDS - 1, remaining_steps=200,
     )
-    assert decision.accepted
-    assert decision.reason == "budget_escape"
-    assert decision.escaped == "time"
+    assert not decision.accepted
+    assert decision.reason == "unmet_plan_rows"
+    assert decision.escaped == ""
+    evidence = decision.as_row()["evidence"]
+    assert evidence["budget_allows_refusal"] is False
+    assert evidence["escape_available"] == "time"
 
 
-def test_low_steps_escapes_too():
+def test_low_steps_refuses_and_journals_the_escape_that_was_available():
     decision = decide(
         plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=0,
         remaining_seconds=3000.0, remaining_steps=MIN_REMAINING_STEPS - 1,
     )
-    assert decision.accepted
-    assert decision.escaped == "steps"
+    assert not decision.accepted
+    evidence = decision.as_row()["evidence"]
+    assert evidence["budget_allows_refusal"] is False
+    assert evidence["escape_available"] == "steps"
 
 
 def test_a_baseline_regression_alone_refuses():
@@ -273,11 +284,12 @@ def test_budget_predicate(seconds, steps, allowed):
     assert budget_allows_refusal(seconds, steps)[0] is allowed
 
 
-def test_the_directive_describes_actual_bounded_retry_policy():
+def test_the_directive_describes_actual_refusal_policy():
     text = render_directive(_plan(), ("req-a",), ())
     assert "reassessed" in text
     assert "accepted either way" not in text
-    assert "bounded stall limit" in text
+    assert "bounded stall limit" not in text
+    assert "will not be executed while" in text
     assert "disagree" in text
 
 
