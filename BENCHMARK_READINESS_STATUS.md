@@ -908,12 +908,20 @@ commands produced no observation at all. Consolidated record:
    graph-lock contention, real ENOSPC/cgroup-OOM) are boundary-limited
    and covered by the installed-rehearsal gate — none block the paid
    smoke. The fresh gate pair is green (`35049683364` / `35049685863`).
-1. **Paid 2-task SWE-Live re-smoke** on the gate-green SHA — needs a fresh
-   explicit owner approval + dispatch tag citing `readiness_run_id`
-   `35049683364`. Success shape: both tasks attested — verifier GRADED
-   joined to clean product receipts (no `receipt_issuance_failed`, no
-   engine-disable), `feature_evaluated` rows present for the local lanes,
-   `submit_window` advisory fires when a green suite-equivalent run exists.
+1. ~~Paid 2-task SWE-Live re-smoke~~ **CLEAN — run `35052806242` on
+   `1bdb35f0` (2026-09-16).** Both prior run-killers are dead:
+   `cyclotruc__gitingest-94` (the `/tmp` spool engine-disable) and
+   `dynaconf__dynaconf-1241` (the cited-base receipt failure) both reached
+   the official verifier, **both GRADED, both solved (reward=1), attestation
+   PASS**. All 5 capability rows WORKING on both tasks (`lsp_promotion`
+   `terminal_succeeded_published`); all 21 identities WITNESSED; strict
+   fleet gate `lsp_watch --strict` PASS on both journals (no TIER_PARTIAL /
+   SCHEDULED_NO_TERMINAL / AMEND_FAILURES / NO_LEG_ON_FINAL; dynaconf drove
+   21 legs / 14 publications / 3 salvage merges to a clean seal). Readiness
+   binding: `35051983365`. One transient operational note: the first
+   dispatch (`35051710971`) refused at `readiness_binding` because a
+   docs-only tip commit moved SOURCE_SHA past the cited readiness head —
+   fail-closed binding worked; no task/provider time consumed.
 2. **Cohort comparison** — 20-task DeepSWE matched cohort against the
    frozen GT-off control
    (`D:\tmp\opencode\gt-off-31824834187\DEEPSWE_EVALUATION_RESULTS.json`,
