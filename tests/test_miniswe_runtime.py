@@ -1572,6 +1572,105 @@ def test_result_level_submit_interception_accepts_when_proven(tmp_path, has_resu
         assert session.integrity_receipt()["valid"] is False
 
 
+def _unmet_plan_session(adapter, monkeypatch, *, mode=GTMode.ADVISORY):
+    """A session whose plan gate honestly refuses: real plan rows, no evidence.
+
+    The plan is built by the shipped producer (``build_plan_inputs`` +
+    ``build_plan``), so ``unmet_plan_rows`` is real; only the wall clock is
+    pinned so the gate's drain/budget branches are deterministic.
+    """
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+
+    adapter.plan_inputs = build_plan_inputs(
+        "The widget must keep working under retries.",
+        repo_root=str(adapter.repo_root or "."),
+        capture_baseline=False,
+    )
+    adapter.persistent_plan = build_plan(
+        {"rows": [{"row_id": row.row_id}
+                  for row in adapter.plan_inputs.ledger.rows]},
+        adapter.plan_inputs,
+        repo_root=str(adapter.repo_root or "."),
+    )
+    assert adapter.persistent_plan.rows, "fixture must mint at least one row"
+    assert adapter.unmet_plan_rows(), "fixture must start with unmet rows"
+    session = _session(adapter, mode)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (3000.0, 200))
+    return session
+
+
+def _suppressed_submit_rows(adapter):
+    return [
+        row for row in (
+            json.loads(line)
+            for line in adapter.store.path.read_text().splitlines())
+        if row.get("event") == "action_suppressed"
+        and row.get("reason") == "submit_refused"
+    ]
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        # ``_command`` prefers ``cmd``, but the environment executes
+        # ``command``: a benign cover string must not hide the marker.
+        pytest.param(
+            {"cmd": "ls -la",
+             "command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
+             "tool_call_id": "c1"},
+            id="cmd_cover_over_executed_command",
+        ),
+        # The shipped environment execs ``argv`` verbatim when present; an
+        # empty ``command`` previously took the no-check early path.
+        pytest.param(
+            {"command": "",
+             "argv": ["echo", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"],
+             "tool_call_id": "c2"},
+            id="argv_marker_empty_command",
+        ),
+        # Same divergence with a present-but-benign command string.
+        pytest.param(
+            {"command": "true",
+             "argv": ["echo", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"],
+             "tool_call_id": "c3"},
+            id="argv_marker_benign_command",
+        ),
+    ],
+)
+def test_submit_gate_inspects_the_fields_the_environment_executes(
+    monkeypatch, tmp_path, action
+):
+    """A submit marker anywhere in the EXECUTED surface must reach the gate.
+
+    Stock parsers emit only ``command``, but ``agent.execute_actions`` is a
+    public seam and the environment honours ``argv`` (exec'd verbatim) while
+    ``_command`` prefers a legacy ``cmd`` key. Detection on only one field
+    lets a marker-bearing action execute under blocking evidence.
+    """
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(tmp_path), issue_text="Keep the widget working.")
+    session = _unmet_plan_session(adapter, monkeypatch)
+    install_runtime_hooks(agent, session)
+    agent.execute_actions({"extra": {"actions": [action]}})
+
+    # Under blocking evidence the action must be suppressed pre-execution:
+    # the environment is never invoked and the journal carries the refusal.
+    assert agent.env.executed == []
+    suppressed = _suppressed_submit_rows(adapter)
+    assert len(suppressed) == 1
+    assert suppressed[0]["executed"] is False
+    decision = [
+        row for row in (
+            json.loads(line)
+            for line in adapter.store.path.read_text().splitlines())
+        if row.get("event") == "plan_gate_decision"
+    ]
+    assert decision and decision[-1]["accepted"] is False
+
+
 def test_failing_test_attributed_to_edited_surface(monkeypatch, tmp_path):
     import subprocess
 

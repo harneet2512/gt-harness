@@ -69,6 +69,29 @@ context receipts, provider admission/route, official verifier result, and final
 attestation. Report DeepSeek results as absolute/exploratory; do not claim
 causal uplift against the retained Muse GT-off cohort.
 
+## P1 — token accounting methodology
+
+The efficiency claim is measured in tokens, never money, and never on
+uncached-token figures alone. The 2026-09-15 smoke-20 accounting showed
++956% uncached/billed input tokens versus the frozen GT-off control while
+total tokens were approximately flat (19.13M vs 19.39M mean) — the dominant
+term was a route confound: GT-off ran native `api.deepseek.com` (~99%
+cache hits), GT-on ran OpenRouter→relace. Before any efficiency claim:
+
+1. Report `total_input`, `cached_input`, `uncached_input`, and
+   `output` tokens per task separately, plus the provider route and the
+   route's cache-reporting semantics.
+2. The primary comparison is **total tokens** per matched task — immune to
+   the cache-regime difference. Uncached/billed tokens are secondary and
+   must be reported with the route confound named.
+3. If a normalized-route control ever becomes available (both arms on the
+   same provider path), uncached tokens become comparable; until then no
+   uncached-token claim stands alone.
+4. Quantify GT prompt mass per request (GT-tagged content share of input
+   bytes) from the journaled request manifests — mechanism, not inference.
+5. Never rerun GT-off locally to generate a same-route control; the frozen
+   baselines and official leaderboard are the only anchors.
+
 ## P1 — fleet LSP health gate
 
 Every paid run ships `GT_JOURNAL_TEE=1`; tail live per-task LSP health with

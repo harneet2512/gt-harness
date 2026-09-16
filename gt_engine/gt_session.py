@@ -209,6 +209,29 @@ _LOCALIZATION_KINDS = frozenset({"brief_localization", "localization"})
 _WEAK_HISTORY_KINDS = frozenset({"cochange_partner", "cochange_prior"})
 _MINISWE_CHAIN_GENESIS = hashlib.sha256(b"miniswe-genesis").hexdigest()
 
+# The per-request delivery ceiling bounds what one decision ships; it says
+# nothing about the history those deliveries accumulate into. This is the
+# HISTORY-axis bound: when the rendered bytes of every currently-live
+# (non-superseded) context unit exceed the budget, the oldest-admitted live
+# units demote to one-line pointers through the same collapse path a
+# supersession takes. The pointer carries the unit's CAS identity, so the
+# demotion destroys nothing - `gt-evidence read` still resolves the bytes.
+# GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES=0 disables the bound.
+_HISTORY_LIVE_UNIT_BYTES_DEFAULT = 8_192
+
+# Lanes whose live unit must stay verbatim under any budget pressure: the
+# current contract and the plan cursor are the steering the next decision is
+# organized around. Finalization/contract lanes exist only to be read.
+_HISTORY_BUDGET_PROTECTED_KEYS = frozenset({
+    "obligations:task",
+    "plan_cursor:task",
+})
+_HISTORY_BUDGET_PROTECTED_PREFIXES = ("finalization:", "contract:")
+
+# The drained unit's superseded_by marker when the history budget - not a
+# successor claim - forced the demotion. Journaled as the collapse reason.
+_HISTORY_BUDGET_MARKER = "history_budget"
+
 
 def _decision_candidate_order(candidate: GTDecisionCandidate) -> tuple[int, int, str, str]:
     """Current facts first; weak historical priors consume only spare room."""
@@ -319,11 +342,14 @@ class GTSession:
         # proven) and must not be confused with "never looked".
         self._last_plan_unmet: tuple[str, ...] | None = None
         self._pending_context_units: dict[str, dict[str, Any]] = {}
-        # unit_id -> {rendered, artifact_reference}: the exact bytes injected
+        # unit_id -> {rendered, artifact_reference, supersession_key,
+        # admitted_iteration, admission_order}: the exact bytes injected
         # into history plus their archive pointer, so a later unit that names
         # it in `supersedes` can have its block collapsed. Only units that
-        # declared supersession ever collapse.
+        # declared supersession ever collapse. The admission stamp is what
+        # the history budget orders and the current-iteration guard reads.
         self._context_unit_rendered: dict[str, dict[str, Any]] = {}
+        self._context_unit_sequence = 0
         self._superseded_context_units: list[dict[str, Any]] = []
         self._execution_sequence = 0
         self._open_executions: set[str] = set()
@@ -988,6 +1014,71 @@ class GTSession:
         self._superseded_context_units = []
         return drained
 
+    def demote_overbudget_context_units(self, *, current_iteration: int) -> int:
+        """Demote oldest live units until live history bytes fit the budget.
+
+        Supersession bounds each lane to its latest claim but leaves every
+        lane's claim live forever; this is the bound across ALL lanes on the
+        history axis. A demoted unit queues onto the same drain a superseded
+        unit takes, so the existing collapse path rewrites it to a one-line
+        pointer carrying its CAS identity - demotion is not deletion.
+
+        A unit admitted in the iteration now being prepared has not provably
+        ridden the wire and is never eligible; the protected lanes stay
+        verbatim regardless of pressure. Returns the count queued.
+        """
+        if self._engine is None or self.disabled:
+            return 0
+        try:
+            budget = int(
+                os.environ.get("GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES", "")
+                or _HISTORY_LIVE_UNIT_BYTES_DEFAULT
+            )
+        except ValueError:
+            budget = _HISTORY_LIVE_UNIT_BYTES_DEFAULT
+        if budget <= 0:
+            return 0
+        live = self._context_unit_rendered
+        live_bytes = sum(
+            len(str(record.get("rendered") or "").encode("utf-8"))
+            for record in live.values()
+        )
+        if live_bytes <= budget:
+            return 0
+        demoted = 0
+        for unit_id, record in sorted(
+            live.items(), key=lambda item: item[1].get("admission_order", 0)
+        ):
+            if live_bytes <= budget:
+                break
+            if int(record.get("admitted_iteration") or 0) >= current_iteration:
+                # Admitted for the request being prepared: it must ride once.
+                continue
+            key = str(record.get("supersession_key") or "")
+            if key in _HISTORY_BUDGET_PROTECTED_KEYS or key.startswith(
+                _HISTORY_BUDGET_PROTECTED_PREFIXES
+            ):
+                continue
+            rendered = str(record.get("rendered") or "")
+            if not rendered:
+                continue
+            live.pop(unit_id, None)
+            self._superseded_context_units.append(
+                {
+                    "unit_id": unit_id,
+                    "rendered": rendered,
+                    "supersession_key": key,
+                    "superseded_by": _HISTORY_BUDGET_MARKER,
+                    "artifact_reference": dict(
+                        record.get("artifact_reference") or {}
+                    ),
+                    "reason": "history_budget",
+                }
+            )
+            live_bytes -= len(rendered.encode("utf-8"))
+            demoted += 1
+        return demoted
+
     def provider_request_admitted(
         self, delivery_ids: tuple[str, ...], *, drain_action_queue: bool = True
     ) -> None:
@@ -1022,11 +1113,15 @@ class GTSession:
                     "action_index": unit["action_index"],
                 }
             if unit.get("rendered"):
+                self._context_unit_sequence += 1
                 self._context_unit_rendered[unit["unit_id"]] = {
                     "rendered": unit["rendered"],
                     "artifact_reference": dict(
                         unit.get("artifact_reference") or {}
                     ),
+                    "supersession_key": key,
+                    "admitted_iteration": int(unit.get("admitted_iteration") or 0),
+                    "admission_order": self._context_unit_sequence,
                 }
             for superseded_id in unit["supersedes"]:
                 superseded_unit = self._context_unit_rendered.pop(
@@ -1394,6 +1489,7 @@ class GTSession:
                     "artifact_reference": artifact_reference,
                     "historical": historical,
                     "action_index": candidate.action_index,
+                    "admitted_iteration": iteration,
                     "rendered": rendered,
                 }
                 self._pending_context_units[payload_sha256] = unit
@@ -1565,6 +1661,25 @@ class GTSession:
         previous = self._plan_gate_last_unmet
         if previous is not None and set(previous) - set(unmet):
             self._plan_gate_stalled_refusals = 0
+        # A RED predicate bound to no plan row is blocking evidence the row
+        # census cannot see: evaluate_failing_observation reddens any matched
+        # contract obligation, and _link_obligations never guaranteed every
+        # obligation a row. They refuse under their own reason so the journal
+        # distinguishes an unmapped-predicate refusal from an unmet-row one.
+        unmapped_red = getattr(self._engine, "unmapped_red_predicates", None)
+        unresolved = tuple(unmapped_red()) if callable(unmapped_red) else ()
+        predicate_labels = (
+            {
+                key: getattr(
+                    getattr(self._engine, "predicates", {}).get(key),
+                    "description",
+                    "",
+                ) or key
+                for key in unresolved
+            }
+            if unresolved
+            else None
+        )
         decision = decide(
             plan=plan,
             unmet_rows=unmet,
@@ -1577,6 +1692,8 @@ class GTSession:
             row_states={row.row_id: self._engine.plan_row_state(row.row_id) for row in plan.rows},
             predicate_mapped_rows=tuple(key for key, value in getattr(
                 self._engine, "plan_row_predicates", {}).items() if value),
+            unresolved_predicates=unresolved,
+            predicate_labels=predicate_labels,
         )
         self._engine.store.append("plan_gate_decision", **decision.as_row())
         if decision.accepted:

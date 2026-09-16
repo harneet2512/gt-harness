@@ -866,3 +866,90 @@ def test_finalize_startup_observes_the_edits_that_beat_the_index(tmp_path, graph
         row for row in _journal(adapter) if row["event"] == "edit_transaction"
     ]
     assert first_revision == journaled[0]["post_revision"]
+
+
+def test_an_unmapped_red_predicate_still_blocks_the_gate(tmp_path, graph, monkeypatch):
+    """The hole the row census cannot see, on the real objects.
+
+    ``unmet_plan_rows`` censuses rows; ``evaluate_failing_observation``
+    reddens any contract obligation a failing check lexically matches, and
+    ``_link_obligations`` never promised every obligation a plan row. An
+    obligation bound to no row mints a predicate that can go RED without a
+    single row reporting it. The gate has to refuse on it directly, under
+    its own journaled reason -- otherwise a submission ships over live
+    failing evidence.
+    """
+    from dataclasses import replace
+
+    from gt_engine.miniswe_controller import PredicateStatus
+    from gt_engine.task_contract import Obligation
+    from gt_engine.verification_contract import compile_obligation_predicates
+
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+
+    # An obligation no ledger row links to: it joins the contract and the
+    # predicate set exactly as register_plan_predicates/adopt_startup_plan
+    # register derived obligations, but no row's candidates ever name it.
+    orphan = Obligation(
+        obligation_id="obl-orphan",
+        text="the tokenizer handles orphan tokens correctly",
+        source="persistent_plan",
+    )
+    adapter.contract = replace(
+        adapter.contract, obligations=adapter.contract.obligations + (orphan,)
+    )
+    adapter._compiled_predicates = compile_obligation_predicates(adapter.contract)
+    adapter._predicate_by_obligation = {
+        item.obligation_id: item.predicate_id
+        for item in adapter._compiled_predicates.values()
+    }
+    adapter._obligation_by_predicate = {
+        value: key for key, value in adapter._predicate_by_obligation.items()
+    }
+    orphan_pid = adapter._predicate_by_obligation["obl-orphan"]
+    adapter.predicates[orphan_pid] = Predicate(orphan_pid, orphan.text)
+    adapter._status[orphan_pid] = PredicateStatus.UNKNOWN
+    assert orphan_pid not in {
+        key for keys in adapter.plan_row_predicates.values() for key in keys
+    }
+
+    # Every row reads PROVEN on the current tree, so the row census is clean
+    # and stays clean -- the orphan predicate is not any row's business.
+    adapter._process_row_observations = {
+        row.row_id: {
+            "state": "PROVEN",
+            "source_revision": adapter.repository_revision,
+        }
+        for row in plan.rows
+    }
+
+    session = GTSession(
+        GTSessionConfig(task_id="unmapped", repo_root=str(repo), mode="advisory"),
+        engine=adapter,
+    )
+    session._plan_agent = SimpleNamespace(env=None)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (600.0, 20))
+
+    adapter.start_task()
+    reddened = adapter.evaluate_failing_observation(
+        "pytest -q tests/test_tokenizer.py",
+        "FAILED tests/test_tokenizer.py::test_orphan_tokens - "
+        "orphan tokens not handled",
+        returncode=1,
+        action_index=1,
+    )
+    assert reddened == (orphan_pid,)
+    assert adapter.predicate_status(orphan_pid) is PredicateStatus.RED
+    # The premise: the row census genuinely cannot see this failure.
+    assert adapter.unmet_plan_rows() == ()
+
+    assert session.plan_submit_gate() is False
+    event = next(
+        row for row in reversed(_journal(adapter))
+        if row["event"] == "plan_gate_decision"
+    )
+    assert event["reason"] == "unresolved_predicates"
+    assert event["unresolved_predicates"] == [orphan_pid]
+    # The refusal names the obligation, not the opaque predicate id.
+    assert "the tokenizer handles orphan tokens correctly" in adapter.pending_directives[-1]

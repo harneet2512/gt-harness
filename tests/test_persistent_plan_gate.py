@@ -308,3 +308,60 @@ def test_the_decision_row_is_journal_shaped():
     assert row["unmet_rows"] == ["req-a"]
     assert isinstance(row["remaining_seconds"], float)
     assert isinstance(row["remaining_steps"], int)
+
+
+def test_an_unmapped_red_predicate_alone_refuses():
+    """A RED predicate bound to no plan row is blocking evidence the row
+    census cannot see: ``evaluate_failing_observation`` reddens any matched
+    contract obligation and ``_link_obligations`` never promised every
+    obligation a row. It refuses under its own reason so an audit can tell
+    an unmapped-predicate refusal from an unmet-row one."""
+    decision = decide(
+        plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+        unresolved_predicates=("pred-obl-orphan",),
+        predicate_labels={"pred-obl-orphan": "the tokenizer handles orphan tokens"},
+        **AMPLE,
+    )
+    assert not decision.accepted
+    assert decision.reason == "unresolved_predicates"
+    row = decision.as_row()
+    assert row["unmet_rows"] == []
+    assert row["unresolved_predicates"] == ["pred-obl-orphan"]
+    assert row["evidence"]["unresolved_predicates"] == ["pred-obl-orphan"]
+    assert row["completion_proven"] is False
+    # The directive must name the obligation, not the hash - a bare
+    # ``pred-<hash>`` refusal is unactionable.
+    assert "the tokenizer handles orphan tokens" in decision.directive
+    assert "pred-obl-orphan" not in decision.directive
+
+
+def test_unresolved_predicates_disprove_completion_even_with_verified_rows():
+    """Same shape as a regression: current failing evidence against an
+    obligation the plan never tracked means completion was never proven,
+    even when every row's check passed."""
+    decision = decide(
+        plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+        baseline_status="intact",
+        row_states={"req-a": "CHECK_PASSED", "req-b": "CHECK_PASSED"},
+        unresolved_predicates=("pred-obl-orphan",),
+        **AMPLE,
+    )
+    assert not decision.accepted
+    assert decision.as_row()["completion_proven"] is False
+
+
+def test_row_unmet_reason_still_wins_over_unresolved_predicates():
+    """When both channels have evidence the row reason leads; the
+    unresolved predicates are still journaled beside it."""
+    decision = decide(
+        plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=0,
+        unresolved_predicates=("pred-obl-orphan",), **AMPLE,
+    )
+    assert not decision.accepted
+    assert decision.reason == "unmet_plan_rows"
+    assert decision.as_row()["unresolved_predicates"] == ["pred-obl-orphan"]
+
+
+def test_the_directive_falls_back_to_the_predicate_id_without_a_label():
+    text = render_directive(_plan(), (), (), ("pred-obl-orphan",))
+    assert "pred-obl-orphan" in text

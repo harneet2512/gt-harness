@@ -21,14 +21,18 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from minisweagent.exceptions import Submitted
 
 from gt_engine.event_journal import verify_event_journal
 from gt_engine.gt_session import GTSession, GTSessionConfig
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter
-from gt_engine.miniswe_runtime import _run_submit_gate
+from gt_engine.miniswe_runtime import _run_submit_gate, install_runtime_hooks
 from gt_engine.persistent_plan import (
     build_plan_inputs,
     merged_plan_contract,
@@ -865,6 +869,145 @@ class TestSealAndGate:
         assert accepted is True and batch.empty
         assert not _rows(adapter, "action_suppressed")
         assert not _rows(adapter, "plan_gate_decision")
+
+
+class _LoopModel:
+    """The smallest model surface ``install_runtime_hooks`` binds to."""
+
+    def _prepare_messages_for_api(self, messages):
+        return messages
+
+    def query(self, messages, **kwargs):
+        return {"role": "assistant", "content": "ok", "extra": {"actions": []}}
+
+    def format_observation_messages(self, message, outputs, template_vars=None):
+        return [
+            {"role": "tool", "content": str(out.get("output") or ""),
+             "tool_call_id": f"call-{index}"}
+            for index, out in enumerate(outputs)
+        ]
+
+
+class _LoopAgent:
+    """The smallest agent surface: env + config clock for the gate budget."""
+
+    def __init__(self, env, *, wall_time_limit_seconds=3600):
+        self.env = env
+        self.model = _LoopModel()
+        self.messages: list[dict] = []
+        self.config = SimpleNamespace(
+            step_limit=0, wall_time_limit_seconds=wall_time_limit_seconds)
+        self.n_calls = 0
+        self._start_time = time.time()
+
+    def execute_actions(self, message):
+        return []
+
+    def add_messages(self, *messages):
+        self.messages.extend(messages)
+        return list(messages)
+
+    def get_template_vars(self):
+        return {}
+
+
+class _SubmittedEnv(_StubEnv):
+    """An isolation boundary whose command OUTPUT opens with the marker even
+    though the command text never carried it -- the post-execution shape."""
+
+    def execute(self, action, cwd=None, timeout=None):
+        command = str((action or {}).get("command") or "")
+        self.calls.append(command)
+        error = Submitted({
+            "role": "exit",
+            "content": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\npayload",
+            "extra": {"exit_status": "Submitted", "submission": "payload"},
+        })
+        error.gt_execution_result = {
+            "output": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\npayload",
+            "returncode": 0,
+            "exception_info": "",
+        }
+        raise error
+
+
+class TestSubmitSeamEndToEnd:
+    """The action loop, not the gate primitive: pin that an ADVISORY run still
+    suppresses a marker command under blocking evidence, and that a submit
+    detected only in the executed output is journaled as a post-execution
+    accept (the seam cannot un-run a command)."""
+
+    def test_advisory_marker_command_is_suppressed_and_steered(
+            self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+        adapter, inputs, _contract, repo = _build(tmp_path)
+        _plan_for(inputs, adapter)
+        # No bound checks and no predicate mapping: every row stays unmet.
+        assert adapter.unmet_plan_rows()
+        env = _StubEnv()
+        agent = _LoopAgent(env)
+        session = GTSession(
+            GTSessionConfig(
+                task_id="audit", repo_root=str(repo), mode="advisory"),
+            engine=adapter,
+        )
+        install_runtime_hooks(agent, session)
+        assert session.mode.value == "advisory" and not session.can_enforce
+
+        submit = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+        observed = agent.execute_actions(
+            {"extra": {"actions": [{"command": submit, "tool_call_id": "c1"}]}})
+
+        # The native command never ran: the environment saw nothing at all.
+        assert env.calls == []
+        assert adapter.phase == "IMPLEMENT"
+        decision = _rows(adapter, "plan_gate_decision")[-1]
+        assert decision["accepted"] is False
+        assert decision["reason"] == "unmet_plan_rows"
+        suppressed = _rows(adapter, "action_suppressed")
+        assert len(suppressed) == 1
+        assert suppressed[0]["reason"] == "submit_refused"
+        assert suppressed[0]["executed"] is False
+        # The refusal is steered back to the model as a user-role directive,
+        # surfaced through the same add_messages return the loop appends.
+        surfaced = "\n".join(
+            str(message.get("content") or "")
+            for message in [*observed, *agent.messages])
+        assert "GT PLAN GATE" in surfaced
+        assert "submission was not executed" in surfaced
+        assert verify_event_journal(adapter.store.path).valid
+
+    def test_output_detected_submit_journals_post_execution_accept(
+            self, tmp_path, monkeypatch) -> None:
+        """The marker that appears only in command OUTPUT cannot be refused
+        pre-execution -- the command already ran. The seam journals the
+        advisory accept and re-raises the native terminal."""
+        monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+        adapter, inputs, _contract, repo = _build(tmp_path)
+        _plan_for(inputs, adapter)
+        env = _SubmittedEnv()
+        agent = _LoopAgent(env)
+        session = GTSession(
+            GTSessionConfig(
+                task_id="audit", repo_root=str(repo), mode="advisory"),
+            engine=adapter,
+        )
+        install_runtime_hooks(agent, session)
+
+        with pytest.raises(Submitted):
+            agent.execute_actions({"extra": {"actions": [
+                {"command": "cat submission.txt", "tool_call_id": "c1"}]}})
+
+        assert env.calls == ["cat submission.txt"]
+        assert adapter.phase == "FINISHED"
+        decision = _rows(adapter, "submit_decision")[-1]
+        assert decision["accepted"] is True
+        assert decision["enforced"] is False
+        # Blocking predicates were journaled as advisory evidence, and no
+        # suppression row exists for a command that already executed.
+        assert _rows(adapter, "submit_advisory")
+        assert not _rows(adapter, "action_suppressed")
+        assert verify_event_journal(adapter.store.path).valid
 
 
 class TestAccounting:

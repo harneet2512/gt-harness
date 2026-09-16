@@ -50,6 +50,7 @@ class GateDecision:
     reason: str
     unmet_rows: tuple[str, ...] = ()
     regressions: tuple[str, ...] = ()
+    unresolved_predicates: tuple[str, ...] = ()
     remaining_seconds: float = 0.0
     remaining_steps: int | None = 0
     refusals: int = 0
@@ -65,6 +66,7 @@ class GateDecision:
             "reason": self.reason,
             "unmet_rows": list(self.unmet_rows),
             "regressions": list(self.regressions),
+            "unresolved_predicates": list(self.unresolved_predicates),
             "remaining_seconds": round(self.remaining_seconds, 1),
             "remaining_steps": self.remaining_steps,
             "refusals": self.refusals,
@@ -96,6 +98,8 @@ def decide(
     refusals_without_progress: int | None = None,
     row_states: dict[str, str] | None = None,
     predicate_mapped_rows: tuple[str, ...] | None = None,
+    unresolved_predicates: tuple[str, ...] = (),
+    predicate_labels: dict[str, str] | None = None,
 ) -> GateDecision:
     """The whole gate policy, as a pure function of the facts.
 
@@ -127,6 +131,10 @@ def decide(
         "deferred_rows": sorted(key for key in row_ids if states.get(key) == "DEFERRED"),
         "proven_rows": sorted(key for key in row_ids if states.get(key) == "PROVEN"),
         "unverified_rows": sorted(key for key in row_ids if states.get(key, "UNVERIFIED") == "UNVERIFIED"),
+        # RED predicates bound to no plan row -- the channel the row census
+        # cannot see, journaled as ids under their own name so an audit can
+        # tell this refusal from an unmet-row one.
+        "unresolved_predicates": sorted(unresolved_predicates),
     }
     # completion_proven was hardcoded False: gate-one journaled
     # submitted_verified beside 28 UNVERIFIED rows and this field could not
@@ -150,6 +158,7 @@ def decide(
         bool(row_ids)
         and all(states.get(key) in verified_states for key in row_ids)
         and not regressions
+        and not unresolved_predicates
         and not _baseline_blind
     )
     common = {
@@ -162,7 +171,10 @@ def decide(
     }
     if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on
         return GateDecision(accepted=True, reason="no_plan", **common)
-    blocking = tuple(unmet_rows) + tuple(regressions)
+    # A RED predicate bound to no plan row is blocking evidence too: the
+    # row census can only see what a row's mapping names, and nothing binds
+    # a failing contract obligation to a row it was never linked to.
+    blocking = tuple(unmet_rows) + tuple(regressions) + tuple(unresolved_predicates)
     if not blocking:
         return GateDecision(accepted=True, reason="no_blocking_evidence", **common)
     # A submission over blocking evidence is refused, unconditionally. The
@@ -177,16 +189,27 @@ def decide(
     details["stalled_refusals"] = stalled
     return GateDecision(
         accepted=False,
-        reason="unmet_plan_rows" if unmet_rows else "baseline_regression",
+        reason=(
+            "unmet_plan_rows" if unmet_rows
+            else "baseline_regression" if regressions
+            else "unresolved_predicates"
+        ),
         unmet_rows=unmet_rows,
         regressions=regressions,
-        directive=render_directive(plan, unmet_rows, regressions),
+        unresolved_predicates=unresolved_predicates,
+        directive=render_directive(
+            plan, unmet_rows, regressions, unresolved_predicates, predicate_labels
+        ),
         **common,
     )
 
 
 def render_directive(
-    plan, unmet_rows: tuple[str, ...], regressions: tuple[str, ...]
+    plan,
+    unmet_rows: tuple[str, ...],
+    regressions: tuple[str, ...],
+    unresolved_predicates: tuple[str, ...] = (),
+    predicate_labels: dict[str, str] | None = None,
 ) -> str:
     """What the agent is told when the gate refuses.
 
@@ -220,6 +243,17 @@ def render_directive(
         for name in regressions[:MAX_LISTED_ROWS]:
             lines.append(f"- {name}")
         extra = len(regressions) - MAX_LISTED_ROWS
+        if extra > 0:
+            lines.append(f"- ... and {extra} more")
+    if unresolved_predicates:
+        labels = predicate_labels or {}
+        lines.append(
+            "Requirements with current failing evidence that no plan row "
+            "tracks - a failing check was matched to them directly:"
+        )
+        for predicate_id in unresolved_predicates[:MAX_LISTED_ROWS]:
+            lines.append(f"- {labels.get(predicate_id) or predicate_id}")
+        extra = len(unresolved_predicates) - MAX_LISTED_ROWS
         if extra > 0:
             lines.append(f"- ... and {extra} more")
     return "\n".join(lines)

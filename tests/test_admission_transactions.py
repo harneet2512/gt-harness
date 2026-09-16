@@ -533,3 +533,169 @@ def test_superseded_context_units_collapse_to_pointers(tmp_path):
     # The drain is one-shot: a second collapse is a no-op.
     collapse_superseded_context_units(session, adapter, messages)
     assert history_text == messages[1]["content"]
+
+
+def _ship_context_unit(session, candidate, *, iteration):
+    """Admit one candidate, then commit it as a delivered provider request.
+
+    A context unit's delivery identity is the sha256 of its exact wire bytes -
+    the same identity provider_request_admitted commits on transport return.
+    """
+    batch = session.admit_decision_packet(
+        [candidate], iteration=iteration, action_index=iteration
+    )
+    session.provider_request_admitted(tuple(
+        hashlib.sha256(item.encode()).hexdigest()
+        for item in batch.context_additions
+    ))
+    return batch
+
+
+def test_overbudget_live_units_collapse_oldest_first(tmp_path, monkeypatch):
+    """The history-axis bound: live unit bytes are capped across lanes, not
+    just per lane. The oldest-admitted units demote to pointers until the
+    survivors fit; the newest stays verbatim."""
+    from gt_engine.miniswe_runtime import collapse_superseded_context_units
+
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+    batches = [
+        _ship_context_unit(session, GTDecisionCandidate(
+            rendered=f"claim body {index} " + "x" * 300,
+            kind="syntax_result", dedup_key=f"key-{index}",
+            unit_id=f"unit-{index}", supersession_key=f"check:lane_{index}",
+        ), iteration=index)
+        for index in range(3)
+    ]
+    additions = [batch.context_additions[0] for batch in batches]
+    # Exactly the newest unit's worth of bytes may stay live.
+    monkeypatch.setenv(
+        "GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES",
+        str(len(additions[2].encode("utf-8"))),
+    )
+    adapter.iteration = 3
+    messages = [{"role": "user", "content": "\n\n".join(additions)}]
+
+    collapse_superseded_context_units(session, adapter, messages)
+
+    parts = messages[0]["content"].split("\n\n")
+    assert len(parts) == 3
+    for part, unit_id in zip(parts[:2], ("unit-0", "unit-1"), strict=True):
+        assert part.startswith("[GT_CONTEXT_UNIT] ")
+        pointer = json.loads(part.split("[GT_CONTEXT_UNIT] ", 1)[1])
+        assert pointer["unit_id"] == unit_id
+        assert pointer["superseded"] is True
+        assert pointer["superseded_by"] == "history_budget"
+        # The pointer still resolves the full bytes through the evidence CAS.
+        assert pointer["artifact_sha256"]
+    # The newest unit rides verbatim - demotion never reaches it.
+    assert parts[2] == additions[2]
+    assert set(session._context_unit_rendered) == {"unit-2"}
+    rows = [json.loads(line)
+            for line in adapter.store.path.read_text().splitlines()]
+    collapsed = [row for row in rows if row["event"] == "context_unit_collapsed"]
+    assert [row["unit_id"] for row in collapsed] == ["unit-0", "unit-1"]
+    assert all(row["reason"] == "history_budget" for row in collapsed)
+
+
+def test_current_iteration_unit_rides_the_wire_before_budget_collapse(
+    tmp_path, monkeypatch
+):
+    """A unit admitted in the iteration being prepared has not provably
+    ridden the wire; the budget may not pull it from under the model."""
+    from gt_engine.miniswe_runtime import collapse_superseded_context_units
+
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+    old = _ship_context_unit(session, GTDecisionCandidate(
+        rendered="old claim bytes " + "o" * 200, kind="syntax_result",
+        dedup_key="key-old", unit_id="unit-old", supersession_key="check:old",
+    ), iteration=0)
+    fresh = _ship_context_unit(session, GTDecisionCandidate(
+        rendered="fresh claim bytes " + "f" * 200, kind="syntax_result",
+        dedup_key="key-fresh", unit_id="unit-fresh",
+        supersession_key="check:fresh",
+    ), iteration=2)
+    additions = [old.context_additions[0], fresh.context_additions[0]]
+    # A budget below EITHER unit still cannot reach the current one.
+    monkeypatch.setenv("GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES", "1")
+    adapter.iteration = 2
+    messages = [{"role": "user", "content": "\n\n".join(additions)}]
+
+    collapse_superseded_context_units(session, adapter, messages)
+
+    content = messages[0]["content"]
+    assert "old claim bytes" not in content
+    assert '"superseded_by":"history_budget"' in content
+    assert additions[1] in content
+    assert "unit-old" not in session._context_unit_rendered
+    assert "unit-fresh" in session._context_unit_rendered
+
+
+@pytest.mark.parametrize("key", ["obligations:task", "plan_cursor:task"])
+def test_contract_and_cursor_lanes_stay_verbatim_under_budget(
+    tmp_path, monkeypatch, key
+):
+    """The current contract and the plan cursor organize the NEXT decision;
+    they stay verbatim no matter how hard the budget bites."""
+    from gt_engine.miniswe_runtime import collapse_superseded_context_units
+
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+    protected = _ship_context_unit(session, GTDecisionCandidate(
+        rendered="current steering " + "s" * 200, kind="context_delta",
+        dedup_key=f"prompt:{key}", lane="prompt", unit_id="unit-protected",
+        supersession_key=key,
+    ), iteration=0)
+    ordinary = _ship_context_unit(session, GTDecisionCandidate(
+        rendered="ordinary claim " + "o" * 200, kind="syntax_result",
+        dedup_key="key-ord", unit_id="unit-ord", supersession_key="check:ord",
+    ), iteration=1)
+    additions = [protected.context_additions[0], ordinary.context_additions[0]]
+    monkeypatch.setenv("GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES", "1")
+    adapter.iteration = 2
+    messages = [{"role": "user", "content": "\n\n".join(additions)}]
+
+    collapse_superseded_context_units(session, adapter, messages)
+
+    content = messages[0]["content"]
+    # The protected lane is the OLDEST admission here and still survives.
+    assert additions[0] in content
+    assert "ordinary claim" not in content
+    assert set(session._context_unit_rendered) == {"unit-protected"}
+
+
+def test_units_under_the_history_budget_are_never_touched(
+    tmp_path, monkeypatch
+):
+    """Under the default bound nothing changes; a zero bound disables the
+    mechanism outright rather than collapsing everything."""
+    from gt_engine.miniswe_runtime import collapse_superseded_context_units
+
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+    additions = [
+        _ship_context_unit(session, GTDecisionCandidate(
+            rendered=f"small claim {index}", kind="syntax_result",
+            dedup_key=f"key-{index}", unit_id=f"unit-{index}",
+            supersession_key=f"check:lane_{index}",
+        ), iteration=index).context_additions[0]
+        for index in range(2)
+    ]
+    adapter.iteration = 3
+    before = "history\n\n" + "\n\n".join(additions)
+    messages = [{"role": "user", "content": before}]
+
+    collapse_superseded_context_units(session, adapter, messages)
+
+    assert messages[0]["content"] == before
+    assert set(session._context_unit_rendered) == {"unit-0", "unit-1"}
+    rows = [json.loads(line)
+            for line in adapter.store.path.read_text().splitlines()]
+    assert not [row for row in rows if row["event"] == "context_unit_collapsed"]
+
+    # GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES=0 means "no bound", not "no bytes".
+    monkeypatch.setenv("GT_HISTORY_CONTEXT_UNIT_LIVE_BYTES", "0")
+    collapse_superseded_context_units(session, adapter, messages)
+    assert messages[0]["content"] == before
+    assert set(session._context_unit_rendered) == {"unit-0", "unit-1"}

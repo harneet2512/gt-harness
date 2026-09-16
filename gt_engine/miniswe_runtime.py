@@ -234,6 +234,30 @@ def _command(action: Any) -> str:
     return str(getattr(action, "cmd", "") or getattr(action, "command", "") or "")
 
 
+def _executed_command_surface(action: Any) -> str:
+    """Every field an environment may execute, joined for submit detection.
+
+    ``_command`` prefers the legacy ``cmd`` key while the shipped
+    environments execute ``command`` -- and ``argv`` verbatim when it is
+    present (``CredentialIsolatedLocalEnvironment`` execs it directly; GT's
+    own bound checks pass it through the same seam). Detecting the submit
+    marker on only the preferred field lets a cover string in one field
+    hide a marker-bearing command the environment would still run.
+    Over-matching is safe: ``is_submit_command`` only decides whether the
+    plan gate is consulted, and a refused submit never executes.
+    """
+    if isinstance(action, dict):
+        fields = (action.get("cmd"), action.get("command"))
+        argv = action.get("argv")
+    else:
+        fields = (getattr(action, "cmd", None), getattr(action, "command", None))
+        argv = getattr(action, "argv", None)
+    parts = [str(field) for field in fields if field]
+    if isinstance(argv, (list, tuple)):
+        parts.extend(str(item) for item in argv if item is not None)
+    return "\n".join(parts)
+
+
 def _observation_bytes(result: Any) -> bytes:
     if isinstance(result, dict):
         extra = result.get("extra") or {}
@@ -593,6 +617,15 @@ def collapse_superseded_context_units(
     take = getattr(session, "take_superseded_context_units", None)
     if not callable(take):
         return
+    # The history-axis bound: when live unit bytes exceed the budget the
+    # session queues its oldest-admitted units onto this same drain, and the
+    # rewrite below turns them into pointers exactly like a supersession.
+    demote = getattr(session, "demote_overbudget_context_units", None)
+    if callable(demote):
+        try:
+            demote(current_iteration=int(getattr(adapter, "iteration", 0) or 0))
+        except Exception:  # noqa: BLE001 - a budget fault keeps full bytes
+            pass
     for unit in take():
         rendered = unit.get("rendered") or ""
         if not rendered:
@@ -620,6 +653,7 @@ def collapse_superseded_context_units(
                 unit_id=str(unit.get("unit_id") or ""),
                 superseded_by=str(unit.get("superseded_by") or ""),
                 supersession_key=str(unit.get("supersession_key") or ""),
+                reason=str(unit.get("reason") or "superseded"),
             )
 
 
@@ -1977,7 +2011,8 @@ def install_runtime_hooks(
                 continue
             session.observe_select_catalog_action(_command(action))
             command = _command(action)
-            if not command:
+            executed_surface = _executed_command_surface(action)
+            if not executed_surface.strip():
                 # Stock Mini-SWE still delegates a malformed/empty action to
                 # the environment. GT must observe less, not invent a result
                 # or consume an action the baseline would have executed.
@@ -1986,7 +2021,7 @@ def install_runtime_hooks(
             is_submit = False
             if not session.disabled:
                 try:
-                    is_submit = is_submit_command(command)
+                    is_submit = is_submit_command(executed_surface)
                 except Exception as exc:  # noqa: BLE001 - detection is fail-open
                     session.degrade("submit_detection", exc)
             if is_submit:

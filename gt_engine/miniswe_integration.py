@@ -6972,6 +6972,31 @@ class MiniSweAdapter(GroundtruthController):
                 outstanding.append(row_id)
         return tuple(outstanding)
 
+    def unmapped_red_predicates(self) -> tuple[str, ...]:
+        """RED predicates no plan row claims -- blocking evidence the row census cannot see.
+
+        `unmet_plan_rows` censuses plan rows and the predicates mapped to
+        them. A predicate outside every row's mapping -- an obligation
+        `_link_obligations` could not attach to any ledger line, or one
+        registered after the map was built -- still goes RED through
+        `evaluate_failing_observation`, and a submission over it ships over
+        live failing evidence. Only RED is reported: an unmapped UNKNOWN is
+        ignorance, and the gate never blocks on its own ignorance.
+        """
+        bound = {
+            key
+            for keys in (getattr(self, "plan_row_predicates", {}) or {}).values()
+            for key in keys
+        }
+        return tuple(
+            sorted(
+                key
+                for key in self.predicates
+                if key not in bound
+                and self._status.get(key) is PredicateStatus.RED
+            )
+        )
+
     def note_select_catalog_bootstrap(self) -> None:
         """Record one GT-internal bootstrap provider call at the transport boundary.
 
