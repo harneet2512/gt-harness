@@ -168,6 +168,30 @@ def discover_command(repo_root: str) -> tuple[tuple[str, ...] | None, str, str]:
     return (tuple(command) if command else None), str(basis), str(confidence)
 
 
+# Runners whose DEFAULT reporter prints a count and no per-test name, and the
+# single flag that makes each one print names. cargo and mocha are absent on
+# purpose: cargo prints `test a::b ... ok` for every test by default, and
+# mocha's spec reporter prints a `✓ name` row per test, so there is nothing
+# to add. A flag already present is never duplicated.
+_NAME_EMITTING_FLAGS: tuple[tuple[frozenset[str], str, frozenset[str]], ...] = (
+    # go test prints only `ok  pkg  0.01s` per PACKAGE without -v.
+    (frozenset({"go"}), "-v", frozenset({"-v"})),
+    # jest's default reporter prints per-FILE status; --verbose prints the
+    # `✓ name` rows the name extractors read.
+    (frozenset({"jest"}), "--verbose", frozenset({"--verbose"})),
+    # vitest's default reporter collapses passing files to one line.
+    (frozenset({"vitest"}), "--reporter=verbose",
+     frozenset({"--reporter", "--reporter=verbose"})),
+)
+
+
+def _runner_tokens(command: tuple[str, ...]) -> set[str]:
+    return {
+        token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].removesuffix(".exe")
+        for token in command
+    }
+
+
 def name_emitting_argv(command: tuple[str, ...]) -> tuple[str, ...]:
     """Argv adjusted to print per-test identities, not just a summary count.
 
@@ -179,15 +203,25 @@ def name_emitting_argv(command: tuple[str, ...]) -> tuple[str, ...]:
     ``-v``/``-q`` as counters, so the transform nets the existing flags rather
     than appending blindly: ``pytest -q`` needs ``-vv`` to reach verbose.
     Flags must not land after a ``--`` separator — everything past it is a
-    test path, not an option. Other runners emit per-test lines by default
-    and are left alone.
+    test path, not an option.
+
+    The same blind baseline exists outside Python and was left in place: a
+    bare ``go test ./...`` prints one ``ok<TAB>pkg`` line per PACKAGE and not
+    one test name, and jest's and vitest's default reporters collapse a
+    passing file to a single row. ``-v`` / ``--verbose`` / ``--reporter=
+    verbose`` fix each. cargo and mocha genuinely do print names by default
+    and are still left alone.
     """
     tokens = list(command)
-    is_pytest = any(
-        tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "pytest"
-        for tok in tokens
-    )
-    if not is_pytest:
+    names = _runner_tokens(tuple(tokens))
+    for runners, flag, already in _NAME_EMITTING_FLAGS:
+        if not (names & runners):
+            continue
+        if any(token.partition("=")[0] in already or token in already
+               for token in tokens):
+            return tuple(command)
+        return _append_flag(tokens, flag)
+    if "pytest" not in names:
         return tuple(command)
     net = 0
     for tok in tokens:
@@ -201,7 +235,17 @@ def name_emitting_argv(command: tuple[str, ...]) -> tuple[str, ...]:
             net -= 1
     if net >= 1:
         return tuple(command)
-    flag = "-" + "v" * (1 - net)
+    return _append_flag(tokens, "-" + "v" * (1 - net))
+
+
+def _append_flag(tokens: list[str], flag: str) -> tuple[str, ...]:
+    """Add ``flag`` as an OPTION - never past a ``--`` separator.
+
+    Everything after ``--`` is a test path (or, for `go test`, a binary's own
+    argument), so a flag appended there would be read as a selection and
+    silently narrow the baseline run.
+    """
+    tokens = list(tokens)
     if "--" in tokens:
         tokens.insert(tokens.index("--"), flag)
     else:
@@ -210,16 +254,17 @@ def name_emitting_argv(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _parse(output: str, command: tuple[str, ...]) -> tuple[dict[str, int], list[str], list[str]]:
-    try:
-        from groundtruth.runtime.test_runner import (
-            _parse_failing_test_names,
-            _parse_passing_test_names,
-            _parse_test_output,
-        )
+    """Counts and names for one captured run.
 
-        counts = _parse_test_output(output, list(command))
-        passing = _parse_passing_test_names(output)
-        failing = _parse_failing_test_names(output)
+    Routed through ``gt_engine.test_names`` so the BASELINE side and the
+    observation side (``miniswe_integration._parse_run_aggregate``) parse with
+    one implementation. Two sides that parse differently compare two different
+    name spaces, and the conservation check between them is then meaningless.
+    """
+    try:
+        from ..test_names import parse_test_names
+
+        passing, failing, counts = parse_test_names(output, command=command)
         return counts, passing, failing
     except Exception:  # noqa: BLE001 - parsing is correct-or-quiet
         return {"passed": 0, "failed": 0, "errored": 0}, [], []

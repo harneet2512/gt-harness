@@ -3163,25 +3163,27 @@ class MiniSweAdapter(GroundtruthController):
 
         The canonical producer's extractors are the only supported name source
         - the baseline and observation sides must parse identically or the
-        join compares two different name spaces.
+        join compares two different name spaces. Both sides now reach them
+        through `gt_engine.test_names.parse_test_names`, which delegates to
+        the pinned wheel and then, for a non-pytest runner, recovers what the
+        wheel's column-0 anchors cannot see: cargo's `failures:` roll-call,
+        go's indented subtests, jest/vitest `FAIL file > suite > name`,
+        mocha's numbered block. It never replaces a wheel answer, and it is
+        the same function the baseline capture calls, so the two sides cannot
+        drift apart.
         """
         try:
             words = shlex.split(command or "", posix=True)
         except ValueError:
             words = (command or "").split()
-        try:
-            from groundtruth.runtime.test_runner import (
-                _parse_failing_test_names,
-                _parse_passing_test_names,
-                _parse_test_output,
-            )
-        except ImportError as exc:
-            raise RuntimeError("canonical_name_extractor_unavailable") from exc
-        return (
-            _parse_test_output(output or "", words),
-            _parse_passing_test_names(output or ""),
-            _parse_failing_test_names(output or ""),
+        from .test_names import family_for_command, parse_test_names
+
+        passing, failing, counts = parse_test_names(
+            output or "",
+            family=family_for_command(command or ""),
+            command=words,
         )
+        return counts, passing, failing
 
     def _record_pristine_probe(
         self, ledger: Any, command: str, output: str

@@ -398,8 +398,15 @@ _BENIGN_COMMANDS = frozenset({
 })
 # `git worktree add` builds a second checkout the agent then `cd`s into; the
 # runner still runs once, against a tree this command names.
+# `git add` and `git commit` move bytes between the index and history; neither
+# changes a tracked file's CONTENT, so the runner beside them reads exactly
+# the tree it would have read anyway, and neither prints a runner's name
+# grammar. `git worktree remove` (which deletes a checkout) is deliberately
+# NOT admitted - see `_is_benign_git`.
 _BENIGN_GIT = frozenset({
     "status", "rev-parse", "branch", "log", "diff", "show", "merge-base",
+    "add", "commit", "rev-list", "ls-files", "describe", "shortlog",
+    "remote", "tag", "blame", "cat-file", "symbolic-ref",
 })
 # A static check reads the tree and reports; it neither builds anything nor
 # selects a single test, and none of these print a runner's name grammar
@@ -414,7 +421,52 @@ _STATIC_CHECKS = frozenset({
 _STATIC_CHECK_SUBCOMMANDS = {
     "cargo": frozenset({"clippy", "fmt"}),
     "go": frozenset({"vet", "fmt"}),
+    # An empty set means the tool IS the check - it has no subcommand.
     "gofmt": frozenset(),
+}
+# A check that REWRITES the sources is not benign: the runner that follows it
+# imports different bytes than the runner before it would have. `black src/`,
+# `gofmt -w x.go`, `eslint --fix`, `ruff format` (no `--check`) all write.
+_CHECK_WRITE_FLAGS = frozenset({
+    "-w", "--write", "--fix", "--fix-only", "--in-place", "-i", "--apply",
+    "--apply-unsafe", "--unsafe-fixes", "-a", "-A", "--autocorrect",
+    "--autocorrect-all",
+})
+# Tools whose DEFAULT is to rewrite; benign only with an explicit check flag.
+# Short forms (`-l`, `-c`, `-n`) are deliberately absent: `black -l 100` is a
+# line length, not a check, and reading it as one would admit a writer.
+_REWRITING_CHECKS = frozenset({"black", "isort", "prettier", "gofmt"})
+_REWRITING_SUBCOMMANDS = {("ruff", "format"), ("cargo", "fmt"), ("go", "fmt")}
+_CHECK_ONLY_FLAGS = frozenset({
+    "--check", "--check-only", "--diff", "--list-different",
+    "--verify-no-changes", "--dry-run",
+})
+# Flags after which a program prints a banner and exits without doing its job.
+# Applied to a RUNNER's argv: `pytest --version` collected nothing, so calling
+# it a `suite` run would let a version banner promote a whole collection.
+_NO_RUN_FLAGS = frozenset({
+    "--version", "-V", "--help", "-h", "--usage",
+    "--collect-only", "--collectonly", "--co", "--fixtures", "--markers",
+    "--setup-only", "--setup-plan", "--list-fixtures",
+    "--no-run", "--list", "--list-tests", "--listTests", "--showConfig",
+    "--show-config", "--show-only", "--dry-run", "--debug-only",
+})
+# Package-manager scripts that are a lint/type gate by near-universal
+# convention. Narrow on purpose: `build` compiles, `check` runs tests in
+# plenty of repositories, and neither is here. The script body is arbitrary,
+# so this is the one entry in the benign set that trusts a NAME - what bounds
+# it is that such a script can only ADD output to a run that already covers
+# the whole package, never narrow one.
+_STATIC_CHECK_SCRIPTS = frozenset({
+    "lint", "lint:check", "lint:ci", "typecheck", "type-check", "types",
+    "tsc", "format:check", "fmt:check", "prettier:check", "style",
+})
+# Read-only queries of tools that are not otherwise benign.
+_READ_ONLY_SUBCOMMANDS = {
+    "pip": frozenset({"list", "show", "freeze", "check", "config"}),
+    "pip3": frozenset({"list", "show", "freeze", "check", "config"}),
+    "conda": frozenset({"list", "info"}),
+    "poetry": frozenset({"show", "check"}),
 }
 # Wrappers that may precede the runner token inside its own segment. Without
 # an allowlist `grep pytest out.log` reads as a pytest invocation.
@@ -810,15 +862,19 @@ def _strip_run_options(words: list[str], hint: str) -> tuple[list[str], str]:
     return words[i:], hint
 
 
-def _runner_call(
-    argv: list[str], assigns: dict[str, str]
-) -> tuple[str, list[str], list[str], str] | None:
-    """``(family, args_after_the_runner, runner_argv, cwd_hint)`` or None."""
-    words = list(argv)
-    hint = ""
+def _peel_exec_wrappers(
+    words: list[str], assigns: dict[str, str], hint: str = ""
+) -> tuple[list[str], str] | None:
+    """Peel `uvx` / `uv run [--project X]` / `npx` / `pnpm exec` off a program.
+
+    These forms say WHERE a program comes from, never what it does, so the
+    program underneath is what both runner resolution and benignity have to
+    look at. None when a `$VAR` head cannot be resolved from an earlier
+    segment's assignments - the program is genuinely unknown then.
+    """
     for _ in range(6):
         if not words:
-            return None
+            return words, hint
         head = words[0]
         if head.startswith("$"):
             # `PY=/root/.../python && $PY -m pytest` - the interpreter is
@@ -849,6 +905,17 @@ def _runner_call(
             words = words[1:]
             continue
         break
+    return words, hint
+
+
+def _runner_call(
+    argv: list[str], assigns: dict[str, str]
+) -> tuple[str, list[str], list[str], str] | None:
+    """``(family, args_after_the_runner, runner_argv, cwd_hint)`` or None."""
+    peeled = _peel_exec_wrappers(list(argv), assigns)
+    if peeled is None:
+        return None
+    words, hint = peeled
     if not words:
         return None
     base = _runner_basename(words[0])
@@ -1286,6 +1353,9 @@ def _is_benign_git(args: tuple[str, ...]) -> bool:
         return True
     if args[:2] == ("worktree", "add"):
         return True
+    # `worktree list` / `stash list` report; `worktree remove` deletes a tree.
+    if args[:2] in (("worktree", "list"), ("stash", "list")):
+        return True
     # `git checkout <path>` restores one file; `git checkout <branch>` moves
     # the whole tree under the runner, so only a path form is benign.
     if args[0] in ("checkout", "restore") and len(args) > 1:
@@ -1296,6 +1366,75 @@ def _is_benign_git(args: tuple[str, ...]) -> bool:
     return False
 
 
+def _option_names(args: list[str]) -> set[str]:
+    """Option words with any ``=value`` tail removed."""
+    return {arg.partition("=")[0] for arg in args if arg.startswith("-")}
+
+
+def _is_static_check(argv: list[str]) -> bool:
+    """A lint/type/format CHECK: it reads the tree and reports, nothing else.
+
+    `_STATIC_CHECKS` and `_STATIC_CHECK_SUBCOMMANDS` were declared for this
+    and never consulted, so `pytest -q && ruff check src && mypy src` - the
+    single most common "and now the lint gate" shape in the corpus - read
+    `unknown` and every gate keyed on a test boundary was dead on it. None of
+    these print a runner's name grammar (ruff prints `path:line:col: CODE`,
+    tsc prints `path(l,c): error TSnnnn`), so admitting them cannot donate a
+    test name. A check that WRITES is refused: the runner after `black src/`
+    imports different bytes than the runner before it would have.
+    """
+    if not argv:
+        return False
+    base = _runner_basename(argv[0])
+    rest = list(argv[1:])
+    # `python -m ruff check src` / `python -m mypy src`.
+    if _INTERPRETER_RE.match(base) and rest[:1] == ["-m"] and len(rest) > 1:
+        base, rest = _runner_basename(rest[1]), rest[2:]
+    positional = [arg for arg in rest if not arg.startswith("-")]
+    subcommand = positional[0] if positional else ""
+    if base in _SCRIPT_RUNNERS:
+        # `npm run lint`: the package's own lint gate, never `npm test`.
+        return (
+            positional[:1] == ["run"]
+            and len(positional) > 1
+            and positional[1] in _STATIC_CHECK_SCRIPTS
+        )
+    if base in _STATIC_CHECK_SUBCOMMANDS:
+        allowed = _STATIC_CHECK_SUBCOMMANDS[base]
+        if allowed and subcommand not in allowed:
+            return False
+    elif base not in _STATIC_CHECKS:
+        return False
+    options = _option_names(rest)
+    if options & _CHECK_WRITE_FLAGS:
+        return False
+    rewrites = (
+        base in _REWRITING_CHECKS
+        or (base, subcommand) in _REWRITING_SUBCOMMANDS
+    )
+    return not rewrites or bool(options & _CHECK_ONLY_FLAGS)
+
+
+def _is_version_probe(argv: list[str]) -> bool:
+    """`python --version`, `yarn --version`: a banner, then exit."""
+    return (
+        len(argv) > 1
+        and all(arg.startswith("-") for arg in argv[1:])
+        and _option_names(argv[1:]) <= _NO_RUN_FLAGS
+    )
+
+
+def _is_read_only_query(argv: list[str]) -> bool:
+    """`pip list`, `pip show x`: reports what is installed, installs nothing."""
+    if not argv:
+        return False
+    allowed = _READ_ONLY_SUBCOMMANDS.get(_runner_basename(argv[0]))
+    if allowed is None:
+        return False
+    positional = [arg for arg in argv[1:] if not arg.startswith("-")]
+    return bool(positional) and positional[0] in allowed
+
+
 def _is_benign(segment: _Segment, *, allow_stash: bool) -> bool:
     argv = list(segment.argv)
     if not argv:
@@ -1304,11 +1443,25 @@ def _is_benign(segment: _Segment, *, allow_stash: bool) -> bool:
     if head.startswith("#"):
         return True  # a comment line inside a multi-line command
     if _ENV_ASSIGN_RE.match(head):
-        return all(_ENV_ASSIGN_RE.match(word) for word in argv)
+        if all(_ENV_ASSIGN_RE.match(word) for word in argv):
+            return True
     # A non-runner segment that WRITES a file can change what the runner
     # collects; only the runner's own `> /tmp/log` is harmless.
     if any(target != "/dev/null" for target in segment.written):
         return False
+    # `timeout 60 python -m ruff check src` and `npx tsc --noEmit` are the
+    # same statements as `ruff check src` and `tsc --noEmit`: the wrappers
+    # say where the program comes from and how long it may take, never what
+    # it does. Runner resolution has always peeled them; benignity did not,
+    # so the identical segment read benign or hostile by spelling alone.
+    stripped, _assignments = _strip_wrappers(argv)
+    peeled = _peel_exec_wrappers(stripped, {})
+    if peeled is None:
+        return False
+    argv = peeled[0]
+    if not argv:
+        return True
+    head = argv[0]
     base = _basename(head)
     if base == "export":
         return all(_ENV_ASSIGN_RE.match(word) for word in argv[1:])
@@ -1322,7 +1475,30 @@ def _is_benign(segment: _Segment, *, allow_stash: bool) -> bool:
         flags = [word for word in argv[1:] if word.startswith("-")]
         operands = [word for word in argv[1:] if not word.startswith("-")]
         return bool(operands) and all(set(flag[1:]) <= {"f"} for flag in flags)
+    if base == "find":
+        # `find . -name conftest.py` lists; `-delete`/`-exec` runs or removes.
+        return not ({arg for arg in argv[1:] if arg.startswith("-")} & {
+            "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint",
+            "-fprintf", "-fls",
+        })
+    if _is_static_check(argv) or _is_version_probe(argv) or _is_read_only_query(argv):
+        return True
+    if _is_probe_invocation(argv):
+        return True
     return base in _BENIGN_COMMANDS or base in _OUTPUT_FILTERS
+
+
+def _is_probe_invocation(argv: list[str]) -> bool:
+    """A runner asked to describe itself rather than to run anything.
+
+    ``pytest --collect-only -q | grep -c "::"`` beside a real run is the
+    corpus's standard "did my paths select what I think" check. It reports
+    which tests EXIST; it produces no pass/fail row for any of them, so it
+    can neither donate a name nor make the byte stream ambiguous about which
+    run produced it.
+    """
+    call = _runner_call(list(argv), {})
+    return call is not None and bool(_option_names(call[1]) & _NO_RUN_FLAGS)
 
 
 def _is_stash(argv: tuple[str, ...]) -> bool:
@@ -1348,6 +1524,10 @@ def _locate_runner(
         stripped, _env = _strip_wrappers(list(segment.argv))
         call = _runner_call(stripped, assigns)
         if call is None:
+            continue
+        if _option_names(call[1]) & _NO_RUN_FLAGS:
+            # A `--collect-only` / `--version` probe is not a second run; it
+            # is judged as an ordinary (benign) neighbour instead.
             continue
         if found is not None:
             # `pytest a | tail -2 && pytest b`: two runs, one byte stream, and
@@ -1421,6 +1601,12 @@ def test_command_shape(command: str) -> CommandShape:
             return _UNKNOWN_SHAPE
     reader = _FAMILY_READERS.get(family)
     if reader is None:
+        return _UNKNOWN_SHAPE
+    # `which pytest && pytest --version`, `go test --help`, `cargo test
+    # --no-run`: the runner printed a banner or compiled and stopped. It
+    # collected NOTHING, so `suite` here would let a version string promote a
+    # whole collection - the one direction this module may not be wrong in.
+    if _option_names(list(args)) & _NO_RUN_FLAGS:
         return _UNKNOWN_SHAPE
     shape = reader(list(args), cwd)
     return replace(shape, runner_segment=tuple(runner_argv))
@@ -2100,9 +2286,11 @@ def classify_failures_vs_baseline(
     Returns ``None`` when there is no ledger at all (no plan inputs) or the
     output parses to no failing names - absent evidence, never an error. An
     uncaptured baseline is NOT a reason to return None: the ledger then runs on
-    a ``suite_observed`` basis (D2). The canonical producer's extractors are
-    the only supported name source; both baseline and observation sides must
-    parse identically.
+    a ``suite_observed`` basis (D2). Names come from
+    ``gt_engine.test_names.parse_test_names`` - the certified wheel first,
+    then a per-family extractor for what the wheel's column-0 anchors cannot
+    reach - which is the same function the baseline capture uses, so both
+    sides parse identically.
     """
     if ledger is None:
         return None
@@ -2111,11 +2299,12 @@ def classify_failures_vs_baseline(
         if isinstance(output, (bytes, bytearray))
         else output
     )
-    try:
-        from groundtruth.runtime.test_runner import _parse_failing_test_names
-    except ImportError as exc:
-        raise RuntimeError("canonical_name_extractor_unavailable") from exc
-    failing = _parse_failing_test_names(text or "")
+    from .test_names import parse_test_names
+
+    shape = test_command_shape(command)
+    failing = parse_test_names(
+        text or "", family=shape.family, command=command
+    ).failing
     if not failing:
         return None
     ledger.note_failing(failing)
@@ -2128,7 +2317,7 @@ def classify_failures_vs_baseline(
         if hint:
             hints[name] = hint
     return BaselineClassification(
-        scope=test_command_scope(command),
+        scope=shape.scope,
         verdicts=verdicts,
         summary=summary,
         basis=ledger.basis,
@@ -2313,8 +2502,17 @@ def compile_execution_evidence(
     # surface: a `;nox`/`| make` inside a quoted payload is message text,
     # not a runner segment, and a quoted `;` is not a compound command.
     surface = _unquoted_command_surface(command)
+    # `_ADDITIONAL_TEST_RE` names the runners the pinned wheel does not, and
+    # it anchors on a segment boundary - so `uvx nox -s tests` missed it for
+    # the same reason `uvx pytest` missed the wheel: the runner is not at a
+    # boundary until the wrapper is peeled. The wheel is CERTIFIED AND PINNED
+    # and is never edited, so the peeling happens here (see
+    # `_classification_command`) and both deciders are handed the invocation
+    # the shell actually parsed. `surface` keeps the compound structure,
+    # because exit-code attribution below must still see `&&` and `|`.
+    runner_surface = _classification_command(command)
     kind = (
-        "test" if test_protocol or _ADDITIONAL_TEST_RE.search(surface)
+        "test" if test_protocol or _ADDITIONAL_TEST_RE.search(runner_surface)
         else "build" if _BUILD_RE.search(surface) else ""
     )
     if not kind:

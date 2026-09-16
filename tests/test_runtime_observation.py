@@ -466,3 +466,54 @@ def test_snapshot_records_gitlink_as_typed_identity_not_unreadable(tmp_path):
     entry = next(item for item in snapshot.files if item.path == "release_data")
     assert entry.kind == "gitlink"
     assert entry.sha256 == hashlib.sha256(pinned.encode("ascii")).hexdigest()
+
+
+def test_wrapped_runner_yields_a_test_evidence_row():
+    """E2: a wrapper must not hide the test boundary from the kind decision.
+
+    The pinned wheel's runner detection never learned `uvx`, and
+    `_ADDITIONAL_TEST_RE` (which covers the runners the wheel does not)
+    anchors on a shell segment boundary - so `uvx nox -s tests` matched
+    NEITHER and produced no evidence row at all, leaving covering_red,
+    recovery and submit_refusal dead on that action. The wheel is certified
+    and pinned and is never edited; the wrapper is peeled on the gt_engine
+    side and both deciders are handed the invocation the shell parsed.
+    """
+    output = "nox > Session tests was successful.\n3 passed in 0.42s\n"
+    for command in (
+        "uvx pytest tests/test_outputs.py -q",
+        "uv run --project /app pytest -q",
+        "cd /app && uv run pytest tests/ -x",
+        "poetry run pytest",
+        "npx jest --no-coverage 2>&1 | tail -30",
+        "pnpm exec vitest run",
+        "uvx nox -s tests",
+        "uv run -- dotnet test",
+    ):
+        evidence = compile_execution_evidence(
+            command=command, output=output, returncode=0,
+            action_id=1, repository_revision="rev",
+        )
+        assert evidence is not None, f"no evidence row for {command!r}"
+        assert evidence.kind == "test", f"{command!r} -> {evidence.kind}"
+
+
+def test_wrapper_peeling_does_not_turn_a_build_into_a_test():
+    """Peeling the wrapper feeds the KIND decision, not the build decision.
+
+    `wrapper_stripped_command` returns the command unchanged when no test
+    runner is located, so a build stays a build. (`uv run -- npm run build`
+    reads as neither: `_BUILD_RE` anchors on a shell boundary and `--` is not
+    one. That is unchanged from before this wave and is a separate gap in
+    build-kind detection, not a test misread.)
+    """
+    build = compile_execution_evidence(
+        command="npm run build", output="built in 3s\n", returncode=0,
+        action_id=1, repository_revision="rev",
+    )
+    assert build is not None and build.kind == "build"
+    wrapped = compile_execution_evidence(
+        command="uv run -- npm run build", output="built in 3s\n", returncode=0,
+        action_id=1, repository_revision="rev",
+    )
+    assert wrapped is None or wrapped.kind != "test"

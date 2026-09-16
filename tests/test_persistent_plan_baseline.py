@@ -850,3 +850,43 @@ def test_pytest_continue_on_collection_errors_argv_helpers():
     assert argv_runs_pytest(["python", "-m", "pytest"])
     assert argv_runs_pytest(["/usr/bin/pytest", "-v"])
     assert not argv_runs_pytest(["cargo", "test"])
+
+
+def test_name_emitting_argv_upgrades_go_jest_and_vitest():
+    """The blind baseline is not a Python-only failure mode.
+
+    A bare `go test ./...` prints one `ok<TAB>pkg` line per PACKAGE and not a
+    single test name; jest's and vitest's default reporters collapse a
+    passing file to one row. Each capture then records counts with zero
+    names, which is the same dead baseline `pytest` had.
+    """
+    assert name_emitting_argv(("go", "test", "./...")) == (
+        "go", "test", "./...", "-v")
+    assert name_emitting_argv(("npx", "jest")) == ("npx", "jest", "--verbose")
+    assert name_emitting_argv(("npx", "vitest", "run")) == (
+        "npx", "vitest", "run", "--reporter=verbose")
+
+
+def test_name_emitting_argv_does_not_duplicate_an_existing_flag():
+    assert name_emitting_argv(("go", "test", "-v", "./...")) == (
+        "go", "test", "-v", "./...")
+    assert name_emitting_argv(("npx", "jest", "--verbose")) == (
+        "npx", "jest", "--verbose")
+    # An explicit reporter is the caller's choice; never second-guess it.
+    assert name_emitting_argv(("npx", "vitest", "run", "--reporter=dot")) == (
+        "npx", "vitest", "run", "--reporter=dot")
+
+
+def test_name_emitting_argv_keeps_go_flags_before_the_separator():
+    """Past `--` a word is an argument to the compiled test binary, not a
+    `go test` option, so `-v` there would be handed to the wrong program."""
+    assert name_emitting_argv(("go", "test", "./...", "--", "-args")) == (
+        "go", "test", "./...", "-v", "--", "-args")
+
+
+def test_name_emitting_argv_still_leaves_cargo_and_mocha_alone():
+    """Both print a per-test row by default: there is nothing to add."""
+    assert name_emitting_argv(("cargo", "test")) == ("cargo", "test")
+    assert name_emitting_argv(("npx", "mocha", "test/")) == (
+        "npx", "mocha", "test/")
+    assert name_emitting_argv(("npm", "test")) == ("npm", "test")
