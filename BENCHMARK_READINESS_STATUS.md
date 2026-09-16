@@ -878,22 +878,34 @@ matched cohort against the frozen GT-off anchors. Current position:
 
 **Done this wave:** all four smoke-exposed failure modes repaired with
 regression tests; audit-side observability closed for every previously
-unverifiable identity; provider-free pyramid green on the dispatch tip.
+unverifiable identity; provider-free pyramid green on the dispatch tip;
+**the offline ability audit is complete** (`4f40e73a`) — 118 audit tests
+across four slices, every identity has an honest verdict, every discovered
+defect has a reproducer + owning-boundary fix + regression test, zero
+xfails remain.
+
+**Audit wave headline defects (all fixed at `4f40e73a`):** the catalog
+bootstrap peek silently killed task-start localization + `GT_LOC_RESLOT`
+on every catalog-enabled (production-default) run (D-α); `_run_evidence`
+dropped `edit_before_after` so `patch_delta`/`caller_contract`/
+`change_surface` delivered nothing, ever, on the shipping edit path
+(D-β); the dead-enrichment restart sweep was reference-blind and
+enrichment graphs could not be pinned — the run-35016130850 crash class
+one namespace up (XB-1..3); scoped runs could claim whole-suite truth
+without repo inventory (RED-2); prepared-only deliveries were credited
+as model exposure in audit accounting (RED-6); quoted interpreter
+commands produced no observation at all. Consolidated record:
+`docs/AUDIT-21-capability-readiness-2026-09-15.md`; slice reports under
+`artifacts/audit/`.
 
 **Next, in order:**
 
-0. **Offline ability audit (in flight)** — owner spec at
-   `docs/AUDIT-ABILITY-SPEC.md`: all 21 identities reviewed by ability,
-   exercised offline against unfamiliar-task variations (command shapes,
-   scope, timing/persistence, cross-ability sequences), with Layer-4
-   mutation checks proving the tests detect breakage. Four parallel audit
-   workers own disjoint slices (runtime lanes, gateway producers,
-   plan/submit, graph/index lifecycle); confirmed defects are fixed at the
-   existing owner with regression tests; slice reports land under
-   `artifacts/audit/` and consolidate into
-   `docs/AUDIT-21-capability-readiness-<date>.md`. Any BROKEN defect from
-   this audit must land its fix + provider-free re-gate before step 1
-   dispatches.
+0. ~~Offline ability audit~~ **COMPLETE at `4f40e73a`.** Remaining honest
+   UNPROVEN items (gt-index subprocess timing, installed-Linux
+   `_viewed_files` seam, localization ranking at scale, multi-process
+   graph-lock contention, real ENOSPC/cgroup-OOM) are boundary-limited
+   and covered by the installed-rehearsal gate — none block the paid
+   smoke. A fresh gate pair on `4f40e73a` is required before step 1.
 1. **Paid 2-task SWE-Live re-smoke** on the gate-green SHA — needs a fresh
    explicit owner approval + dispatch tag citing `readiness_run_id`
    `35028936016`. Success shape: both tasks attested — verifier GRADED
