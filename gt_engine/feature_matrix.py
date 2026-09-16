@@ -149,7 +149,7 @@ FEATURE_NEGATIVE_EVIDENCE: dict[str, tuple[str, ...]] = {
         "tests/test_gt_audit.py::"
         "test_native_plan_requires_exact_immediate_provider_bytes[plan_gate-False]",
         "tests/test_persistent_plan_gate.py::"
-        "test_low_time_escapes_rather_than_forcing_a_timeout",
+        "test_no_plan_never_gates",
         "tests/test_persistent_plan_off.py::test_the_gate_is_inert_without_a_plan",
     ),
     "select_catalog": (

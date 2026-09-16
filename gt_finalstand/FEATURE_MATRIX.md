@@ -1,29 +1,31 @@
 # GT Feature Proof Matrix
 
 Schema: `gt.feature_matrix.md.v2`
-Source revision: `9010199412dd1cb4fb5cd60e9ebd63000cc2132f`
-Generated at: `2026-09-05T03:05:12.672469Z`
-Matrix digest: `51441a7f7eb9d385d5cfa1513dbfbca6c01166a01f52f6100a1ded3534c9e524`
+Source revision: `2171c00db189a703cecc358e220c28540a025d58`
+Generated at: `2026-09-16T23:26:13.267561Z`
+Matrix digest: `4e638389b7baf821b8701db863794400139cf326c650664d5ae7ef2ed01b97b6`
 
 | Identity | Kind | Disposition | Trigger | Evidence exit | Cell digest |
 | --- | --- | --- | --- | ---: | --- |
-| GT_CERT_DELIVERY | CAP | WITNESSED | `tests/test_gt_engine.py::test_bridge_proves_exact_delivery_exposure` | 0/0 | `ed7f84b309cac64975f17d171a484cf0fb5a417225473c6e2e337c9009e693e1` |
-| GT_CHANGE_SURFACE | CAP | WITNESSED | `tests/test_gt_engine.py::test_repeated_failed_search_fires_newfile_precedent_and_change_surface` | 0/0 | `791cfa06a6f9ab31dc1a25b1159367e997aaf26f9d22d4d41ad6b48784f22da8` |
-| GT_EDIT_CHECK | CAP | WITNESSED | `tests/test_gt_attribution.py::test_executed_clean_edit_check_is_witnessed_but_no_target_is_ineligible` | 0/0 | `2758606d84d024714fca24068496b81fa2a17a3d6711dbd39058877a52183311` |
-| GT_HYPOTHESIS | CAP | WITNESSED | `tests/test_gt_engine.py::test_recovery_fires_on_same_failure_recurring_across_edit` | 0/0 | `fffb9e5458d9f77cbd03b0cd542b9baa16ca62e73f3597ed603c3ba2205ecbc0` |
-| GT_LOC_RESLOT | CAP | WITNESSED | `tests/test_gt_engine.py::test_search_fires_ranked_localization_and_loc_reslot` | 0/0 | `806c6ae485d5172feb9d14e19386afea87b89607b30d4ad6bf9d0f9b4eab0279` |
-| GT_PATCH_DELTA | CAP | WITNESSED | `tests/test_runtime_observation.py::test_python_signature_delta_distinguishes_body_and_signature_edits` | 0/0 | `82ec89ec4446b1070b65b6de0816797952bf79b5c07011e9baee6b0fbb4e3c84` |
-| GT_SS_SUBMIT_RED | CAP | WITNESSED | `tests/test_gt_engine.py::test_submit_red_blocks_on_unresolved_observed_fail` | 0/0 | `911d66142b0c9dded19cc1ca3b2639eaa9c509516fb680bda2a090445a7a5118` |
-| caller_contract | FACT | WITNESSED | `tests/test_gt_engine.py::test_file_view_fires_verified_caller_contract` | 0/0 | `91fbe98eb32c787d35ca67eba30a196599224482e97c2bcf8e5fcc8adeaa5fd4` |
-| cochange_prior | FACT | WITNESSED | `tests/test_gt_attribution.py::test_cochange_evidence_binds_to_dark_trigger_identity` | 0/0 | `6d6d9630c61c8523e41126181e6bb4d81f286694e8aef732366ff143fd4263ad` |
-| covering_red | FACT | WITNESSED | `tests/test_gt_engine.py::test_covering_red_fires_at_post_edit` | 0/0 | `8e9c446002367c4e3c2616053a3d01a5b58caa9c5b6981bacebe46df93e0ba18` |
-| def_partition | FACT | WITNESSED | `tests/test_gt_engine.py::test_bridge_delivers_sealed_pure_suffix` | 0/0 | `19c4ea40d65e2935509e1ed5d7e891dceeeaa2d0ec742652ab7f7ae74e653c13` |
-| localization | FACT | WITNESSED | `tests/test_gt_engine.py::test_search_fires_ranked_localization_and_loc_reslot` | 0/0 | `fa6dd3c8743aeab0310c4bf1af1d5c829b941b476240d10fd22761657d51f7bd` |
-| newfile_precedent | FACT | WITNESSED | `tests/test_miniswe_runtime.py::test_newfile_precedent_delivered_on_file_create` | 0/0 | `7d7db5ac262f768415a5cb0ccf3e2d97dda062f977f13cd393de65a943265b16` |
-| obligations | FACT | WITNESSED | `tests/test_gt_engine.py::test_submit_certificate_receives_obligation_coverage` | 0/0 | `142ca52e628407db53ed7194ece6d45f4e258ae98a10fc4840c36dc81e1cf896` |
-| recovery | FACT | WITNESSED | `tests/test_gt_engine.py::test_recovery_fires_on_same_failure_recurring_across_edit` | 0/0 | `35cb815ced3ef87f39d2cd254ab10fe28fa003179d75e8b1f0282103b6a2ae65` |
-| select_catalog | CAP | WITNESSED | `tests/test_persistent_execution_state.py::test_feature18_selection_lifecycle_is_content_safe_and_action_bound` | 0/0 | `0f7bd3a1c8dc6e3ab1441a23da450b377e2ec8f48fa159d3efa22cb8c1d91540` |
-| signature_delta | FACT | WITNESSED | `tests/test_gt_engine.py::test_edit_fires_signature_mismatch_under_profile_2` | 0/0 | `74eb02efe8c4c4094eeea87cb69af604e3e35c549969d06b1efadfba3448a20c` |
-| submit_refusal | FACT | WITNESSED | `tests/test_gt_engine.py::test_sdlc_submit_refuses_edit_without_post_edit_verification` | 0/0 | `74685e4a25f95392c2d4156d8a935c0e4d25ea0caebd8881f94a1ba1f2ccc96b` |
-| syntax_result | FACT | WITNESSED | `tests/test_gt_engine.py::test_post_edit_syntax_failure_delivers_immediately` | 0/0 | `80f0d7897a7754c614cdb9aa885ce16c4535458bea805c4923f0e48b5dc9b749` |
+| GT_CERT_DELIVERY | CAP | WITNESSED | `tests/test_gt_engine.py::test_bridge_proves_exact_delivery_exposure` | 0/0 | `7e403cbd1aa02b6908c8225a4d9b2e478d0e9b14c9b6ca804f72fe2cb27f3ef7` |
+| GT_CHANGE_SURFACE | CAP | not_run | `tests/test_gt_engine.py::test_repeated_failed_search_fires_newfile_precedent_and_change_surface` | 0/0 | `814511ace16647b9bc8986c6c19b82410d125ad4ab651639c8e599e5efe7ec5d` |
+| GT_EDIT_CHECK | CAP | WITNESSED | `tests/test_gt_attribution.py::test_executed_clean_edit_check_is_witnessed_but_no_target_is_ineligible` | 0/0 | `59914ea0b2e92cf36e5a62a6be87bd2e655dd936544a7aa00f37a50c4452e1e4` |
+| GT_HYPOTHESIS | CAP | not_run | `tests/test_gt_engine.py::test_recovery_fires_on_same_failure_recurring_across_edit` | 0/0 | `f43fdc1d14a13a77ca4c0d8daffdbecd1cead2d70e242316ec739bccb4a0365f` |
+| GT_LOC_RESLOT | CAP | not_run | `tests/test_gt_engine.py::test_search_fires_ranked_localization_and_loc_reslot` | 0/0 | `d876830d47a527f17d38e060b097454a8faa5bbc076f80e897bd56514dec34c6` |
+| GT_PATCH_DELTA | CAP | WITNESSED | `tests/test_runtime_observation.py::test_python_signature_delta_distinguishes_body_and_signature_edits` | 0/0 | `f94f1325f5d0174a7cb4e13224eba20b48e4208fa091be30624dd042768438ba` |
+| GT_SS_SUBMIT_RED | CAP | not_run | `tests/test_gt_engine.py::test_submit_red_blocks_on_unresolved_observed_fail` | 0/0 | `1c7134f6307b1f2746feb7ee9503ac35ce184d20ac675321d6748e0dab373f30` |
+| caller_contract | FACT | not_run | `tests/test_gt_engine.py::test_file_view_fires_verified_caller_contract` | 0/0 | `b41e10046000ec8337cbba64c97e26a5c636da4f564d3f19c196f1666c14e9d2` |
+| cochange_prior | FACT | WITNESSED | `tests/test_gt_attribution.py::test_cochange_evidence_binds_to_dark_trigger_identity` | 0/0 | `d458f4d1262b9058131f22cbc7af24e539d931763dd2ba1b7e047b28304d9668` |
+| covering_red | FACT | not_run | `tests/test_gt_engine.py::test_covering_red_fires_at_post_edit` | 0/0 | `00c28a93266d1078ca309eae9671c46b74a5c80c2360c94932ec69a32730773b` |
+| def_partition | FACT | not_run | `tests/test_gt_engine.py::test_bridge_delivers_sealed_pure_suffix` | 0/0 | `7cee21f53b8a4966c7c8de2e7b25dd0d22cfb53e1038160214258d941d873132` |
+| localization | FACT | not_run | `tests/test_gt_engine.py::test_search_fires_ranked_localization_and_loc_reslot` | 0/0 | `0b6f17b2399459c556665439a8a4b68f3a3867e3dae623fca9b10aecda9d9817` |
+| newfile_precedent | FACT | WITNESSED | `tests/test_miniswe_runtime.py::test_newfile_precedent_delivered_on_file_create` | 0/0 | `e9a13a1f24744f11e8f8fd612903de92c5c1c61b5503b9e4745258a57cb4dbe3` |
+| obligations | FACT | not_run | `tests/test_gt_engine.py::test_submit_certificate_receives_obligation_coverage` | 0/0 | `036bce682e6247958f7ff0961a5228a1298ae46650d6e422e38a612d8ebf85b9` |
+| persistent_plan | CAP | WITNESSED | `tests/test_miniswe_runtime.py::test_plan_render_receipt_matches_native_request_bytes` | 0/0 | `b48cd925ea9de1e5fcfd8b9a6e13bafd2889dc9d58d8bb0ebc7a21de543f01e3` |
+| plan_gate | CAP | WITNESSED | `tests/test_miniswe_runtime.py::test_plan_gate_directive_is_audited_through_native_provider_request` | 0/0 | `ee542e11856e6f0be21132d7814bd5add6d440bd54c3286b292e9d15c49ce571` |
+| recovery | FACT | not_run | `tests/test_gt_engine.py::test_recovery_fires_on_same_failure_recurring_across_edit` | 0/0 | `6a0690f5110f71664a3ee6f1bca9c6a015bd25abd5a33a6aa41a8d23dd897783` |
+| select_catalog | CAP | WITNESSED | `tests/test_persistent_execution_state.py::test_feature18_selection_lifecycle_is_content_safe_and_action_bound` | 0/0 | `207aeeee231bb4d9c1f5573bbbaf5ae647b2a22a3033098cb8871630866bb838` |
+| signature_delta | FACT | not_run | `tests/test_gt_engine.py::test_edit_fires_signature_mismatch_under_profile_2` | 0/0 | `504e1e359f6667761734226b0f9a3db92edf6c8b1a01592c38ae0e66323c837b` |
+| submit_refusal | FACT | not_run | `tests/test_gt_engine.py::test_sdlc_submit_refuses_edit_without_post_edit_verification` | 0/0 | `fae2ed8f6446c429d75d6bf82bc85951e3f0909ee33d9c7232d536cd816b08ea` |
+| syntax_result | FACT | not_run | `tests/test_gt_engine.py::test_post_edit_syntax_failure_delivers_immediately` | 0/0 | `4428c11a53253de89842f81a74f3e1e342ae0bc40355d0c58612a993ed3cfe20` |
 
