@@ -37,6 +37,30 @@ _PACING_KEYS = {
     "model_retry_attempts",
 }
 
+# Authorized (model -> provider_routing) pairs. The route file selects ONE of
+# these identities; a silent swap to an arbitrary model or provider fails
+# here, which is the control property the hardcoded pin existed for.
+#
+# - deepseek-v4-flash-0731/relace: the HAR-83 benchmark route (the only model
+#   whose results may be cited against the frozen GT-off baselines).
+# - stealth/union-alpha/stealth: functional-verification route only. A $0
+#   preview model served by OpenRouter's anonymous Stealth provider -
+#   "does the machinery work" runs, never comparison evidence: the provider
+#   is unnamed, the preview can be delisted, and its numbers cannot join a
+#   matched cohort.
+_AUTHORIZED_ROUTES = {
+    "deepseek/deepseek-v4-flash-0731": {
+        "only": ["relace"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    },
+    "stealth/union-alpha": {
+        "only": ["stealth"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    },
+}
+
 
 class ProviderPreflightError(RuntimeError):
     """A closed provider failure carrying only non-sensitive progress metadata."""
@@ -58,13 +82,10 @@ def load_route(path: Path) -> tuple[dict[str, Any], str]:
         raise ValueError("provider_route_identity_invalid")
     if route["base_url"] != "https://openrouter.ai/api/v1":
         raise ValueError("provider_base_url_not_allowed")
-    if route["model"] != "deepseek/deepseek-v4-flash-0731":
+    authorized_routing = _AUTHORIZED_ROUTES.get(route["model"])
+    if authorized_routing is None:
         raise ValueError("provider_model_not_allowed")
-    if route["provider_routing"] != {
-        "only": ["relace"],
-        "allow_fallbacks": False,
-        "require_parameters": True,
-    }:
+    if route["provider_routing"] != authorized_routing:
         raise ValueError("provider_routing_not_allowed")
     if route["credential_env"] != "OPENROUTER_API_KEY":
         raise ValueError("provider_credential_env_not_allowed")

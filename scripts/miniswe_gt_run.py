@@ -480,6 +480,24 @@ def _templates() -> tuple[str, str]:
     return str(agent["system_template"]), str(agent["instance_template"])
 
 
+# The closed set of models that may carry a `provider` routing object, keyed
+# by the openai/-prefixed id the run layer sees. Must mirror
+# provider_preflight._AUTHORIZED_ROUTES - a model not listed here cannot
+# smuggle routing constraints through GT_PROVIDER_ROUTING_JSON.
+_PROVIDER_ROUTING_BY_MODEL = {
+    "openai/deepseek/deepseek-v4-flash-0731": {
+        "only": ["relace"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    },
+    "openai/stealth/union-alpha": {
+        "only": ["stealth"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    },
+}
+
+
 def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     """litellm-routable model id + kwargs for the configured gateway."""
     model_kwargs: dict = {"temperature": temperature, "num_retries": 0}
@@ -509,17 +527,13 @@ def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
         if not model.startswith("openai/"):
             model = f"openai/{model}"
         model_kwargs["api_base"] = base_url
-        if model == "openai/deepseek/deepseek-v4-flash-0731":
+        expected_routing = _PROVIDER_ROUTING_BY_MODEL.get(model)
+        if expected_routing is not None:
             raw_routing = os.environ.get("GT_PROVIDER_ROUTING_JSON", "")
             try:
                 routing = json.loads(raw_routing)
             except json.JSONDecodeError as exc:
                 raise ValueError("provider_routing_env_invalid") from exc
-            expected_routing = {
-                "only": ["relace"],
-                "allow_fallbacks": False,
-                "require_parameters": True,
-            }
             if routing != expected_routing:
                 raise ValueError("provider_routing_env_not_allowed")
             model_kwargs["extra_body"] = {"provider": routing}

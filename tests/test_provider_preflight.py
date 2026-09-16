@@ -11,14 +11,49 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "provider_route.v1.json"
 
 
-def test_paid_route_is_deepseek_relace_only() -> None:
+def test_paid_route_is_union_alpha_stealth_only() -> None:
+    """The active route: functional-verification model, single provider."""
     route, _ = provider_preflight.load_route(MANIFEST)
-    assert route["model"] == "deepseek/deepseek-v4-flash-0731"
+    assert route["model"] == "stealth/union-alpha"
     assert route["provider_routing"] == {
+        "only": ["stealth"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }
+
+
+def test_each_authorized_route_identity_loads(tmp_path: Path) -> None:
+    """The allowlist is a closed set: deepseek stays authorized for the
+    benchmark route; union-alpha is the functional-verification route."""
+    base = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    for model, routing in provider_preflight._AUTHORIZED_ROUTES.items():
+        doc = dict(base, model=model, provider_routing=routing)
+        manifest = tmp_path / f"route-{model.split('/')[-1]}.json"
+        manifest.write_text(json.dumps(doc), encoding="utf-8")
+        route, _ = provider_preflight.load_route(manifest)
+        assert route["model"] == model
+
+
+def test_load_route_refuses_an_unauthorized_model(tmp_path: Path) -> None:
+    doc = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    doc["model"] = "openai/gpt-5"
+    manifest = tmp_path / "route.json"
+    manifest.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="provider_model_not_allowed"):
+        provider_preflight.load_route(manifest)
+
+
+def test_load_route_refuses_routing_drift(tmp_path: Path) -> None:
+    doc = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    doc["provider_routing"] = {
         "only": ["relace"],
         "allow_fallbacks": False,
         "require_parameters": True,
     }
+    manifest = tmp_path / "route.json"
+    manifest.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="provider_routing_not_allowed"):
+        provider_preflight.load_route(manifest)
 
 
 def test_provider_route_is_valid_without_network(tmp_path: Path) -> None:
@@ -29,7 +64,7 @@ def test_provider_route_is_valid_without_network(tmp_path: Path) -> None:
         live=False,
     )
     assert receipt["status"] == "PASS"
-    assert receipt["model"] == "deepseek/deepseek-v4-flash-0731"
+    assert receipt["model"] == "stealth/union-alpha"
     assert receipt["provider_inference_calls"] == 0
     assert receipt["provider_inference_attempts"] == 0
     assert receipt["provider_ready"] is False
@@ -50,7 +85,7 @@ def test_live_preflight_checks_key_limit_and_exact_model(
         return {
             "data": [
                 {
-                    "id": "deepseek/deepseek-v4-flash-0731",
+                    "id": "stealth/union-alpha",
                     "context_length": 1_048_576,
                     "top_provider": {"max_completion_tokens": 32_768},
                 }
@@ -65,10 +100,10 @@ def test_live_preflight_checks_key_limit_and_exact_model(
             {"choices": [{"message": {"content": "OK"}}]}
             if url.endswith("/chat/completions")
             and key == "canary-not-a-real-key"
-            and body["model"] == "deepseek/deepseek-v4-flash-0731"
+            and body["model"] == "stealth/union-alpha"
             and body["max_tokens"] == 16
             and body["provider"] == {
-                "only": ["relace"],
+                "only": ["stealth"],
                 "allow_fallbacks": False,
                 "require_parameters": True,
             }
@@ -139,7 +174,7 @@ def test_canary_http_failure_preserves_completed_checks_and_attempt(
         return {
             "data": [
                 {
-                    "id": "deepseek/deepseek-v4-flash-0731",
+                    "id": "stealth/union-alpha",
                     "context_length": 1_048_576,
                     "top_provider": {"max_completion_tokens": 32_768},
                 }
@@ -180,7 +215,7 @@ def test_live_preflight_fails_when_model_window_is_missing(
     def fake_get(url: str, _api_key: str) -> dict[str, object]:
         if url.endswith("/key"):
             return {"data": {"limit_remaining": 1}}
-        return {"data": [{"id": "deepseek/deepseek-v4-flash-0731"}]}
+        return {"data": [{"id": "stealth/union-alpha"}]}
 
     monkeypatch.setattr(provider_preflight, "_get_json", fake_get)
     receipt = provider_preflight.run(

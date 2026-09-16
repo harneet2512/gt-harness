@@ -23,8 +23,8 @@ from tests.conftest import write_certifiable_graph
 
 SWELIVE_TASK = "cyclotruc__gitingest-94"
 SWELIVE_OTHER = "dynaconf__dynaconf-1241"
-REQUESTED = "deepseek/deepseek-v4-flash-0731"
-EFFECTIVE = "openai/deepseek/deepseek-v4-flash-0731"
+REQUESTED = "stealth/union-alpha"
+EFFECTIVE = "openai/stealth/union-alpha"
 
 
 def _write(path: Path, value: object) -> None:

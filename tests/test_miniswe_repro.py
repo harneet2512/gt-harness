@@ -1245,3 +1245,41 @@ def test_the_supervisor_artifact_is_never_written_to_the_graded_path():
         if "artifacts/model.patch" in line and not line.lstrip().startswith("#")
     ]
     assert graded == [], graded
+
+
+def test_union_alpha_route_forwards_stealth_only(monkeypatch) -> None:
+    """The functional-verification route pins its single provider the same
+    way the benchmark route pins relace."""
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "16384")
+    monkeypatch.setenv(
+        "GT_PROVIDER_ROUTING_JSON",
+        json.dumps(
+            {
+                "only": ["stealth"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+            }
+        ),
+    )
+
+    model, kwargs = _model_and_kwargs("stealth/union-alpha", 1.0)
+
+    assert model == "openai/stealth/union-alpha"
+    assert kwargs["extra_body"] == {
+        "provider": {
+            "only": ["stealth"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+    }
+
+
+def test_union_alpha_route_refuses_foreign_routing(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+    monkeypatch.setenv(
+        "GT_PROVIDER_ROUTING_JSON",
+        json.dumps({"only": ["relace"], "allow_fallbacks": False}),
+    )
+    with pytest.raises(ValueError, match="provider_routing_env_not_allowed"):
+        _model_and_kwargs("stealth/union-alpha", 1.0)
