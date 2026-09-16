@@ -152,30 +152,28 @@ policy, the rehearsal covers the physics.
 | step | done when | status |
 |---|---|---|
 | R1 consumer guard + typed reason, RED→green | `test_lexical_rank` bm25-NULL fixture passes; hybrid continues degraded | **DONE** — `retrieval.py` guards invalid scores → typed `fts_bm25_score_invalid`; proven on the real artifact (40 invalid scores, hybrid continued) |
-| R2 producer rebuild maintenance + verify + fail-closed under `GT_REQUIRE_FTS5` | Go tests green incl. corrupt-fixture repair; preflight rejects the real corrupt artifact | **DONE in source** — native rebuild + DROP/recreate + `VerifyFTS5Integrity` (docsize parity + finite-bm25 probe); final rebuild at true pipeline end; real artifact repaired (190,953→95,644 docsize, 0 NULLs). Python preflight `_graph_schema_receipt` now runs `_graph_fts5_health_reason` — refuses `fts5_invalid:nodes_fts_desynced` on the real corrupt artifact, passes the repaired one. **PENDING: certified binary rebuild** — vendored source diverged from `gt-index-linux-amd64` (binding test correctly red); fix must land upstream and `producer_build.yml` must re-emit the binary |
+| R2 producer rebuild maintenance + verify + fail-closed under `GT_REQUIRE_FTS5` | Go tests green incl. corrupt-fixture repair; preflight rejects the real corrupt artifact | **DONE and shipped** — native rebuild + DROP/recreate + `VerifyFTS5Integrity` (docsize parity + finite-bm25 probe); final rebuild at true pipeline end; real artifact repaired (190,953→95,644 docsize, 0 NULLs). Python preflight `_graph_schema_receipt` runs `_graph_fts5_health_reason` — refuses `fts5_invalid:nodes_fts_desynced` on the real corrupt artifact, passes the repaired one. Upstream `d2e4a1c3` on `gate1-fts5-amend-fix`; producer CI 35120201968 all green (go-build runs full `go test -tags sqlite_fts5 ./...` incl. `nodes_fts_test.go`); certified binary rebuilt in run 35117328791 (sha 9e2758c0) and rebound in commit `515fe702` |
 | R3 memory envelope measured + early-refusal floor wired | measured table in `docs/`; policy tests green | **DONE** — measured: batch amend peak 1,262 MiB vs full build 1,333 MiB on a 93.6k-node graph (amend ≈ full build regardless of delta). Floor = 170 MiB + 16 KiB/node from certified manifest `indexed_node_count` (`_graph_scale` fallback). Pre-launch refusal `GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:limit=…need=…` — bare typed code, not `amend_failed:*`; opens the cgroup defer window only (no spawn window, no producer-death count). GOMEMLIMIT=600MiB still peaked 1,043 MiB — env tuning alone insufficient |
 | R4 journal-anomaly scan extended | certificate C5 extension tested on gate-one journal (must FAIL it) | **DONE** — `lsp_watch.py` counts `*_unavailable` events whose reason is an exception class as `CAPABILITY_CRASH(n)`, added to `fail_flags`. Gate-one journal now reads `AMEND_FAILURES(2), CAPABILITY_CRASH(9)` |
-| R5 provider-free acceptance + serial/xdist/lint + Go suite | all green on the remediation SHA | **PARTIAL** — Go suite green (vendored + upstream-clone transplant); Python focused files green; full xdist sweep: only expected reds remain (product-acceptance needs committed SHA; vendor-fingerprint needs binary rebind). Provider-free acceptance runs on the committed remediation SHA |
-| R6 docs + HAR-83 updated; gate-one failure preserved as historical evidence | status doc records run, defects, proofs | **IN PROGRESS** — this doc updated; HAR-83 record next |
-| R7 re-dispatch gate-one | strict fleet gate PASS on the gate task journal — *then* the remaining-19 release decision belongs to the owner, and the DEEPSWE-10 certificate path supersedes it if that framework lands first | **BLOCKED** — no paid dispatch until the certified binary carries the fix and the committed SHA passes provider-free acceptance |
+| R5 provider-free acceptance + serial/xdist/lint + Go suite | all green on the remediation SHA | **DONE** — producer CI 35120201968 on `d2e4a1c3`: lint + go-build (full `sqlite_fts5` suite) + benchmark + 6-job pytest matrix all green. Python side on `109c379e`: all previously-failing files green (143 tests incl. product-acceptance, vendored-binding, scoped-merge, hammer, audit-lifecycle). Provider-free acceptance ran to completion: `provider_calls=0`, `benchmark_runs=0`, content correctness 12/12 PASS, `release_eligible=true`; sole blocker `container_install_not_executed` is environmental (no Docker daemon on this host — that arm is CI-only) |
+| R6 docs + HAR-83 updated; gate-one failure preserved as historical evidence | status doc records run, defects, proofs | **DONE** — this doc records landed state; review packet `har83-context-plan-producer-d2e4a1c3-ci` pushed to `gt-review-inbox-d2e4a1c3` (`256d7127`); provenance verifier PASS locally |
+| R7 re-dispatch gate-one | strict fleet gate PASS on the gate task journal — *then* the remaining-19 release decision belongs to the owner, and the DEEPSWE-10 certificate path supersedes it if that framework lands first | **READY-BLOCKED on route scope** — all GT-side fixes are shipped and bound. Active route is `stealth/union-alpha` (functional verification only, free preview, delistable — NOT valid benchmark evidence). Before any matched-cohort claim the route must flip back to `deepseek-v4-flash-0731`/`relace`; before ANY dispatch, fresh paid approval is required |
 
 **Never:** reclassify a refusal to pass the gate; publish a graph whose FTS integrity check failed;
 treat a typed-unavailable capability row as "working"; run GT-off; dispatch anything before R1–R6.
 
-## 5. Shipping dependency — certified binary rebind
+## 5. Shipping dependency — certified binary rebind — **RESOLVED**
 
 The paid workflow runs `vendor/gt-index-linux-amd64`, not the vendored source it compiles and
-discards. The producer fix therefore ships only via:
+discards. The rebind completed:
 
-1. Push `gate1-fts5-amend-fix` (commit `d2e4a1c3`, branched off `4e346402`) to
-   `harneet2512/groundtruth` — changes applied to `gt-index/` and the full module suite is green
-   there.
-2. Dispatch `producer_build.yml` with `source_commit=d2e4a1c37f668dcab15190be50e47d2bdf334656`
-   → artifact `gt-index-linux-amd64-<sha>` (binary + build-info + builder identity).
-3. Vendor: replace `vendor/gt-index-linux-amd64` + `.build-info.json`, set
-   `vendor/gt-index-src/SOURCE-COMMIT` to the new sha — vendored source already equals the
-   upstream commit content, so `test_vendored_producer_binding` goes green.
-
-Until step 3 lands, the binding test is **honestly red**: the shipped binary does not carry the
-fix. That red is the point of the binding — it blocks the paid path from running a stale
-producer.
+1. `gate1-fts5-amend-fix` (commit `d2e4a1c3`, branched off `4e346402`) pushed to
+   `harneet2512/groundtruth`; producer CI run 35120201968 all green.
+2. `producer_build.yml` run 35117328791 emitted binary `9e2758c0` + build-info + builder
+   identity (image `golang:1.22.5-bookworm@3600cb0c`, fingerprint `f381466a`).
+3. Vendored in commit `515fe702`: binary + build-info + `SOURCE-COMMIT`; bundle rebound —
+   `producer_build.source_commit/tree`, `producer_sha256`, lineage ancestry path (140),
+   `post_certification_changed_paths` (751), review packet `har83-context-plan-producer-
+   d2e4a1c3-ci` on inbox commit `256d7127`, attestation digest recomputed. Both
+   `verify_groundtruth_lineage` and `verify_producer_binding` PASS locally;
+   `test_vendored_producer_binding` green.
