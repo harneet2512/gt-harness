@@ -38,8 +38,15 @@ Full per-task tables and inventories: `artifacts/audit/benchmarks/{deepswe,sweli
 | `9d945b3d` | audit counted a graph-refresh event no emitter writes → `graph_refreshes: 0` always | counts the emitted names; fake-green test pinned to its branch |
 | `d448f9fd` | `submitted_verified` on a blind baseline; plan built after the first edit claimed "before implementation began" | terminal consults the gate's `completion_proven`; post-edit builds typed and stale anchors named; checkpoint layout v5 |
 
-Provider-free gates on the last head: acceptance and rehearsal dispatched (`35055408506`, `35055410186`);
-previous head `d9dd5809`: both green (`35049683364`, `35049685863`).
+Provider-free gates: acceptance `35056359613` GREEN on `54aabd00` (the first run on `d448f9fd`,
+`35055408506`, failed only the source-closure test on the new `gt_engine/test_names.py`; fixed in
+`54aabd00`), rehearsal `35056361619` GREEN on `83f56ea1`.
+
+**Paid evidence on this SHA class (run by the owner, not this session):** SWE-Live 2-task re-smoke
+`35052806242` on `1bdb35f0` — both tasks reached the official verifier, both solved (reward 1),
+attestation PASS, all 5 capability rows WORKING, all 21 identities WITNESSED, strict fleet gate PASS
+on both journals. The two earlier run-killers (shared `/tmp` spool delete, pruned enrichment base)
+did not recur.
 
 ## 3. Per-benchmark capability verdicts (condensed; full tables in the inventories)
 
