@@ -768,6 +768,11 @@ class TaskAudit:
     graph_refresh_count: int = 0
     graph_refresh_failure_count: int = 0
     graph_refresh_recovered_count: int = 0
+    # Which surface refreshed, by the event name that recorded it. The totals
+    # above cannot distinguish an amend chain that keeps landing from a graph
+    # rebuilt from scratch at every boundary, and the two are different health
+    # stories at identical counts.
+    graph_refresh_breakdown: dict[str, int] = field(default_factory=dict)
     capsule_expired_count: int = 0
     capsule_unique_exposed_count: int = 0
     capsule_exposure_count: int = 0
@@ -1236,6 +1241,30 @@ def distinctive_term_hit(command: str, terms, snippets) -> str:
     return ""
 
 
+# The journal names for one graph refresh, and for one that did not land.
+# `gt_engine/miniswe_integration.py` is the only writer: `graph_publication`
+# from `_record_graph_publication`, `graph_boundary_amend`/`graph_recovery`
+# from `_adopt_graph_receipt`, `graph_boundary_amend_refused` from the amend
+# boundary and `graph_recovery_failed` from `_recovery_build_inline`. Adding a
+# new one is a one-line change here; leaving it out only understates, never
+# invents. Deferrals (`graph_recovery_deferred`, `graph_refresh_deferred`) are
+# deliberately absent: a refresh that was postponed neither succeeded nor
+# failed, and counting it as either would misreport backpressure as breakage.
+_GRAPH_REFRESH_EVENTS = frozenset(
+    {"graph_publication", "graph_boundary_amend", "graph_recovery"}
+)
+_GRAPH_REFRESH_FAILURE_EVENTS = frozenset(
+    {"graph_boundary_amend_refused", "graph_recovery_failed"}
+)
+
+
+def _note_refresh(audit: TaskAudit, event_name: str) -> None:
+    """Record one refresh-ish event under the name that carried it."""
+    audit.graph_refresh_breakdown[event_name] = (
+        audit.graph_refresh_breakdown.get(event_name, 0) + 1
+    )
+
+
 def _audit_native_miniswe_task(
     task_dir: Path,
     rj: dict,
@@ -1357,8 +1386,31 @@ def _audit_native_miniswe_task(
                 row["rendered_bytes"] = 0
 
     counts = Counter(str(row.get("event") or "") for row in rows)
-    a.graph_refresh_count = counts["graph_refreshed"]
-    a.graph_refresh_failure_count = counts["graph_refresh_failed"]
+    # COUNT THE EVENTS THE ENGINE ACTUALLY WRITES.
+    #
+    # This read `counts["graph_refreshed"]` / `counts["graph_refresh_failed"]`,
+    # the names the pre-adapter engine used (they survive only in the recorded
+    # HAR-81 renderer sources). Nothing has emitted either since: a refresh is
+    # journaled by `miniswe_integration._record_graph_publication` as
+    # `graph_publication`, and by `_adopt_graph_receipt` as
+    # `graph_boundary_amend` or `graph_recovery`; a failed one is
+    # `graph_boundary_amend_refused` or `graph_recovery_failed`. So every
+    # attestation reported `graph_refresh_count 0` and
+    # `graph_refresh_failure_count 0` no matter what the graph did - the shape
+    # HANDOFF-2026-09-06 recorded as "all literally true".
+    #
+    # An adopted amend writes its own row AND the `graph_publication` that
+    # follows adoption, so the total counts the adoption and the publication
+    # separately; the breakdown below is what lets a reader take them apart,
+    # and `graph_surface_counts["published_revisions"]` (computed further down)
+    # still reports distinct published artifacts.
+    for name in _GRAPH_REFRESH_EVENTS | _GRAPH_REFRESH_FAILURE_EVENTS:
+        if counts[name]:
+            a.graph_refresh_breakdown[name] = counts[name]
+    a.graph_refresh_count = sum(counts[name] for name in _GRAPH_REFRESH_EVENTS)
+    a.graph_refresh_failure_count = sum(
+        counts[name] for name in _GRAPH_REFRESH_FAILURE_EVENTS
+    )
     # The native journal records the same contract lifecycle the bridge
     # attribution stream does, under its own event names. Counting only the
     # bridge file left predicate_compiled_count/observed_count at 0 for every
@@ -2251,10 +2303,13 @@ def audit_task(task_dir: Path) -> TaskAudit:
                     a.predicate_invalid_receipt_count += 1
             elif event_type == "graph.context_refreshed":
                 a.graph_refresh_count += 1
+                _note_refresh(a, event_type)
             elif event_type == "graph.context_refresh_failed":
                 a.graph_refresh_failure_count += 1
+                _note_refresh(a, event_type)
             elif event_type == "graph.context_refresh_recovered":
                 a.graph_refresh_recovered_count += 1
+                _note_refresh(a, event_type)
             elif event_type == "graph.evidence_need":
                 a.graph_evidence_need_count += 1
             elif event_type == "graph.evidence_ranked":

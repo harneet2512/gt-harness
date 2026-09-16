@@ -1143,6 +1143,14 @@ def test_audit_projects_contract_graph_router_and_verification_receipts(
     assert audit.graph_router_revision == "graph-r1"
     assert audit.graph_semantic_fact_count == 8
     assert audit.graph_refresh_count == 1
+    # This task has no native journal: the increment above can only have come
+    # from the bridge attribution stream. Naming the event pins it to that
+    # branch -- the assertion used to be satisfiable by either counter, so it
+    # gave the native `_audit_native_miniswe_task` counter cover while that
+    # counter was reading an event name no emitter writes. The native side is
+    # owned by
+    # test_audit_counts_publications_amends_and_recoveries_as_refreshes.
+    assert audit.graph_refresh_breakdown == {"graph.context_refreshed": 1}
     assert audit.capsule_expired_count == 1
     assert audit.capsule_unique_exposed_count == 1
     assert audit.capsule_repeated_exposure_count == 0
@@ -1972,3 +1980,78 @@ def test_duplicate_provider_failure_is_flagged(tmp_path):
         "duplicate provider failure request_id" in issue
         for issue in audit.attribution_issues
     ), audit.attribution_issues
+
+
+def test_audit_counts_publications_amends_and_recoveries_as_refreshes(tmp_path):
+    """The native journal names refreshes three ways; none of them is
+    ``graph_refreshed``.
+
+    `_audit_native_miniswe_task` counted `counts["graph_refreshed"]`, an event
+    name no emitter has written since the adapter was reworked: the engine
+    appends `graph_publication` (`miniswe_integration._record_graph_publication`),
+    `graph_boundary_amend` and `graph_recovery` (both via
+    `_adopt_graph_receipt`). Every attestation therefore reported
+    `graph_refresh_count 0` on runs whose graph was rebuilt dozens of times,
+    and `graph_refresh_failure_count 0` on runs where hundreds of amends were
+    refused. The only green test for this counter drives the BRIDGE branch
+    (`graph.context_refreshed`, audit_task) which the Mini-SWE path never
+    reaches, so the native counter was never exercised at all.
+    """
+    task = make_native_miniswe_task(tmp_path)
+    publications, amends, recoveries = 2, 3, 1
+    refusals, recovery_failures = 4, 2
+    journaled = (
+        [{"event": "graph_publication", "artifact_sha256": f"{i:064x}",
+          "graph_sha256": f"{i:064x}", "repository_revision": f"rev{i}"}
+         for i in range(publications)]
+        + [{"event": "graph_boundary_amend", "adopted": True,
+            "graph_revision": f"g{i}", "phase": "post_edit"}
+           for i in range(amends)]
+        + [{"event": "graph_recovery", "adopted": True,
+            "graph_revision": f"r{i}", "phase": "post_edit"}
+           for i in range(recoveries)]
+        + [{"event": "graph_boundary_amend_refused", "phase": "post_edit",
+            "reason": "amend_failed:producer_exit_1"}
+           for _ in range(refusals)]
+        + [{"event": "graph_recovery_failed", "phase": "post_edit",
+            "error_type": "RuntimeError"}
+           for _ in range(recovery_failures)]
+    )
+
+    def add(rows):
+        for payload in journaled:
+            rows.append({
+                "schema": "gt.event.v1",
+                "sequence": len(rows) + 1,
+                "timestamp_utc": "2026-09-04T00:00:00+00:00",
+                "iteration": 1,
+                **payload,
+            })
+
+    rewrite_native_events(task, add)
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.graph_refresh_count == publications + amends + recoveries
+    assert audit.graph_refresh_failure_count == refusals + recovery_failures
+    # The sum alone cannot say WHICH surface refreshed, and the run evidence
+    # turns on that distinction: an amend chain that keeps landing and a graph
+    # that is rebuilt from scratch every boundary produce the same total.
+    assert audit.graph_refresh_breakdown == {
+        "graph_boundary_amend": amends,
+        "graph_boundary_amend_refused": refusals,
+        "graph_publication": publications,
+        "graph_recovery": recoveries,
+        "graph_recovery_failed": recovery_failures,
+    }
+
+
+def test_audit_reports_zero_refreshes_when_the_journal_has_none(tmp_path):
+    """The counter must still be able to say nothing happened."""
+    task = make_native_miniswe_task(tmp_path)
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.graph_refresh_count == 0
+    assert audit.graph_refresh_failure_count == 0
+    assert audit.graph_refresh_breakdown == {}
