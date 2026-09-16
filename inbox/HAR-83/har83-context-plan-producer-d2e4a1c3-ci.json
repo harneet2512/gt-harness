@@ -1,0 +1,37 @@
+{
+ "basis": "exact_ci_go_fts5_matrix_and_real_corrupt_artifact_repair",
+ "detail": {
+  "changes": [
+   "d2e4a1c3 fix(store): rebuild nodes_fts natively, verify before publish - PopulateFTS5 uses FTS5-native rebuild mirroring properties_fts, falls back to DROP+recreate from one canonical DDL constant; VerifyFTS5Integrity asserts docsize==nodes parity plus finite-bm25 MATCH probe; FTS5RowCount reads docsize not COUNT(*) (external-content COUNT hides desync); all three call sites fail closed under GT_REQUIRE_FTS5=1 via abortStagedBuild; final rebuild moved after last node-producing pass closing a latent prefix-indexing bug the parity check exposed (26 post-fts node rows never indexed)"
+  ],
+  "ci_conclusion": "success",
+  "ci_matrix": "lint + go-build(CGO,sqlite_fts5 full suite incl. nodes_fts_test.go) + benchmark + test x {ubuntu,macos,windows} x {3.11,3.12} - all green",
+  "ci_workflow_run_id": 35120201968,
+  "full_producer_ci_conclusion": "success",
+  "measured": {
+   "binding": "binary built by gt-harness producer_build run 35117328791 on d2e4a1c3: sha256 9e2758c0, static ELF, tags netgo,osusergo,sqlite_fts5; build-info ca278fff; builder_image golang:1.22.5-bookworm@3600cb0c; source_fingerprint f381466a; src/ subtree untouched so wheel_sha256 56a65a20 carries forward",
+   "corruption_proof": "real gate-one graph (95,644 nodes) carried a dead index generation: nodes_fts_docsize 190,953 vs nodes 95,644; 178,485 aiomonitor hits all scored NULL bm25 under the consumer SQLite. Producer -rebuild-closure on the artifact: docsize 95,644 == nodes, 0 NULL scores",
+   "edges": "post_certification_changed_paths 751 (750 + gt-index/internal/store/nodes_fts_test.go); commit touches gt-index/{cmd/gt-index/main.go, internal/store/sqlite.go, internal/store/nodes_fts_test.go} only; Go producer src changed, Python src/ untouched",
+   "go_tests": "full suite green on d2e4a1c3 incl. internal/store nodes_fts_test.go: stale-stats, dead-generation, malformed-shadow repair + COUNT(*)-trap guard, batch-amend parity",
+   "python_tests": "n/a - no Python changes in producer; consumer-side guard+preflight live in gt-harness (tests/test_graph_fts5_preflight.py, test_hybrid_retrieval.py bm25-invalid arm)"
+  },
+  "producer_sha256": "9e2758c0d20a98f7767b4ceea2ce246e53acacbdca1f0b32fc328128d21e6204",
+  "remaining": [
+   "canonical provider-free acceptance on final bundle SHA (rebound producer d2e4a1c3 + union-alpha functional-verification route)",
+   "installed full-flow rehearsal on new wheel+binary",
+   "2-task smoke re-run on rebound bundle, then matched-cohort DeepSWE",
+   "paid smoke approval gate; union-alpha route is functional verification only, benchmark evidence stays on the authorized deepseek/relace route"
+  ],
+  "repository": "harneet2512/groundtruth",
+  "scope": "Gate-one FTS5/BM25 remediation: native nodes_fts rebuild + publication-boundary integrity verification (docsize parity + finite bm25), fail-closed under GT_REQUIRE_FTS5, prefix-indexing heal; binary rebuilt and rebound",
+  "source_tree": "19586c423d50775c5048091ac1279b6392ac6f18",
+  "wheel_sha256": "56a65a2057992730593d0adf550c2e3ce448eb445482f6075e91a3f6827c01dd"
+ },
+ "head_sha": "d2e4a1c37f668dcab15190be50e47d2bdf334656",
+ "kind": "check_outcome",
+ "packet_digest_sha256": "c4a5b0d3f83bdce367b85906fb7b87332a6cd7470e5e63fb2bfba8f46877109b",
+ "packet_id": "har83-context-plan-producer-d2e4a1c3-ci",
+ "schema": "gt.review_packet.v1",
+ "status": "PASS",
+ "ticket": "HAR-83"
+}
