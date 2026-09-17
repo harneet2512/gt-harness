@@ -1004,10 +1004,39 @@ live-validated; the remaining attestation blocker is model compliance,
 which is why the paid `deepseek-v4-flash-0731`/`relace` route (which
 closed the contract cleanly in `35052806242`) stays the benchmark path.
 
-**Blocked pending owner decision:** restore the paid route
-(`deepseek/deepseek-v4-flash-0731` via `relace`) and re-dispatch the
-staged cohort — requires fresh paid approval. Union-alpha smoke results
-cannot support solve-rate or token-efficiency claims.
+**Paid route restored and first gate-one run (2026-09-17):**
+`config/provider_route.v1.json` reverted to the certified deepseek/relace
+route in `67cbf42e`; stale route-pin tests repointed in `1b0a0b5e`.
+
+- `35169106038` (on `67cbf42e`): died at provider-free readiness on the
+  stale route pins — fail-closed, zero paid calls.
+- `35170780678` (on `1b0a0b5e`, `aiomonitor-task-snapshots-diff`): full
+  pipeline PASS through the task leg — readiness, image-digest, provider
+  gates, route receipts all bound correctly. **First live refusals
+  observed**: five `plan_gate_decision accepted=false
+  reason=unmet_plan_rows` + `action_suppressed reason=submit_refused`,
+  then a clean accept and `submit_decision accepted=true`. Official
+  verifier graded `reward=0, solved=false` — the patch failed on merit,
+  not on machinery. Attestation honestly FAILed
+  (`treatment_dense_index_not_ready` + `product_completion_unverified`).
+  Tokens: 36.76M input / 32.9M cached (~89.5% hit on relace) / 175.5K
+  output / 216 calls.
+- `35168421439` (cyclotruc, union-alpha $0): exposed a real bypass — plan
+  bootstrap timeout → `persistent_plan_unavailable` → no-plan early
+  return shipped the submit over 3 live RED predicates with no
+  `plan_gate_decision` journaled → `submitted_unverified`.
+- **Fix `e84d646b`**: `decide()` refuses on regressions+unresolved
+  predicates even with no plan; `plan_submit_gate()` always consults;
+  bootstrap transport failure installs the deterministic floor plan
+  (`fallback=deterministic_floor`); `plan_gate_budget()` reads config
+  defensively (a missing attribute previously degraded the whole
+  session). Contract tests updated; new regression coverage for the full
+  no-plan→refusal chain.
+- `35178222629` dispatched on `e84d646b` — cohort must bind to the SHA
+  carrying the fix.
+
+Union-alpha smoke results cannot support solve-rate or token-efficiency
+claims; the free arm remains functional-verification only.
 
 ## Outcome claims
 
