@@ -1189,6 +1189,46 @@ as a call site in `b02e06ca` without the constant update.
 The standing reference for what must fire vs. what is trigger-dependent
 vs. what was ever dead is now `docs/CAPABILITY-MATRIX.md`.
 
+## Fallback was itself dead — capability name no build declares (this commit)
+
+The `921bec20` amend fallback gated on `_producer_supports_amend_capability(
+"incremental_amend_in_place")`, which reads the binary's own `-build-info`
+`capabilities` list. That string has never been emitted by any producer:
+the pinned `9e2758c0` build-info declares ten capabilities (incl.
+`batch_parser_node_reuse_v1`) and the capability name postdates the build;
+`git log -S` finds it only inside the Python gate. Every prior fallback
+test stubbed the probe, so the lane stayed green in tests and unreachable
+on the shipping image — on 35178222629's graph it would have refused
+`batch_amend_floor` exactly as before.
+
+The `-file` lane exists in the binary (`main.go` per-file amend, invoked
+by `_incremental_index_command`), but a flag's presence is not evidence:
+certified `c3b9f16e` accepted `-file` and its amend discarded 177,390 of
+181,200 nodes on a twenty-symbol edit. So the fix is a **functional
+conservation probe**, not a flag or name check: an identified-but-
+undeclaring binary gets one scratch amend — index a two-file repo, amend
+`beta.py`, then require (a) the untouched file's nodes survive, (b) the
+amended file's prior symbol survives, (c) the new symbol appears, (d)
+edges resolve. Declaration still short-circuits; a binary that cannot
+identify itself gets no probe (fail-closed); a non-conserving amend
+fails closed; the batch lane stays declaration-only; the verdict caches
+per (path, sha256, capability).
+
+Coverage: stub producers speaking the real argv surface (only `Popen`
+wrapped to prepend the interpreter — `subprocess.run` resolves `Popen`
+through the module namespace, so a second prepend double-wraps):
+conserving → accepted, `DELETE FROM nodes` destroyer → refused,
+unidentified → no probe attempted, batch name undeclared → batch still
+refused while `-file` is proven, and an end-to-end floor-refusal that
+runs the unmocked probe then publishes the per-file amend.
+`test_the_shipped_producer_proves_the_amend_lane` asserts the real
+binary (Linux, `GT_INDEX_BINARY`) proves the lane — the check that was
+missing on 2026-09-07 when the declared-name gate first shipped.
+
+The pinned `9e2758c0` cannot execute on this Windows host (no
+Docker/WSL); its conservation proof happens on the benchmark image at
+first amend decision — which is the environment that matters.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains

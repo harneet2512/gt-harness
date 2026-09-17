@@ -374,13 +374,16 @@ def _binary_certification() -> dict[str, str]:
     }
 
 
-# The capability a producer must DECLARE before the engine will amend with it.
+# The capability a producer must prove before the engine will amend with it.
 #
 # The flag's presence proves nothing: the certified c3b9f16e accepts -file and
 # its amend discarded 177,390 of 181,200 nodes for a twenty-symbol edit, while
 # declaring a capability list otherwise identical to a build that amends
-# correctly. Nothing observable at the command line separates them, so the
-# binary has to say which one it is.
+# correctly. Nothing observable at the command line separates them. A producer
+# built knowing the contract declares the capability itself; a producer built
+# before the capability name existed cannot say it, so for that lane the
+# engine runs the amend on a scratch graph and checks the conservation
+# c3b9f16e violated - on the actual binary, not on anything it claims.
 AMEND_CAPABILITY = "incremental_amend_in_place"
 
 # Keyed on (path, content digest): a rebuilt binary at the same path is a
@@ -410,6 +413,7 @@ def _producer_supports_amend_capability(capability: str) -> bool:
     if cached is not None:
         return cached
     supported = False
+    identified = False
     try:
         probe = subprocess.run(
             [binary, "-build-info"],
@@ -422,15 +426,91 @@ def _producer_supports_amend_capability(capability: str) -> bool:
         if probe.returncode == 0:
             identity = json.loads(probe.stdout.decode("utf-8", "replace"))
             capabilities = identity.get("capabilities")
-            supported = (
+            identified = (
                 isinstance(identity, dict)
                 and isinstance(capabilities, list)
-                and capability in capabilities
             )
+            supported = identified and capability in capabilities
     except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
         supported = False
+    if not supported and identified and capability == AMEND_CAPABILITY:
+        supported = _probe_incremental_amend_functionally(binary)
     _AMEND_CAPABILITY_CACHE[key] = supported
     return supported
+
+
+def _probe_incremental_amend_functionally(binary: str) -> bool:
+    """Prove the -file amend conserves a graph on this binary.
+
+    An identified producer that does not declare the capability gets one
+    chance to demonstrate it: index a two-file scratch repo, amend one file,
+    then the published graph must still carry the untouched file's nodes,
+    the amended file's new symbol, and at least one resolved edge - the
+    conservation c3b9f16e's amend violated. Anything less fails closed; the
+    scratch graph is thrown away either way.
+    """
+    scratch = Path(tempfile.mkdtemp(prefix="gt-amend-probe-"))
+    try:
+        repo = scratch / "repo"
+        repo.mkdir()
+        (repo / "alpha.py").write_text(
+            "def shared_mark(x):\n    return x + 1\n", encoding="utf-8"
+        )
+        beta_before = (
+            "from alpha import shared_mark\n\n"
+            "def calls_mark():\n    return shared_mark(1)\n"
+        )
+        (repo / "beta.py").write_text(beta_before, encoding="utf-8")
+        db = scratch / "graph.db"
+        env = _index_child_environment(_INDEX_RSS_LIMIT_BYTES)
+        build = subprocess.run(
+            _index_command(binary, str(repo), str(db)),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            env=env,
+            timeout=_INDEX_BUILD_INFO_TIMEOUT_SECONDS,
+            check=False,
+        )
+        if build.returncode != 0 or not db.is_file():
+            return False
+        (repo / "beta.py").write_text(
+            beta_before + "\ndef added_mark():\n    return shared_mark(2)\n",
+            encoding="utf-8",
+        )
+        amend = subprocess.run(
+            _incremental_index_command(binary, str(repo), str(db), "beta.py"),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            env=env,
+            timeout=_INDEX_BUILD_INFO_TIMEOUT_SECONDS,
+            check=False,
+        )
+        if amend.returncode != 0:
+            return False
+        with sqlite3.connect(
+            f"{db.resolve().as_uri()}?mode=ro", uri=True
+        ) as conn:
+            surviving = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE file_path LIKE '%alpha.py'"
+                ).fetchone()[0]
+            )
+            kept = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE name = 'calls_mark'"
+                ).fetchone()[0]
+            )
+            added = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE name = 'added_mark'"
+                ).fetchone()[0]
+            )
+            edges = int(conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0])
+        return surviving > 0 and kept > 0 and added > 0 and edges > 0
+    except (OSError, sqlite3.Error, subprocess.SubprocessError, ValueError):
+        return False
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:

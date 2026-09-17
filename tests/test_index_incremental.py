@@ -23,6 +23,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -190,6 +191,125 @@ def test_missing_binary_refuses_without_probing(monkeypatch):
 
     monkeypatch.setattr(indexer.subprocess, "run", forbidden)
     assert indexer._producer_supports_incremental_amend() is False
+
+
+# ------------------------------------------------- functional capability probe
+#
+# Every test above mocks _producer_supports_amend_capability, so a producer
+# that never declared incremental_amend_in_place kept the lane unreachable
+# end-to-end. The pinned 9e2758c0 declares batch_parser_node_reuse_v1 but not
+# the per-file name (the name postdates the build); run 35178222629 journaled
+# 58 batch_amend_floor refusals while the fallback sat dead behind the probe.
+# These exercise the real detection: an identified-but-undeclaring binary gets
+# one scratch amend to prove the conservation c3b9f16e violated.
+
+_KEEP_AMEND = (
+    "    conn.execute(\"INSERT INTO nodes VALUES ('beta.py','added_mark')\")\n"
+    "    conn.commit()\n"
+    "    print(json.dumps({'file':'beta.py','nodes_replaced':1,'inserted':1,\n"
+    "        'updated':0,'removed':0,'symbols_reminted':0,'symbols_removed':0,\n"
+    "        'short_circuited':False}))\n"
+)
+_DESTROY_AMEND = (
+    "    conn.execute('DELETE FROM nodes')\n"
+    "    conn.execute('DELETE FROM edges')\n"
+    "    conn.commit()\n"
+    "    print(json.dumps({'file':'beta.py','nodes_replaced':0}))\n"
+)
+
+
+def _stub_producer(tmp_path: Path, monkeypatch, *, amender: str,
+                   capabilities: list | None = None) -> Path:
+    """A fake producer speaking the real argv surface, no mocked builders.
+
+    -build-info emits the given capability list (batch-only by default);
+    index mode creates a tiny graph.db; -file mode runs ``amender`` SQL
+    against it. The subprocess wrappers prepend the interpreter to whatever
+    argv the real command builders produce, so _index_command and
+    _incremental_index_command run unstubbed.
+    """
+    probe = tmp_path / "producer.py"
+    probe.write_text(
+        "import json, sqlite3, sys\n"
+        "argv = sys.argv[1:]\n"
+        "if '-build-info' in argv:\n"
+        "    sys.stdout.write(json.dumps({'schema': 'gt-index.build.v1',\n"
+        f"        'capabilities': {json.dumps(capabilities or ['batch_parser_node_reuse_v1'])}}}))\n"
+        "    raise SystemExit(0)\n"
+        "out = argv[argv.index('-output') + 1]\n"
+        "conn = sqlite3.connect(out)\n"
+        "if '-file' in argv:\n"
+        f"{amender}"
+        "else:\n"
+        "    conn.execute('CREATE TABLE nodes(file_path TEXT, name TEXT)')\n"
+        "    conn.execute('CREATE TABLE edges(id INTEGER)')\n"
+        "    conn.execute(\"INSERT INTO nodes VALUES ('alpha.py','shared_mark')\")\n"
+        "    conn.execute(\"INSERT INTO nodes VALUES ('beta.py','calls_mark')\")\n"
+        "    conn.execute('INSERT INTO edges VALUES (1)')\n"
+        "    conn.commit()\n"
+        "conn.close()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: str(probe))
+    monkeypatch.setattr(
+        indexer, "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    # Patch only Popen: subprocess.run resolves Popen through the module
+    # namespace at call time, so a second prepend here would double it
+    # ([python, python.exe, argv...] -> python.exe parses itself).
+    real_popen = indexer.subprocess.Popen
+    monkeypatch.setattr(
+        indexer.subprocess, "Popen",
+        lambda argv, **kw: real_popen([sys.executable] + list(argv), **kw),
+    )
+    return probe
+
+
+def test_undeclared_lane_is_proven_by_a_conserving_scratch_amend(tmp_path, monkeypatch):
+    """A producer built before the capability name existed proves the lane
+    functionally: the scratch amend keeps the untouched file's nodes, adds
+    the amended file's new symbol, and resolves edges - the conservation
+    c3b9f16e violated."""
+    _stub_producer(tmp_path, monkeypatch, amender=_KEEP_AMEND)
+    assert indexer._producer_supports_incremental_amend() is True
+
+
+def test_functional_probe_fails_closed_on_a_graph_destroying_amend(tmp_path, monkeypatch):
+    """c3b9f16e's exact failure: accepts -file, discards the parent's rows."""
+    _stub_producer(tmp_path, monkeypatch, amender=_DESTROY_AMEND)
+    assert indexer._producer_supports_incremental_amend() is False
+
+
+def test_functional_probe_is_not_attempted_on_an_unidentified_binary(tmp_path, monkeypatch):
+    """A binary that cannot state its identity gets no scratch-amend chance:
+    a failed identity probe stays fail-closed rather than paying for
+    functional discovery on an unknown producer."""
+    calls = []
+
+    class _Result:
+        returncode = 2
+        stdout = b""
+
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: "/bin/probe")
+    monkeypatch.setattr(
+        indexer, "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    monkeypatch.setattr(
+        indexer.subprocess, "run", lambda argv, **kw: calls.append(list(argv)) or _Result())
+    assert indexer._producer_supports_incremental_amend() is False
+    assert calls == [["/bin/probe", "-build-info"]]
+
+
+def test_functional_probe_does_not_extend_to_the_batch_lane(tmp_path, monkeypatch):
+    """The scratch amend proves -file only; a producer that never declares
+    batch_parser_node_reuse_v1 still gets no batch lane."""
+    _stub_producer(tmp_path, monkeypatch, amender=_KEEP_AMEND,
+                   capabilities=["call_resolution_v2"])
+    assert indexer._producer_supports_amend_capability(
+        indexer.BATCH_AMEND_CAPABILITY) is False
+    assert indexer._producer_supports_incremental_amend() is True
 
 
 # ------------------------------------------------------------ path selection
@@ -473,6 +593,41 @@ def test_batch_headroom_refusal_names_an_uncoverable_fallback_set(tmp_path, monk
     assert reason.startswith("GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:")
     assert "incremental_amend_uncoverable:no_amendable_paths" in reason
     assert rows == ()
+
+
+def test_floor_refusal_engages_the_lane_through_the_real_probe(tmp_path, monkeypatch):
+    """Unmocked capability path: batch declared, floor-refused, then the
+    functional probe proves -file and the per-file amend runs.
+
+    Every prior fallback test stubbed _producer_supports_amend_capability,
+    so a producer that never declared the per-file name kept the lane
+    unreachable end-to-end while the tests stayed green. This one keeps the
+    real probe: build-info declares batch only, the floor refuses it, the
+    scratch amend demonstrates -file on the actual argv surface, and the
+    candidate graph gets its row.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    real_index_command = indexer._index_command
+    real_incremental_command = indexer._incremental_index_command
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+    _stub_producer(tmp_path, monkeypatch, amender=_KEEP_AMEND)
+    monkeypatch.setattr(indexer, "_index_command", real_index_command)
+    monkeypatch.setattr(indexer, "_incremental_index_command", real_incremental_command)
+    monkeypatch.setattr(indexer, "_batch_amend_memory_floor", lambda *a: 10**12)
+
+    receipt = indexer.refresh_index_files(
+        root, parent, ("app.py",), layout=layout, source_revision="rev-probe")
+
+    assert receipt.success, receipt.error_type
+    assert receipt.build_mode == "incremental"
+    assert receipt.incremental_results[0]["path"] == "app.py"
+    published = Path(receipt.graph_db)
+    with sqlite3.connect(f"file:{published.as_posix()}?mode=ro", uri=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 2
 
 
 def test_parser_cache_location_survives_graph_revision_changes(tmp_path):
@@ -1011,9 +1166,6 @@ def test_real_producer_amend_reminds_the_edited_files_symbols(tmp_path):
 # ---------------------------------------------------------------- write path
 
 
-from types import SimpleNamespace
-
-
 def _txn(post: str, paths: tuple[str, ...], complete: bool = True):
     return SimpleNamespace(
         post_revision=post, pre_revision="rev0",
@@ -1550,3 +1702,22 @@ def test_a_freshly_produced_graph_passes_preflight_and_ranks(tmp_path):
     assert ranking.available
     names = {entry.snippet for entry in ranking.ranking}
     assert {"save", "run"} <= names
+
+
+@pytest.mark.skipif(
+    not os.environ.get("GT_INDEX_BINARY"),
+    reason="real producer binary required (set GT_INDEX_BINARY)",
+)
+def test_the_shipped_producer_proves_the_amend_lane():
+    """The pin must support the per-file lane - by declaration or by
+    demonstrated conservation on a scratch graph.
+
+    The pinned 9e2758c0 declares batch_parser_node_reuse_v1 but never the
+    per-file name, so every mocked test stayed green while the fallback it
+    gated could never run: 58 batch_amend_floor refusals in 35178222629 and
+    a graph stale for the tail of the task. This is the assertion that
+    closes that coverage gap - if the real binary cannot prove the lane,
+    the refusal is at least the honest answer instead of a silent dead
+    code path.
+    """
+    assert indexer._producer_supports_incremental_amend()
