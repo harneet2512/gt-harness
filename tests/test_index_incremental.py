@@ -353,6 +353,128 @@ def test_batch_amend_uses_one_process_for_multiple_paths_and_config(tmp_path, mo
     assert parent.read_bytes() == before
 
 
+def test_batch_headroom_refusal_falls_back_to_the_per_file_amend(tmp_path, monkeypatch):
+    """A batch floor the cgroup can never meet must not starve the graph.
+
+    Run 35178222629 journaled 58 batch_amend_floor refusals on one task:
+    the floor (~1.7 GB for a ~93k-node parent) sat permanently above the
+    ~1.4 GB limit, the adopted graph stayed stale for the tail of the
+    run, and refused re-localizations then poisoned the last dense
+    receipt -- treatment_dense_index_not_ready on a task the verifier
+    passed. The per-file amend's memory scales with the dirty set, not
+    the parent, so when the producer declares both lanes and the dirty
+    set is amendable it is the lane that still fits.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    parent_bytes = parent.read_bytes()
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability", lambda capability: True)
+    # The batch floor priced above any real cgroup limit; the per-file
+    # spawn keeps the real _effective_index_memory_limit.
+    monkeypatch.setattr(indexer, "_batch_amend_memory_floor", lambda *a: 10**12)
+
+    def forbidden_batch(*args, **kwargs):
+        pytest.fail("the refused batch lane spawned a producer anyway")
+    monkeypatch.setattr(indexer, "_index_command", forbidden_batch)
+
+    amend = tmp_path / "fake-amend.py"
+    amend.write_text(
+        "import sqlite3, sys, json\n"
+        "output = sys.argv[sys.argv.index('-output') + 1]\n"
+        "relpath = sys.argv[sys.argv.index('-file') + 1]\n"
+        "with sqlite3.connect(output) as c:\n"
+        "    c.execute('insert into nodes values (2, ?)', (relpath,))\n"
+        "print(json.dumps({'file': relpath, 'nodes_replaced': 2, 'inserted': 1,\n"
+        "                  'updated': 1, 'removed': 0, 'symbols_reminted': 2,\n"
+        "                  'symbols_removed': 1, 'short_circuited': False}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        indexer, "_incremental_index_command",
+        lambda binary, r, output, relpath: [
+            binary, str(amend), "-root", r, "-output", output, "-file", relpath,
+        ],
+    )
+
+    receipt = indexer.refresh_index_files(
+        root, parent, ("app.py",), layout=layout, source_revision="rev-2",
+    )
+
+    assert receipt.success, receipt.error_type
+    assert receipt.build_mode == "incremental"
+    assert receipt.incremental_results[0]["path"] == "app.py"
+    assert "mode" not in receipt.incremental_results[0]
+    assert parent.read_bytes() == parent_bytes
+    published = Path(receipt.graph_db)
+    with sqlite3.connect(f"file:{published.as_posix()}?mode=ro", uri=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 2
+
+
+def test_batch_headroom_refusal_stands_without_the_per_file_lane(tmp_path, monkeypatch):
+    """A batch-only producer keeps the memory refusal - it never spawns."""
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability == indexer.BATCH_AMEND_CAPABILITY)
+    monkeypatch.setattr(indexer, "_batch_amend_memory_floor", lambda *a: 10**12)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a refused amend spawned a producer")
+    monkeypatch.setattr(indexer, "_index_command", forbidden)
+    monkeypatch.setattr(indexer, "_incremental_index_command", forbidden)
+
+    result, reason, rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None
+    assert reason.startswith("GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:")
+    assert "need=1000000000000" in reason
+    assert "incremental_amend_uncoverable" not in reason
+    assert rows == ()
+
+
+def test_batch_headroom_refusal_names_an_uncoverable_fallback_set(tmp_path, monkeypatch):
+    """A dirty set the cheap lane cannot parse keeps the memory refusal.
+
+    Defer stays honest: every bigger lane is bounded by the same cgroup,
+    and the suffix records that the fallback was evaluated, not skipped.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability", lambda capability: True)
+    monkeypatch.setattr(indexer, "_batch_amend_memory_floor", lambda *a: 10**12)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a refused amend spawned a producer")
+    monkeypatch.setattr(indexer, "_index_command", forbidden)
+    monkeypatch.setattr(indexer, "_incremental_index_command", forbidden)
+
+    result, reason, rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("logo.png",))
+
+    assert result is None
+    assert reason.startswith("GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:")
+    assert "incremental_amend_uncoverable:no_amendable_paths" in reason
+    assert rows == ()
+
+
 def test_parser_cache_location_survives_graph_revision_changes(tmp_path):
     root = tmp_path / "repo"
     state = tmp_path / "state"

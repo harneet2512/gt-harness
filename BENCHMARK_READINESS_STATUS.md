@@ -1144,6 +1144,51 @@ plan-gate's `unmet_plan_rows` — but the delivery path is live-proven.
 miniswe the alias inherits submit_refusal's delivery and
 `plan_gate_decision` is the equivalent record.
 
+## Gate-one `35178222629` — task SOLVED, attestation FAIL on `e84d646b` (2026-09-17)
+
+The fixed-SHA gate-one completed: **verifier passed (solved=1,
+reward-bearing), 96 provider calls, 113 deliveries, graph CERTIFIED** —
+and attestation still failed on
+`product_receipt:...:treatment_dense_index_not_ready` +
+`product_completion_unverified`. The journal trace found a two-defect
+chain, both now fixed:
+
+1. **Graph freshness starvation (root cause).**
+   `graph_boundary_amend_refused GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:
+   batch_amend_floor:limit≈1.4GB need≈1.7GB` fired **58 times** — the
+   batch amend's memory floor scales with the parent (~93k nodes) and sat
+   permanently above the cgroup headroom, so the defer window waited for
+   pressure that never drained and the adopted graph stayed stale for the
+   tail of the run. The producer's cheaper `incremental_amend_in_place`
+   lane (memory scales with the dirty set, not the parent) was never
+   tried. **Fix:** a headroom-refused batch amend now falls back to the
+   per-file lane when the producer declares it and the dirty set is
+   amendable; an uncoverable set keeps the memory-typed refusal with an
+   `incremental_amend_uncoverable:*` suffix naming why.
+2. **Dense receipt conflation (attestation blocker).** While the graph
+   was stale, every re-localization reached the `hybrid_required` lexical
+   block, which raised `graph_snapshot_not_current` *before* any dense
+   work and journaled it as `dense_index_ready query_ready=false` — 43
+   rows, every one after event ~6200 poisoned. Last-row-wins in
+   `verify_runtime_receipt` read the final row as the dense verdict even
+   though the measured index had repeatedly reported `query_ready=true`
+   (515–534 docs). The capability-accounting reader already filtered
+   these rows as refusals-not-measurements; the product receipt did not.
+   **Fix:** the lexical re-rank embeds the ~20 candidates' own file
+   texts — the graph is provenance, not an input — so it now runs during
+   stale windows, produces a real execution receipt, and stamps the
+   last-known `graph_revision` (or `graph_unavailable`).
+
+Regression coverage: `test_index_incremental.py` (fallback runs and
+publishes per-file, refusal preserved without the lane, uncoverable set
+keeps memory typing) + `test_miniswe_integration.py`
+(`test_lexical_hybrid_rerank_runs_while_the_graph_is_stale`). Also fixed
+a latent `_DEGRADE_STAGES` drift: `post_terminal_gate_verdict` was added
+as a call site in `b02e06ca` without the constant update.
+
+The standing reference for what must fire vs. what is trigger-dependent
+vs. what was ever dead is now `docs/CAPABILITY-MATRIX.md`.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains

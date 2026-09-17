@@ -1928,12 +1928,36 @@ def _ensure_index_incremental_unlocked(
         floor = _batch_amend_memory_floor(parent_graph, parent_manifest)
         limit = _effective_index_memory_limit(_cgroup_snapshot())
         if limit < floor:
-            return (
-                None,
-                f"GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:"
-                f"limit={limit}need={floor}",
-                results,
-            )
+            # The floor prices a whole-parent pipeline run, so on a large
+            # parent inside a small cgroup it can sit permanently above the
+            # limit: run 35178222629 journaled 58 such refusals on one task
+            # and the adopted graph stayed stale for the rest of it. The
+            # per-file amend's memory scales with the dirty set instead -
+            # when it can cover the change it is the lane that keeps the
+            # graph fresh here. A dirty set it cannot cover keeps the
+            # memory refusal: every bigger lane is bounded by the same
+            # cgroup, so defer remains the honest answer.
+            if _producer_supports_incremental_amend():
+                fallback, fallback_refusal = _amendable_paths(
+                    Path(root), changed_paths
+                )
+                if fallback:
+                    batch = False
+                else:
+                    return (
+                        None,
+                        "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT"
+                        f":batch_amend_floor:limit={limit}need={floor}"
+                        f":incremental_amend_uncoverable:{fallback_refusal}",
+                        results,
+                    )
+            else:
+                return (
+                    None,
+                    f"GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:"
+                    f"limit={limit}need={floor}",
+                    results,
+                )
 
     root_path = Path(root)
     if batch:

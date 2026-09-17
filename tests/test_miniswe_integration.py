@@ -247,6 +247,64 @@ def test_stale_or_unreadable_graph_localization_falls_back_to_lexical(tmp_path):
     assert "target.py:1 ~ quasar = True | matched quasar" in rendered
 
 
+def test_lexical_hybrid_rerank_runs_while_the_graph_is_stale(tmp_path, monkeypatch):
+    """graph_snapshot_not_current was a precondition refusal, not a dense run.
+
+    Run 35178222629's journal: mid-task amend refusals left the adopted
+    graph stale, so every later re-localization journaled
+    dense_index_ready query_ready=false reason=graph_snapshot_not_current
+    -- and last-row-wins at the product receipt read it as
+    treatment_dense_index_not_ready on a task the verifier passed. The
+    re-rank embeds the lexical candidates' own texts; it does not need
+    the graph, so it still runs and its receipt measures the index it
+    actually touched, stamped with the revision the engine last held.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "target.py").write_text(
+        "def frobnicate():\n    return 1\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("GT_RETRIEVAL_MODE", "hybrid_required")
+    monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(tmp_path / "model"))
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+        issue_text="repair frobnicate",
+    )
+    adapter.engine_state.graph_path = str(repo / "graph.db")
+    adapter.engine_state.graph_revision = "stale-revision-abc"
+    adapter.engine_state.mark_graph_failed()
+
+    captured: dict = {}
+
+    def fake_rank_documents(**kwargs):
+        captured.update(kwargs)
+        return (["target.py"], {
+            "schema": "gt.dense_index_receipt.v1",
+            "query_ready": True,
+            "graph_revision": kwargs["graph_revision"],
+            "reason": None,
+        })
+
+    monkeypatch.setattr(
+        "gt_engine.dense_runtime.rank_documents", fake_rank_documents)
+
+    rendered = adapter._lexical_task_localization("repair frobnicate")
+
+    assert "target.py" in rendered
+    assert captured["graph_revision"] == "stale-revision-abc"
+    rows = [
+        json.loads(line)
+        for line in (adapter.store.root / "events.jsonl").read_text().splitlines()
+    ]
+    dense = [row for row in rows if row.get("event") == "dense_index_ready"]
+    assert len(dense) == 1
+    assert dense[0]["query_ready"] is True
+    assert "graph_snapshot_not_current" not in str(dense)
+
+
 def test_existing_stale_graph_is_never_used_for_localization(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

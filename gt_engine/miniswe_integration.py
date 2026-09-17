@@ -6298,8 +6298,13 @@ class MiniSweAdapter(GroundtruthController):
                 from .dense_runtime import rank_documents
 
                 snapshot = self.graph_query_snapshot()
-                if not snapshot.graph_current:
-                    raise RuntimeError("graph_snapshot_not_current")
+                # The re-rank embeds the lexical candidates' file texts - the
+                # graph is provenance, not an input. Refusing on a stale
+                # graph journaled dense_index_ready query_ready=false rows
+                # that landed last and read as dense_index_not_ready on the
+                # product receipt, while the measured index was serving fine
+                # (run 35178222629: 58 amend refusals, then every refused
+                # re-localization poisoned the last dense receipt).
                 dense_order, dense_receipt = rank_documents(
                     query_text=query,
                     documents={str(row["path"]): str(row["text"]) for row in candidates},
@@ -6309,7 +6314,7 @@ class MiniSweAdapter(GroundtruthController):
                     model_dir=Path(os.environ["GT_DENSE_MODEL_DIR"]),
                     index_path=self.store.root / "dense-index.sqlite",
                     source_revision=self.repository_revision or "repository-start",
-                    graph_revision=snapshot.graph_revision,
+                    graph_revision=snapshot.graph_revision or "graph_unavailable",
                     limit=4,
                 )
                 by_path = {str(row["path"]): row for row in candidates}
