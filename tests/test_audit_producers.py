@@ -627,6 +627,10 @@ def test_caller_contract_view_producer_direct(production_env, tmp_path):
     assert entered
 
 
+@pytest.mark.skipif(
+    os.name == "posix",
+    reason="POSIX seam relativizes correctly; covered by the POSIX twin below",
+)
 def test_caller_contract_view_windows_seam_abstains_closed(
     production_env, tmp_path
 ):
@@ -655,6 +659,35 @@ def test_caller_contract_view_windows_seam_abstains_closed(
     assert "no_verified_caller_contract" in reasons
     # No caller_contract_view delivery may exist after a correct abstention.
     assert _delivery_for(rows, "caller_contract_view") is None
+
+
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="the seam defect is Windows-only; on POSIX _to_repo_rel relativizes",
+)
+def test_caller_contract_view_posix_seam_returns_fact(
+    production_env, tmp_path
+):
+    """POSIX twin of the Windows-seam pin: the same ``cat src/service.py``
+    command resolves through ``_viewed_files`` to an OS-absolute POSIX path,
+    which the certified wheel's ``_to_repo_rel`` relativizes under the repo
+    root -- so the producer must return caller facts and a
+    ``caller_contract_view`` delivery must exist. This is the installed-Linux
+    recheck the audit ledger still owed."""
+    stack = _build_stack(tmp_path, ISSUE, FIXTURE_FILES, task_id="audit-ccv")
+    _turn(stack, "cat src/service.py", "v1")
+    rows = _rows(stack)
+    invocation = next(
+        (
+            r for r in _by_event(rows, "producer_invocation")
+            if r.get("producer") == "caller_contract"
+            and r.get("invocation_site") == "gateway.view.caller_contract_view"
+            and r.get("outcome") == "returned_fact"
+        ),
+        None,
+    )
+    assert invocation is not None, "POSIX seam must deliver caller facts"
+    assert _delivery_for(rows, "caller_contract_view") is not None
 
 
 # --------------------------------------------------------------------------
