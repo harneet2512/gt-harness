@@ -17,8 +17,8 @@ from scripts.provider_preflight import load_route
 from tests.conftest import write_certifiable_graph
 
 TASK = "abs-module-cache-flags"
-REQUESTED = "stealth/union-alpha"
-EFFECTIVE = "openai/stealth/union-alpha"
+REQUESTED = "deepseek/deepseek-v4-flash-0731"
+EFFECTIVE = "openai/deepseek/deepseek-v4-flash-0731"
 
 
 @pytest.fixture(autouse=True)
