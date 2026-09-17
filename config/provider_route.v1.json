@@ -1,11 +1,11 @@
 {
   "schema": "gt.provider_route.v1",
-  "route_id": "openrouter-union-alpha-stealth-only",
+  "route_id": "openrouter-deepseek-v4-flash-0731-relace-only",
   "provider": "openrouter",
   "base_url": "https://openrouter.ai/api/v1",
-  "model": "stealth/union-alpha",
+  "model": "deepseek/deepseek-v4-flash-0731",
   "provider_routing": {
-    "only": ["stealth"],
+    "only": ["relace"],
     "allow_fallbacks": false,
     "require_parameters": true
   },
