@@ -169,14 +169,24 @@ def decide(
         "completion_proven": completion_proven,
         "details": details,
     }
-    if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on
-        return GateDecision(accepted=True, reason="no_plan", **common)
-    # A RED predicate bound to no plan row is blocking evidence too: the
-    # row census can only see what a row's mapping names, and nothing binds
-    # a failing contract obligation to a row it was never linked to.
-    blocking = tuple(unmet_rows) + tuple(regressions) + tuple(unresolved_predicates)
-    if not blocking:
-        return GateDecision(accepted=True, reason="no_blocking_evidence", **common)
+    if plan is None or not getattr(plan, "rows", ()):
+        # No plan is not no evidence. Run 35168421439: the plan bootstrap
+        # died on a provider timeout (``persistent_plan_unavailable``), this
+        # early return shipped the submit over 3 live RED predicates, and no
+        # ``plan_gate_decision`` was ever journaled. Row ids are opaque
+        # without the plan that names them, but a regression node id and a
+        # RED predicate's obligation are self-describing -- they still
+        # block. ``no_plan`` means no row census, never no gate.
+        blocking = tuple(regressions) + tuple(unresolved_predicates)
+        if not blocking:
+            return GateDecision(accepted=True, reason="no_plan", **common)
+    else:
+        # A RED predicate bound to no plan row is blocking evidence too: the
+        # row census can only see what a row's mapping names, and nothing
+        # binds a failing contract obligation to a row it was never linked to.
+        blocking = tuple(unmet_rows) + tuple(regressions) + tuple(unresolved_predicates)
+        if not blocking:
+            return GateDecision(accepted=True, reason="no_blocking_evidence", **common)
     # A submission over blocking evidence is refused, unconditionally. The
     # escapes that used to ship it anyway (stalled refusals, near-deadline
     # budget) are journaled below as evidence of the pressure the run was
@@ -217,13 +227,22 @@ def render_directive(
     a check proves its requirement. The refusal stands while evidence is
     missing -- there is no retry count that discharges it.
     """
-    lines = [
-        "GT PLAN GATE: submission was not executed. The plan built before the "
-        "first edit still has requirements with no evidence. You may run any "
-        "command, edit any file, or disagree. A later submission is reassessed "
-        "against current evidence, and will not be executed while these "
-        "requirements stay unproven.",
-    ]
+    if plan is None or not getattr(plan, "rows", ()):
+        lines = [
+            "GT PLAN GATE: submission was not executed. No plan was built "
+            "for this run, but blocking evidence still stands. You may run "
+            "any command, edit any file, or disagree. A later submission is "
+            "reassessed against current evidence, and will not be executed "
+            "while this evidence stands.",
+        ]
+    else:
+        lines = [
+            "GT PLAN GATE: submission was not executed. The plan built before the "
+            "first edit still has requirements with no evidence. You may run any "
+            "command, edit any file, or disagree. A later submission is reassessed "
+            "against current evidence, and will not be executed while these "
+            "requirements stay unproven.",
+        ]
     if unmet_rows:
         lines.append("Requirements with no evidence yet:")
         for row_id in unmet_rows[:MAX_LISTED_ROWS]:

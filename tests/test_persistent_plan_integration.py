@@ -953,3 +953,69 @@ def test_an_unmapped_red_predicate_still_blocks_the_gate(tmp_path, graph, monkey
     assert event["unresolved_predicates"] == [orphan_pid]
     # The refusal names the obligation, not the opaque predicate id.
     assert "the tokenizer handles orphan tokens correctly" in adapter.pending_directives[-1]
+
+
+def test_a_missing_plan_does_not_disarm_the_gate(tmp_path, graph, monkeypatch):
+    """Run 35168421439 (cyclotruc): the plan bootstrap died on a provider
+    timeout, ``persistent_plan_unavailable`` fired, and ``plan_submit_gate``
+    early-returned on the absent plan before the unresolved-predicate
+    channel was ever read -- the submit shipped over live RED evidence and
+    attestation read ``submitted_unverified``. With no plan the gate must
+    still consult RED predicates and still journal the consult."""
+    from dataclasses import replace
+
+    from gt_engine.miniswe_controller import PredicateStatus
+    from gt_engine.task_contract import Obligation
+    from gt_engine.verification_contract import compile_obligation_predicates
+
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    # No plan is ever installed: adapter.persistent_plan stays None, the
+    # bootstrap-failure shape. The orphan RED predicate is the blocking
+    # evidence that remains.
+    orphan = Obligation(
+        obligation_id="obl-orphan",
+        text="the tokenizer handles orphan tokens correctly",
+        source="persistent_plan",
+    )
+    adapter.contract = replace(
+        adapter.contract, obligations=adapter.contract.obligations + (orphan,)
+    )
+    adapter._compiled_predicates = compile_obligation_predicates(adapter.contract)
+    adapter._predicate_by_obligation = {
+        item.obligation_id: item.predicate_id
+        for item in adapter._compiled_predicates.values()
+    }
+    adapter._obligation_by_predicate = {
+        value: key for key, value in adapter._predicate_by_obligation.items()
+    }
+    orphan_pid = adapter._predicate_by_obligation["obl-orphan"]
+    adapter.predicates[orphan_pid] = Predicate(orphan_pid, orphan.text)
+    adapter._status[orphan_pid] = PredicateStatus.UNKNOWN
+    assert adapter.persistent_plan is None
+
+    session = GTSession(
+        GTSessionConfig(task_id="noplan", repo_root=str(repo), mode="advisory"),
+        engine=adapter,
+    )
+    session._plan_agent = SimpleNamespace(env=None)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (600.0, 20))
+
+    adapter.start_task()
+    reddened = adapter.evaluate_failing_observation(
+        "pytest -q tests/test_tokenizer.py",
+        "FAILED tests/test_tokenizer.py::test_orphan_tokens - "
+        "orphan tokens not handled",
+        returncode=1,
+        action_index=1,
+    )
+    assert reddened == (orphan_pid,)
+    assert adapter.predicate_status(orphan_pid) is PredicateStatus.RED
+
+    assert session.plan_submit_gate() is False
+    event = next(
+        row for row in reversed(_journal(adapter))
+        if row["event"] == "plan_gate_decision"
+    )
+    assert event["accepted"] is False
+    assert event["reason"] == "unresolved_predicates"
+    assert event["unresolved_predicates"] == [orphan_pid]

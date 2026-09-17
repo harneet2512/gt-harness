@@ -1586,12 +1586,18 @@ class GTSession:
             return 0.0, 0
         import time
 
-        limit = float(getattr(agent.config, "wall_time_limit_seconds", 0) or 0)
+        # ``config`` reads through getattr, not attribute access: the gate now
+        # runs on every marker submit including no-plan consults, and a
+        # budget read must never raise -- a raised read lands in degrade()
+        # and disables the session, which is how a missing attribute used to
+        # silently skip post-execution observation entirely.
+        config = getattr(agent, "config", None)
+        limit = float(getattr(config, "wall_time_limit_seconds", 0) or 0)
         started = float(getattr(agent, "_start_time", 0) or 0)
         remaining_seconds = (
             max(0.0, limit - (time.time() - started)) if limit and started else 0.0
         )
-        configured_steps = getattr(agent.config, "step_limit", None)
+        configured_steps = getattr(config, "step_limit", None)
         step_limit = int(configured_steps or 0)
         remaining_steps = (
             None if configured_steps is not None and step_limit == 0
@@ -1634,13 +1640,16 @@ class GTSession:
         if self._engine is None or self.disabled:
             return True
         plan = getattr(self._engine, "persistent_plan", None)
-        if plan is None or not getattr(plan, "rows", ()):
-            return True
+        # Run 35168421439: the plan bootstrap died on a provider timeout and
+        # this early return shipped the submit over 3 live RED predicates
+        # without a consult -- ``no_plan`` must mean "no row census", never
+        # "no gate". The decide() call below is what journals the consult.
+        has_plan_rows = plan is not None and bool(getattr(plan, "rows", ()))
         from .persistent_plan.gate import decide
 
         remaining_seconds, remaining_steps = self.plan_gate_budget()
         try:
-            unmet = self._engine.unmet_plan_rows()
+            unmet = self._engine.unmet_plan_rows() if has_plan_rows else ()
         except Exception:  # noqa: BLE001 - a gate fault must never block
             return True
         # The drain and baseline recheck can still close outstanding rows and
@@ -1649,13 +1658,16 @@ class GTSession:
         # remains to submit afterward; the refusal itself never checks the
         # reserve. Re-read the clock after any verification work.
         if remaining_seconds > _SUBMIT_ROOM_SECONDS:
-            drain = getattr(self._engine, "drain_plan_checks", None)
-            environment = getattr(self._plan_agent, "env", None)
-            if callable(drain) and environment is not None:
-                drain(environment, budget_seconds=min(30, max(0, remaining_seconds - _SUBMIT_ROOM_SECONDS)))
+            if has_plan_rows:
+                drain = getattr(self._engine, "drain_plan_checks", None)
+                environment = getattr(self._plan_agent, "env", None)
+                if callable(drain) and environment is not None:
+                    drain(environment, budget_seconds=min(30, max(0, remaining_seconds - _SUBMIT_ROOM_SECONDS)))
+            # The baseline recheck reads plan_inputs, not plan rows: a
+            # regression is blocking evidence even when the plan never built.
             regressions, baseline_status = self._plan_baseline_check()
             remaining_seconds, remaining_steps = self.plan_gate_budget()
-            unmet = self._engine.unmet_plan_rows()
+            unmet = self._engine.unmet_plan_rows() if has_plan_rows else ()
         else:
             regressions, baseline_status = (), "budget_not_checked"
         previous = self._plan_gate_last_unmet
@@ -1689,7 +1701,10 @@ class GTSession:
             refusals=self._plan_gate_refusals,
             refusals_without_progress=self._plan_gate_stalled_refusals,
             baseline_status=baseline_status,
-            row_states={row.row_id: self._engine.plan_row_state(row.row_id) for row in plan.rows},
+            row_states={
+                row.row_id: self._engine.plan_row_state(row.row_id)
+                for row in getattr(plan, "rows", ())
+            },
             predicate_mapped_rows=tuple(key for key, value in getattr(
                 self._engine, "plan_row_predicates", {}).items() if value),
             unresolved_predicates=unresolved,

@@ -501,6 +501,9 @@ def test_exactly_one_planning_call_is_ever_made():
     # one guard, set before anything can fail, and one provider call
     assert "if plan_started:" in body
     assert body.index("plan_started = True") < body.index("native_query(")
+    # The provider is asked exactly once. The transport-failure path builds
+    # the deterministic floor from the already-computed inputs without a
+    # second call -- one response OR one floor, never two calls.
     assert body.count("native_query(") == 1
 
     tree = ast.parse(source)
@@ -511,7 +514,7 @@ def test_exactly_one_planning_call_is_ever_made():
         and isinstance(node.func, ast.Name)
         and node.func.id == "build_plan"
     ]
-    assert len(calls) == 1, "the plan is built from exactly one response"
+    assert len(calls) == 2, "response path plus transport floor, one call"
 
 
 def test_a_row_with_no_check_is_recorded_as_unprovable(inputs):

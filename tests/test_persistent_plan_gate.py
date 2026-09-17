@@ -270,6 +270,35 @@ def test_an_empty_plan_never_gates():
     assert decision.reason == "no_plan"
 
 
+def test_no_plan_with_unresolved_predicates_still_refuses():
+    """A missing plan is not missing evidence.
+
+    Run 35168421439 (cyclotruc): the plan bootstrap died on a provider
+    timeout (``persistent_plan_unavailable``), the gate's plan early-return
+    then short-circuited before the unresolved-predicate channel was ever
+    read, and the submit shipped over 3 live RED predicates. ``no_plan``
+    means "no row census" -- it must never mean "no gate".
+    """
+    decision = decide(
+        plan=None, unmet_rows=(), regressions=(), refusals=0,
+        unresolved_predicates=("pred-red-1",), **AMPLE,
+    )
+    assert not decision.accepted
+    assert decision.reason == "unresolved_predicates"
+    assert decision.unresolved_predicates == ("pred-red-1",)
+    assert "pred-red-1" in decision.directive
+
+
+def test_an_empty_plan_with_unresolved_predicates_still_refuses():
+    empty = _plan(rows=())
+    decision = decide(
+        plan=empty, unmet_rows=(), regressions=(), refusals=0,
+        unresolved_predicates=("pred-red-1",), **AMPLE,
+    )
+    assert not decision.accepted
+    assert decision.reason == "unresolved_predicates"
+
+
 @pytest.mark.parametrize(
     "seconds,steps,allowed",
     [

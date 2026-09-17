@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
@@ -97,19 +99,44 @@ def test_advisory_gt_executes_every_baseline_action_unchanged(
     assert any(f"ORIGINAL::{command}" in row["content"] for row in messages), capability
 
 
-def test_cap_submit_011_unknown_and_red_are_nonblocking_in_default_mode(tmp_path):
-    for status in (None, "RED"):
-        agent, adapter, _session = _advisory_agent(tmp_path / str(status))
-        if status:
-            adapter.record_receipt(
-                "p", "failing check", 1, "failure", epoch=0,
-                status=status, semantic=True,
-            )
-        command = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
-        agent.execute_actions({
-            "extra": {"actions": [{"command": command, "tool_call_id": "submit"}]}
-        })
-        assert agent.env.executed == [command]
+def test_cap_submit_011_unknown_is_nonblocking_and_red_is_gated_in_default_mode(
+    tmp_path,
+):
+    """The preserved capability is that no BLOCKER is fabricated: an
+    UNKNOWN predicate never holds a submit, because the gate does not block
+    on its own ignorance. A RED predicate is different -- it is live failing
+    evidence, and since run 35168421439 showed a no-plan submit shipping
+    over it, the contract-first gate refuses pre-execution in advisory too.
+    """
+    agent, adapter, _session = _advisory_agent(tmp_path / "unknown")
+    command = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+    agent.execute_actions({
+        "extra": {"actions": [{"command": command, "tool_call_id": "submit"}]}
+    })
+    assert agent.env.executed == [command]
+
+    agent, adapter, _session = _advisory_agent(tmp_path / "red")
+    adapter.record_receipt(
+        "p", "failing check", 1, "failure", epoch=0,
+        status="RED", semantic=True,
+    )
+    msgs = agent.execute_actions({
+        "extra": {"actions": [{"command": command, "tool_call_id": "submit"}]}
+    })
+    assert agent.env.executed == []
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    decision = next(
+        row for row in reversed(rows) if row["event"] == "plan_gate_decision"
+    )
+    assert decision["accepted"] is False
+    assert decision["unresolved_predicates"] == ["p"]
+    assert any(
+        m.get("role") == "user" and "GT PLAN GATE" in str(m.get("content"))
+        for m in msgs
+    )
 
 
 def test_cap_malformed_014_empty_command_still_reaches_baseline_environment(tmp_path):

@@ -1689,11 +1689,25 @@ def install_runtime_hooks(
                 )
             except Exception:  # noqa: BLE001
                 pass
+            # The call failed; the inputs did not. Ledger rows, anchors, and
+            # covering checks were all computed before the call and stay
+            # true, so the deterministic floor still gives the submit gate a
+            # substrate. Run 35168421439 shipped over 3 live RED predicates
+            # because transport failure left persistent_plan unset entirely.
             adapter.store.append(
                 "persistent_plan_unavailable",
                 error=f"{type(exc).__name__}: {exc}"[:300],
+                fallback="deterministic_floor",
             )
-            return
+            try:
+                plan = build_plan(
+                    None, inputs,
+                    note=f"plan_call_transport_failed:{type(exc).__name__}",
+                    repo_root=getattr(adapter, "repo_root", ""),
+                )
+                finish_reason = "transport_failed"
+            except Exception:  # noqa: BLE001 - even the floor is advisory
+                return
         finally:
             plan_preparing = False
             if callable(original_parser):

@@ -648,6 +648,58 @@ def test_persistent_plan_exhausted_retries_close_as_request_failure_pair(
     )
 
 
+def test_persistent_plan_transport_failure_falls_back_to_deterministic_floor(
+    tmp_path, monkeypatch
+):
+    """Run 35168421439 (cyclotruc): the planning call died inside the
+    provider's flake window, ``persistent_plan_unavailable`` fired, and the
+    submit gate lost its substrate -- the run submitted over 3 live RED
+    predicates without a gate consult. The inputs (ledger rows, anchors,
+    covering checks) were all computed before the call; transport failure
+    must degrade the enrichment to the deterministic floor, never to no
+    plan at all."""
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    monkeypatch.setenv("GT_PROVIDER_RETRY_JITTER_MAX_SECONDS", "0")
+    task = (
+        "Fix the tokenizer.\n"
+        "\n"
+        "Assumptions:\n"
+        " the tokenizer must preserve behavior\n"
+    )
+    adapter = MiniSweAdapter(
+        task_id="plan-floor", repo_root=str(tmp_path),
+        state_dir=tmp_path / "state", predicates=[], issue_text=task,
+    )
+    adapter.plan_inputs = build_plan_inputs(
+        task, repo_root=str(tmp_path), capture_baseline=False
+    )
+
+    agent = FakeAgent()
+    agent.model = FlakyInternalCallModel("_gt_persistent_plan", fail_attempts=10)
+    agent.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": task},
+    ]
+    install_runtime_hooks(agent, _session(adapter))
+    agent.model.query(agent.messages)
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    unavailable = [
+        row for row in rows if row.get("event") == "persistent_plan_unavailable"
+    ]
+    assert unavailable
+    assert unavailable[-1].get("fallback") == "deterministic_floor"
+    # The floor plan is installed: the gate keeps its substrate.
+    assert adapter.persistent_plan is not None
+    assert adapter.persistent_plan.rows
+    assert adapter.plan_inputs is not None
+
+
 @pytest.mark.parametrize("receipt_failure", [False, True])
 def test_plan_gate_directive_is_audited_through_native_provider_request(tmp_path, monkeypatch, receipt_failure):
     from gt_engine.persistent_plan import build_plan_inputs
@@ -1349,7 +1401,13 @@ def test_submit_magic_string_executes_when_no_red_evidence(tmp_path):
                    for m in msgs)
 
 
-def test_advisory_mode_never_blocks_submit_on_red_evidence(tmp_path):
+def test_advisory_mode_still_gates_submit_on_red_evidence(tmp_path):
+    """Advisory is not a gate bypass. The benchmark runs advisory
+    (--gt-mode advisory) and run 35168421439 showed the hole this test used
+    to certify: a RED predicate + no plan shipped the submit because the
+    consult never ran. The pre-execution gate is mode-uniform -- refusal
+    suppresses, journals the decision, and issues the directive; what
+    advisory changes is the post-execution decision's enforced flag."""
     agent = FakeAgent()
     adapter = MiniSweAdapter(task_id="t", state_dir=tmp_path,
                              predicates=[Predicate("p", "p")])
@@ -1360,10 +1418,29 @@ def test_advisory_mode_never_blocks_submit_on_red_evidence(tmp_path):
     msgs = agent.execute_actions({"extra": {"actions": [
         {"cmd": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
     ]}})
-    assert adapter.phase == "IMPLEMENT"  # FakeEnv returned ok, not Submitted.
+    assert adapter.phase == "IMPLEMENT"  # Refused, not submitted.
+    assert not agent.env.executed
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    decision = next(
+        row for row in reversed(rows) if row["event"] == "plan_gate_decision"
+    )
+    assert decision["accepted"] is False
+    assert decision["unresolved_predicates"] == ["p"]
+    # The directive reaches the model as a user message.
+    assert any(m.get("role") == "user" and "GT PLAN GATE" in str(m.get("content"))
+               for m in msgs)
+
+    # A clean submit in advisory still executes natively.
+    adapter.record_receipt("p", "pytest", 0, "1 passed",
+                           epoch=adapter.workspace_epoch, status="GREEN",
+                           semantic=True)
+    msgs = agent.execute_actions({"extra": {"actions": [
+        {"cmd": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
+    ]}})
     assert agent.env.executed
-    assert not any(m.get("role") == "user" and "GT ADVISORY" in str(m.get("content"))
-                   for m in msgs)
 
 
 def test_enforced_mode_refuses_only_current_red_evidence(monkeypatch, tmp_path):
@@ -1523,6 +1600,13 @@ def test_real_submission_preserves_output_and_edit(monkeypatch, tmp_path, edit):
     assert (tmp_path / "changed.py").read_text() == ("x = 2" if edit else "x = 1\n")
 
     # An accepted literal-marker action must also pass through observation.
+    # Green the predicate first: under the unconditional gate a RED predicate
+    # with no plan is still blocking evidence -- this half tests that an
+    # ACCEPTED submit preserves observation, not that dirty submits sail.
+    adapter.record_receipt(
+        "p", "pytest", 0, "1 passed",
+        epoch=adapter.workspace_epoch, status="GREEN", semantic=True,
+    )
     agent._gt_runtime_hook_handle.restore()
     session = _session(adapter, GTMode.ASSISTIVE)
     install_runtime_hooks(agent, session)
@@ -2369,6 +2453,14 @@ def test_submit_suppression_kill_switch_off_fails_open_to_native_action(
     adapter.record_receipt(
         "p", "pytest", 1, "failed", epoch=0, status="RED", semantic=True
     )
+    # This test targets the boundary-receipt path: with the kill switch off
+    # authorize_submit_suppression returns no receipt and must not veto. The
+    # predicate is greened so the evidence gate -- a separate mechanism with
+    # its own unconditional refusal contract -- has no objection here.
+    adapter.record_receipt(
+        "p", "pytest", 0, "1 passed",
+        epoch=adapter.workspace_epoch, status="GREEN", semantic=True,
+    )
     command = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
     agent.execute_actions({"extra": {"actions": [{"command": command}]}})
     assert command in agent.env.executed
@@ -2396,6 +2488,13 @@ def test_submit_suppression_missing_receipt_fails_open_to_native_action(
     install_runtime_hooks(agent, _session(adapter, GTMode.ENFORCED))
     adapter.record_receipt(
         "p", "pytest", 1, "failed", epoch=0, status="RED", semantic=True
+    )
+    # Same reasoning as the kill-switch test: the missing boundary receipt
+    # fails open, and the evidence gate is greened so only the receipt path
+    # is under test.
+    adapter.record_receipt(
+        "p", "pytest", 0, "1 passed",
+        epoch=adapter.workspace_epoch, status="GREEN", semantic=True,
     )
     command = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
     agent.execute_actions({"extra": {"actions": [{"command": command}]}})
