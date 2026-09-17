@@ -1101,11 +1101,48 @@ metric; blocks only the stronger efficacy claim, not dispatch).
 **TB2:** reproductions on `dff90fd8`/`tb2/host-route-offline-repro` bind
 to `eval.gt_central_agent` on the `embed-bakeoff` central product line —
 absent from this branch by design. Verdict: DEFER (no cherry-pick; the
-matrix already names it a separate-repo track). Salvage taken: the one
-portable file's two xfails pin real phase5-side defects; porting
-`test_tb2_runtime_observation.py` (~10-line import change) is queued.
+matrix already names it a separate-repo track). Salvage landed in
+`b222eac2`: `test_tb2_runtime_observation.py` ported natively — 28 pass,
+2 strict xfails pinning real phase5 defects (bare `make` and `gcc` rc0
+both book "pass" with no test run).
 Dangling ref found: `docs/AUDIT-ABILITY-SPEC.md` is referenced by tests
 and docs but exists on neither branch.
+
+**Dead-gate trace (2026-09-17, `0479fb14`):** each never-delivered
+identity was traced to its trigger on the shipping advisory path. Two
+real defects, both fixed:
+
+- `syntax_result` (+ `GT_EDIT_CHECK`) was **structurally dead**: its only
+  producer `run_syntax_probe` requires `allow_live_probes` (ASSISTIVE +
+  `GT_ALLOW_LIVE_PROBES=1`), and benchmarks run advisory — a broken edit
+  journaled as a transaction artifact but never reached the model.
+  `0479fb14` adds a reactive lane: `compile_transaction_artifacts`
+  already computes a certified syntax verdict on every edit; those rows
+  now deliver as `syntax_result` candidates on every mode.
+- `covering_red` starvation was an **elif ordering defect**: with
+  `changed_files` + live probes, `run_covering_lane` returning None meant
+  the model's own failing test was never attributed — the
+  `no_covering_result_threaded` shape in 35056493769/35141054074.
+  Attribution now runs whenever the probe produced nothing and the test
+  failed; the fingerprint tracker and `feature_evaluated` rows (previously
+  inside the elif) fire on probe-enabled failing tests too.
+
+Reachable-but-never-held (not dead): `def_partition` (needs
+AMBIGUOUS_HIT/FLOOD — models' symbol searches resolved uniquely),
+`signature_delta`/`GT_PATCH_DELTA` (invoked 28× live, all correctly
+quiet — no signature change with callers), `newfile_precedent`/
+`GT_CHANGE_SURFACE` (delivered in gate runs; SWE-Live tasks never
+created a file), `recovery`/`GT_HYPOTHESIS` (delivered once;
+tracked_no_steer elsewhere is correct).
+
+`submit_refusal` correction: **5× `action_suppressed reason=submit_refused`
+in 35170780678 — live-delivered** by feature_accounting's own rule
+(delivered = the suppression). Its distinct trigger (active RED at
+submit) hasn't been the observed refusal cause yet — the refusals were
+plan-gate's `unmet_plan_rows` — but the delivery path is live-proven.
+`GT_CERT_DELIVERY`'s env flag is only read on the nano bridge path; on
+miniswe the alias inherits submit_refusal's delivery and
+`plan_gate_decision` is the equivalent record.
 
 ## Outcome claims
 
