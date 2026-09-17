@@ -65,6 +65,84 @@ def test_binary_pages_cli_and_corruption(tmp_path):
         store.read(ref["sha256"], 0, 1)
 
 
+def test_paged_reads_verify_the_blob_once_then_seek(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from gt_engine.output_evidence import PAGE_BYTES, EvidenceStore
+
+    store = EvidenceStore(tmp_path / "evidence")
+    source = tmp_path / "spool"
+    payload = b"A" * (PAGE_BYTES * 10) + b"TAIL"
+    source.write_bytes(payload)
+    reference = store.publish(source)
+    digest = reference["sha256"]
+    total = reference["total_length"]
+    assert total == len(payload) > 2 * PAGE_BYTES
+
+    consumed = [0]
+    real_open = Path.open
+
+    def counting_open(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        try:
+            path.relative_to(store.root)
+        except ValueError:
+            return stream
+
+        class Counted:
+            def __enter__(self):
+                stream.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return stream.__exit__(*exc)
+
+            def read(self, size=-1):
+                chunk = stream.read(size)
+                consumed[0] += len(chunk)
+                return chunk
+
+            def __getattr__(self, name):
+                return getattr(stream, name)
+
+        return Counted()
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    tail = store.read(digest, total - PAGE_BYTES, PAGE_BYTES)
+    assert tail["text"].endswith("TAIL")
+    # The publish-time scan already proved this exact blob in this process;
+    # a paged read on it must seek and slice, not rescan the whole artifact.
+    assert consumed[0] <= 2 * PAGE_BYTES
+
+    consumed[0] = 0
+    head = store.read(digest, 0, PAGE_BYTES)
+    assert head["offset"] == 0
+    assert consumed[0] <= 2 * PAGE_BYTES
+
+
+def test_paged_read_reverifies_after_same_size_blob_mutation(tmp_path):
+    from gt_engine.output_evidence import PAGE_BYTES, EvidenceStore
+
+    store = EvidenceStore(tmp_path / "evidence")
+    source = tmp_path / "spool"
+    source.write_bytes(b"A" * (PAGE_BYTES * 4) + b"ORIG")
+    reference = store.publish(source)
+    digest = reference["sha256"]
+    assert store.read(digest, 0, PAGE_BYTES)["returned_length"] == PAGE_BYTES
+
+    artifact = store.path(digest)
+    tampered = bytearray(artifact.read_bytes())
+    tampered[-4:] = b"HACK"
+    artifact.write_bytes(bytes(tampered))
+    # Same length: bump the mtime leg of the verification key explicitly so
+    # the mutation is observable regardless of filesystem timestamp granularity.
+    stat = artifact.stat()
+    os.utime(artifact, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    with pytest.raises(ValueError, match="digest"):
+        store.read(digest, 0, PAGE_BYTES)
+
+
 def test_timeout_preserves_actual_bytes(tmp_path):
     script = tmp_path / "wait.py"
     script.write_text("import sys,time; sys.stdout.buffer.write(b'partial\\xff'); sys.stdout.flush(); time.sleep(30)")

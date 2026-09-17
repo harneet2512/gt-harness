@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -27,6 +28,12 @@ class EvidenceStore:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        # digest -> (size, mtime_ns, encoding) for blobs whose full content
+        # this process already hashed to that digest. The stat legs are the
+        # tamper evidence: any post-verification mutation changes size or
+        # mtime, misses the entry, and repays the whole-blob rescan.
+        self._verified: dict[str, tuple[int, int, str]] = {}
+        self._lock = threading.Lock()
 
     def path(self, digest: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -74,6 +81,7 @@ class EvidenceStore:
             os.fsync(frozen.fileno())
         frozen_path = Path(frozen.name)
         with frozen_path.open("rb") as stream:
+            frozen_stat = os.fstat(stream.fileno())
             digest, size, encoding = self._identity(stream)
         destination = self.path(digest)
         if destination.exists():
@@ -81,6 +89,14 @@ class EvidenceStore:
             frozen_path.unlink()
         else:
             os.replace(frozen_path, destination)
+            if size == frozen_stat.st_size:
+                # The bytes just hashed are the inode that landed at the CAS
+                # path; rename preserves its size and mtime. Any later write
+                # moves one of those legs and falls back to a full rescan.
+                with self._lock:
+                    self._verified[digest] = (
+                        frozen_stat.st_size, frozen_stat.st_mtime_ns, encoding
+                    )
         try:
             spool.unlink()
         except PermissionError:
@@ -98,9 +114,22 @@ class EvidenceStore:
         if offset < 0 or not 1 <= length <= PAGE_BYTES:
             raise ValueError("offset must be nonnegative; length must be 1..8192 bytes")
         with self.path(digest).open("rb") as stream:
-            actual, total, disposition = self._identity(stream)
-            if actual != digest:
-                raise ValueError("artifact digest mismatch")
+            stat = os.fstat(stream.fileno())
+            with self._lock:
+                proven = self._verified.get(digest)
+            if proven is not None and proven[:2] == (stat.st_size, stat.st_mtime_ns):
+                # Verified once this process for this exact (digest, size,
+                # mtime); the slice below cannot see unproven content.
+                total, disposition = proven[0], proven[2]
+            else:
+                actual, total, disposition = self._identity(stream)
+                if actual != digest:
+                    raise ValueError("artifact digest mismatch")
+                if total == stat.st_size:
+                    with self._lock:
+                        self._verified[digest] = (
+                            stat.st_size, stat.st_mtime_ns, disposition
+                        )
             if offset > total:
                 raise ValueError("offset exceeds artifact length")
             stream.seek(offset)

@@ -789,3 +789,304 @@ def test_real_graph_hybrid_rank(query: str) -> None:
 
     # Determinism on the real graph, not only on the fixture.
     assert retrieval.hybrid_rank(REAL_GRAPH, query, 5).fused == result.fused
+
+
+# ---------------------------------------------------------------------------
+# 7. localization ranking at scale
+# ---------------------------------------------------------------------------
+
+_SCALE_NODES = 6_000
+
+# Same env-var convention as REAL_GRAPH: the leg that needs the pinned ONNX
+# asset runs only where the asset is present, and skips without pretending.
+_SCALE_DENSE_MODEL_RAW = os.environ.get("GT_RETRIEVAL_DENSE_MODEL", "")
+_SCALE_DENSE_MODEL = Path(_SCALE_DENSE_MODEL_RAW) if _SCALE_DENSE_MODEL_RAW else None
+
+
+def _scale_stable_id(node: tuple) -> str:
+    from gt_engine.resolution_provenance import stable_symbol_id
+
+    (_id, label, _name, qualified_name, file_path, language, start, end, _sig) = node
+    return stable_symbol_id(
+        language=language,
+        path=file_path,
+        qualified_name=qualified_name,
+        native_kind=label,
+        start_line=start,
+        end_line=end,
+    )
+
+
+def _build_scale_graph(path: Path) -> tuple[Path, dict[str, set[str]]]:
+    """A ~6k-node graph on the real schema with planted signal.
+
+    Noise nodes repeat common tokens. Two planted classes carry rare terms:
+    identifier-level (``defrobnicate``/``checksum`` in ``nodes_fts`` columns)
+    and behavioural (``quiescent``/``backpressure`` in ``properties`` only).
+    The FTS index is populated by the same external-content rebuild the
+    producer runs, so BM25 statistics at this scale are the real ones.
+    """
+    nodes: list[tuple] = []
+    properties: list[tuple] = []
+    pid = 0
+
+    def add_property(node_id: int, kind: str, value: str, confidence: float) -> None:
+        nonlocal pid
+        pid += 1
+        properties.append((pid, node_id, kind, value, confidence))
+
+    for i in range(1, _SCALE_NODES + 1):
+        nodes.append((
+            i, "Function", f"fn_{i}", f"pkg{i % 40}.fn_{i}",
+            f"pkg{i % 40}/mod{i % 97}.py", "python", 1, 5,
+            f"(value_{i % 31}: int) -> int",
+        ))
+        add_property(i, "param", f"value_{i % 31}:: int [required]", 1.0)
+        if i <= 200:
+            # Partial-match noise: one query term, one fact, high confidence.
+            add_property(i, "side_effect", "leaves the quiescent flag set", 0.9)
+
+    strong: list[tuple] = []
+    for j in range(5):
+        node_id = 6_001 + j
+        strong.append((
+            node_id, "Function", "defrobnicate",
+            f"pipeline.stage{j}.defrobnicate",
+            f"pipeline/stage{j}/defrobnicate.py", "python", 1, 9,
+            "defrobnicate checksum(frame) -> frame",
+        ))
+    weak: list[tuple] = []
+    for j in range(40):
+        node_id = 6_010 + j
+        weak.append((
+            node_id, "Function", f"util_{j}", f"pkg{j % 40}.util_{j}",
+            f"defrobnicate/util_{j}.py", "python", 1, 4,
+            "(frame) -> frame",
+        ))
+    prop_nodes: list[tuple] = []
+    for j in range(4):
+        node_id = 6_050 + j
+        prop_nodes.append((
+            node_id, "Function", f"settle_{j}", f"pkg{j % 40}.settle_{j}",
+            f"pkg{j % 40}/settle_{j}.py", "python", 1, 8, "(queue) -> None",
+        ))
+        add_property(
+            node_id, "guard_clause",
+            "opens the quiescent backpressure valve when the queue saturates",
+            1.0,
+        )
+
+    nodes.extend(strong)
+    nodes.extend(weak)
+    nodes.extend(prop_nodes)
+
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE nodes (
+                id INTEGER PRIMARY KEY,
+                label TEXT NOT NULL,
+                name TEXT NOT NULL,
+                qualified_name TEXT,
+                file_path TEXT NOT NULL,
+                signature TEXT,
+                language TEXT NOT NULL,
+                start_line INTEGER,
+                end_line INTEGER,
+                stable_id TEXT,
+                source_revision TEXT
+            );
+            CREATE TABLE properties (
+                id INTEGER PRIMARY KEY,
+                node_id INTEGER NOT NULL REFERENCES nodes(id),
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                line INTEGER,
+                confidence REAL DEFAULT 1.0
+            );
+            CREATE VIRTUAL TABLE nodes_fts USING fts5(
+                name, qualified_name, signature, file_path,
+                content='nodes', content_rowid='id'
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO nodes (id,label,name,qualified_name,file_path,language,"
+            "start_line,end_line,signature,stable_id,source_revision) "
+            "VALUES (?,?,?,?,?,?,?,?,?,NULL,'rev-1')",
+            nodes,
+        )
+        connection.executemany(
+            "INSERT INTO properties (id,node_id,kind,value,line,confidence) "
+            "VALUES (?,?,?,?,NULL,?)",
+            properties,
+        )
+        connection.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+        connection.commit()
+    finally:
+        connection.close()
+    return path, {
+        "strong": {_scale_stable_id(n) for n in strong},
+        "weak": {_scale_stable_id(n) for n in weak},
+        "property": {_scale_stable_id(n) for n in prop_nodes},
+    }
+
+
+@pytest.fixture(scope="module")
+def scale_graph(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, dict[str, set[str]]]:
+    return _build_scale_graph(tmp_path_factory.mktemp("scale_graph") / "scale.db")
+
+
+def test_lexical_rank_at_scale_ranks_planted_signal_above_noise(
+    scale_graph: tuple[Path, dict[str, set[str]]],
+) -> None:
+    path, planted = scale_graph
+
+    result = retrieval.lexical_rank(path, "defrobnicate checksum", 10)
+
+    assert result.available is True
+    # The k*4 over-fetch cut is part of the contract: 45 rows match, 40 land.
+    assert result.detail["matched_rows"] == 40
+    top = [row.stable_id for row in result]
+    assert set(top[: len(planted["strong"])]) == planted["strong"]
+    assert set(top[len(planted["strong"]):]) <= planted["weak"]
+
+    full = retrieval.lexical_rank(path, "defrobnicate", 50)
+    assert full.available is True
+    assert full.detail["matched_rows"] == len(planted["strong"]) + len(planted["weak"])
+    assert len(full) == 45
+    assert {row.stable_id for row in full[:5]} == planted["strong"]
+
+
+def test_property_rank_at_scale_scores_coverage_above_partial_noise(
+    scale_graph: tuple[Path, dict[str, set[str]]],
+) -> None:
+    path, planted = scale_graph
+
+    result = retrieval.property_rank(path, "quiescent backpressure", 10)
+
+    assert result.available is True
+    assert len(result) == 10
+    head = result[: len(planted["property"])]
+    assert {row.stable_id for row in head} == planted["property"]
+    # coverage 2 at confidence 1.0: 2 + (1 - 1/3); the 200 one-term rows sit
+    # strictly below at 1 + (1 - 1/1.9) no matter how confidently they match.
+    for row in head:
+        assert row.score == pytest.approx(2 + 2 / 3)
+    for row in result[len(planted["property"]):]:
+        assert row.score == pytest.approx(1 + (1 - 1 / 1.9))
+
+
+def test_hybrid_rank_at_scale_is_deterministic_and_signal_led(
+    scale_graph: tuple[Path, dict[str, set[str]]],
+) -> None:
+    path, planted = scale_graph
+    query = "defrobnicate checksum quiescent backpressure"
+
+    first = retrieval.hybrid_rank(path, query, 10, use_dense=False)
+    second = retrieval.hybrid_rank(path, query, 10, use_dense=False)
+
+    assert first.fused == second.fused
+    assert [s.as_dict() for s in first.sources] == [
+        s.as_dict() for s in second.sources
+    ]
+    assert first.attribution_record() == second.attribution_record()
+
+    fused_ids = [row.stable_id for row in first.fused]
+    planted_all = planted["strong"] | planted["property"]
+    # RRF over the source rankings: the strong identifier rows hold lexical
+    # ranks 1-5 and the planted fact rows hold property ranks 1-4. The eight
+    # rows strictly above 1/(60+5) are all planted; positions 9-10 tie the
+    # fifth strong row against the best partial-coverage noise row, so the
+    # nine planted ids are complete within the fused top-10 either way.
+    assert len(fused_ids) == 10
+    assert len(set(fused_ids[:8])) == 8
+    assert set(fused_ids[:8]) <= planted_all
+    assert planted_all <= set(fused_ids[:10])
+    for stable_id in planted["strong"]:
+        assert first.contributing_sources(stable_id) == ("lexical",)
+    for stable_id in planted["property"]:
+        assert first.contributing_sources(stable_id) == ("property",)
+
+
+def test_dense_pool_bound_bookkeeping_at_scale(
+    scale_graph: tuple[Path, dict[str, set[str]]],
+) -> None:
+    path, planted = scale_graph
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        provenance: dict[str, retrieval.SymbolProvenance] = {}
+        bounded = retrieval._dense_pool(
+            connection,
+            limit=retrieval.DENSE_POOL_LIMIT,
+            labels=retrieval.SYMBOL_LABELS,
+            restrict_to=None,
+            provenance=provenance,
+        )
+        assert len(bounded) == retrieval.DENSE_POOL_LIMIT
+        # The bounded pool is the first N symbol nodes in n.id order.
+        assert {provenance[sid].node_id for sid in bounded} == set(
+            range(1, retrieval.DENSE_POOL_LIMIT + 1)
+        )
+        assert all(text.startswith("Function ") for text in bounded.values())
+
+        unbounded = retrieval._dense_pool(
+            connection,
+            limit=None,
+            labels=retrieval.SYMBOL_LABELS,
+            restrict_to=None,
+            provenance={},
+        )
+        assert len(unbounded) == _SCALE_NODES + 5 + 40 + 4
+
+        wanted = sorted(planted["strong"])[:2]
+        restricted = retrieval._dense_pool(
+            connection,
+            limit=None,
+            labels=retrieval.SYMBOL_LABELS,
+            restrict_to=wanted,
+            provenance={},
+        )
+        assert set(restricted) == set(wanted)
+    finally:
+        connection.close()
+
+
+@pytest.mark.skipif(
+    _SCALE_DENSE_MODEL is None or not _SCALE_DENSE_MODEL.is_dir(),
+    reason="real ONNX model absent (set GT_RETRIEVAL_DENSE_MODEL)",
+)
+def test_dense_rank_at_scale_uses_the_bounded_pool(
+    scale_graph: tuple[Path, dict[str, set[str]]], tmp_path: Path
+) -> None:
+    """The dense leg with the pinned model asset, where it exists.
+
+    ``pool_limit`` is exercised through ``dense_rank`` itself so the
+    bookkeeping in ``detail`` is observed on the real path, not reconstructed.
+    """
+    path, _planted = scale_graph
+
+    result = retrieval.dense_rank(
+        path,
+        "quiescent backpressure",
+        10,
+        model_dir=_SCALE_DENSE_MODEL,
+        index_path=tmp_path / "dense.sqlite",
+        pool_limit=128,
+    )
+
+    assert result.available is True, result.reason
+    assert result.detail["pool_size"] == 128
+    assert result.detail["pool_bounded"] is True
+    repeat = retrieval.dense_rank(
+        path,
+        "quiescent backpressure",
+        10,
+        model_dir=_SCALE_DENSE_MODEL,
+        index_path=tmp_path / "dense.sqlite",
+        pool_limit=128,
+    )
+    assert [row.stable_id for row in repeat] == [row.stable_id for row in result]

@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -181,6 +182,82 @@ def test_bounded_indexer_kills_only_child_when_rss_guard_is_crossed(
     assert result.status == "memory_guard_triggered"
     assert result.error_code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
     assert result.memory_evidence is True
+
+
+def _pid_alive(pid: int) -> bool:
+    """External liveness check - the runner's own wait() is not the proof."""
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        # PROCESS_QUERY_LIMITED_INFORMATION
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            # WAIT_TIMEOUT: the handle is not signalled, so still running.
+            return kernel32.WaitForSingleObject(handle, 0) == 258
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def test_bounded_indexer_timeout_kills_the_child_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Drive the real Popen -> drain -> poll -> kill path into its timeout leg.
+
+    ``command_factory`` is the late-bound seam kept for test doubles; pointing
+    it at a 30s sleeper with the module timeout at 1s exercises the actual
+    loop body that fires ``GT_INDEX_TIMEOUT``, including the teardown and the
+    pipe drainers, rather than a stand-in for any of them.
+    """
+    pid_path = tmp_path / "sleeper.pid"
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: sys.executable)
+    monkeypatch.setattr(indexer, "_INDEX_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(
+        indexer, "_effective_index_memory_limit", lambda _snapshot: 64 * 1024 * 1024
+    )
+
+    def sleeper_command(binary: str, _root: str, _output: str) -> list[str]:
+        return [
+            binary,
+            "-c",
+            "import os,sys,time;from pathlib import Path;"
+            "Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
+            str(pid_path),
+        ]
+
+    started = time.monotonic()
+    result = indexer._run_index_bounded(
+        str(tmp_path), tmp_path / "graph.db", tmp_path,
+        command_factory=sleeper_command,
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.success is False
+    assert result.status == "timeout"
+    assert result.error_code == "GT_INDEX_TIMEOUT"
+    # The 1s bound was reached; teardown then finished well inside the waits.
+    assert 1_000 <= result.elapsed_ms < 30_000
+    assert elapsed < 30
+    # wait() inside the runner reaped the child - verify death externally too.
+    assert result.exit_code is not None
+    deadline = time.monotonic() + 5
+    while not pid_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert pid_path.exists(), "the sleeper never reported its pid"
+    assert not _pid_alive(int(pid_path.read_text(encoding="utf-8")))
 
 
 def test_pipe_cleanup_closes_raw_descriptors_not_buffered_streams(monkeypatch) -> None:
@@ -689,3 +766,100 @@ def test_index_timeout_env_override_and_malformed_fallback(monkeypatch) -> None:
     monkeypatch.delenv("GT_INDEX_TIMEOUT_SECONDS")
     assert indexer._env_seconds("GT_INDEX_TIMEOUT_SECONDS", 0) == 0
     assert indexer._INDEX_TIMEOUT_SECONDS == 0
+
+
+_REPO_ROOT = Path(indexer.__file__).resolve().parents[1]
+
+_LOCK_CHILD_SOURCE = '''\
+"""Worker for the cross-process publication-lock test.
+
+Runs in a fresh interpreter so ``_graph_publication_lock`` contends with a
+real second OS process - on Windows, byte-range locks are process-scoped, so
+two threads of one process could never prove the msvcrt branch works.
+"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+lock_path = Path(sys.argv[1])
+marker_path = Path(sys.argv[2])
+barrier = float(sys.argv[3])
+hold_seconds = float(sys.argv[4])
+sys.path.insert(0, sys.argv[5])
+
+from gt_engine.indexer import _graph_publication_lock
+
+while time.time() < barrier:
+    time.sleep(0.002)
+attempt = time.time()
+with _graph_publication_lock(lock_path):
+    entered = time.time()
+    time.sleep(hold_seconds)
+    released_boundary = time.time()
+marker_path.write_text(
+    json.dumps(
+        {
+            "pid": os.getpid(),
+            "attempt": attempt,
+            "entered": entered,
+            "released_boundary": released_boundary,
+            "exited": time.time(),
+        }
+    ),
+    encoding="utf-8",
+)
+'''
+
+
+def test_graph_publication_lock_serializes_two_real_processes(tmp_path: Path) -> None:
+    """Two real OS processes race the same lock file.
+
+    ``test_concurrent_index_builds_are_serialized_and_publish_one_pair``
+    covers in-process serialization; the msvcrt/fcntl branch of
+    ``_graph_publication_lock`` exists for the cross-process case, where a
+    contender must retry inside the helper rather than crash or enter
+    concurrently. Both children hit the same byte-range lock behind a
+    wall-clock barrier and record their critical-section bounds.
+    """
+    child = tmp_path / "lock_child.py"
+    child.write_text(_LOCK_CHILD_SOURCE, encoding="utf-8")
+    lock_path = tmp_path / ".graph.lock"
+    markers = [tmp_path / f"marker-{ordinal}.json" for ordinal in range(2)]
+    # Barrier past both interpreter start-ups; hold long enough that the
+    # contender's retry loop (50ms cadence) runs several times.
+    barrier = time.time() + 6.0
+    hold_seconds = 0.6
+    env = dict(os.environ, GT_INDEX_TIMEOUT_SECONDS="10")
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable, str(child), str(lock_path), str(marker),
+                str(barrier), str(hold_seconds), str(_REPO_ROOT),
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for marker in markers
+    ]
+    outputs = [process.communicate(timeout=90) for process in processes]
+
+    for process, (_out, err) in zip(processes, outputs, strict=True):
+        assert process.returncode == 0, f"lock child failed: {err}"
+    records = [json.loads(marker.read_text(encoding="utf-8")) for marker in markers]
+
+    # Two real processes, not threads of this one.
+    assert len({record["pid"] for record in records} | {os.getpid()}) == 3
+    winner, contender = sorted(records, key=lambda record: record["entered"])
+    # Disjoint critical sections: the contender could not enter before the
+    # winner's last in-section timestamp (unlock runs after it).
+    assert contender["entered"] >= winner["released_boundary"]
+    # Real contention, not a late start: the contender was already trying
+    # while the winner still held the lock.
+    assert contender["attempt"] < winner["released_boundary"]
+    # The contender retried inside the helper rather than crashing or sailing
+    # through: its wait spanned several 50ms retry intervals.
+    assert contender["entered"] - contender["attempt"] >= 0.1
