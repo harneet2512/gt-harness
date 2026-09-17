@@ -1560,6 +1560,64 @@ def test_result_level_submit_cannot_reuse_preexecution_authority(monkeypatch, tm
     assert agent._gt_runtime_hook_handle.session.disabled_stage == "terminal_refusal_authority"
 
 
+def test_output_marker_submit_journals_post_terminal_gate_verdict(tmp_path):
+    """A marker assembled at runtime never matches is_submit_command's text
+    check, so the submit executes and lands on the advisory post-execution
+    path. Nothing can be suppressed there -- but the journal must still
+    carry the verdict the gate would have reached, marked
+    enforcement=post_terminal. Run 35168421439's journal had no gate row at
+    all: "no gate row" and "gate saw clean evidence" were indistinguishable.
+    """
+    from minisweagent.exceptions import Submitted
+
+    class MarkerOutputEnv:
+        def __init__(self):
+            self.executed = []
+
+        def execute(self, action):
+            self.executed.append(action.get("command", ""))
+            error = Submitted({
+                "role": "exit",
+                "content": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nfake",
+                "extra": {"exit_status": "Submitted", "submission": "fake"},
+            })
+            error.gt_execution_result = {
+                "output": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nfake",
+                "returncode": 0,
+                "exception_info": "",
+            }
+            raise error
+
+    agent = FakeAgent()
+    agent.env = MarkerOutputEnv()
+    adapter = MiniSweAdapter(task_id="t", state_dir=tmp_path,
+                             predicates=[Predicate("p", "p")])
+    install_runtime_hooks(agent, _session(adapter, GTMode.ADVISORY))
+    agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
+    adapter.record_receipt("p", "pytest", 1, "1 failed", epoch=0, status="RED",
+                           semantic=True)
+    with pytest.raises(Submitted):
+        agent.execute_actions({"extra": {"actions": [
+            {"command": "python -c \"print('COMPLETE_' 'TASK_AND_SUBMIT_FINAL_OUTPUT')\"",
+             "tool_call_id": "c1"},
+        ]}})
+
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    verdict = next(
+        row for row in reversed(rows) if row["event"] == "plan_gate_decision"
+    )
+    assert verdict["enforcement"] == "post_terminal"
+    assert verdict["accepted"] is False
+    assert verdict["reason"] == "unresolved_predicates"
+    assert verdict["unresolved_predicates"] == ["p"]
+    # The submit still shipped -- the verdict is evidence, not suppression.
+    decision = next(
+        row for row in reversed(rows) if row["event"] == "submit_decision"
+    )
+    assert decision["accepted"] is True
+    assert decision["enforced"] is False
+
+
 @pytest.mark.parametrize("edit", [False, True])
 def test_real_submission_preserves_output_and_edit(monkeypatch, tmp_path, edit):
     import subprocess

@@ -1791,11 +1791,70 @@ class GTSession:
                     mode=self.mode.value,
                     predicate_ids=list(blocking),
                 )
+            self._journal_gate_verdict()
             accepted = self._engine.advisory_submit_decision()
             return accepted, GTDecisionBatch()
         accepted = self._engine.submit_decision()
         batch = GTDecisionBatch(policy=["accept" if accepted else "deny"])
         return accepted, batch
+
+    def _journal_gate_verdict(self) -> None:
+        """Journal the verdict the gate would have reached, post-terminal.
+
+        A marker the model assembled at runtime (string concat, expansion)
+        never matches ``is_submit_command``'s text check, so the submit
+        reaches this path without a pre-execution consult -- run
+        35168421439's bypass class. Nothing can suppress an executed
+        command, but the audit must still distinguish "the gate saw clean
+        evidence" from "the gate never ran". Read-only: no suite recheck,
+        no directive, no refusal counter -- this is evidence, not policy.
+        """
+        try:
+            plan = getattr(self._engine, "persistent_plan", None)
+            has_plan_rows = plan is not None and bool(getattr(plan, "rows", ()))
+            from .persistent_plan.gate import decide
+
+            remaining_seconds, remaining_steps = self.plan_gate_budget()
+            unmet = self._engine.unmet_plan_rows() if has_plan_rows else ()
+            unmapped_red = getattr(self._engine, "unmapped_red_predicates", None)
+            unresolved = tuple(unmapped_red()) if callable(unmapped_red) else ()
+            predicate_labels = (
+                {
+                    key: getattr(
+                        getattr(self._engine, "predicates", {}).get(key),
+                        "description",
+                        "",
+                    ) or key
+                    for key in unresolved
+                }
+                if unresolved
+                else None
+            )
+            decision = decide(
+                plan=plan,
+                unmet_rows=unmet,
+                regressions=(),
+                remaining_seconds=remaining_seconds,
+                remaining_steps=remaining_steps,
+                refusals=self._plan_gate_refusals,
+                refusals_without_progress=self._plan_gate_stalled_refusals,
+                baseline_status="post_terminal_not_checked",
+                row_states={
+                    row.row_id: self._engine.plan_row_state(row.row_id)
+                    for row in getattr(plan, "rows", ())
+                },
+                predicate_mapped_rows=tuple(key for key, value in getattr(
+                    self._engine, "plan_row_predicates", {}).items() if value),
+                unresolved_predicates=unresolved,
+                predicate_labels=predicate_labels,
+            )
+            self._engine.store.append(
+                "plan_gate_decision",
+                enforcement="post_terminal",
+                **decision.as_row(),
+            )
+        except Exception as exc:  # noqa: BLE001 - verdict plumbing must not lose the submit
+            self.degrade("post_terminal_gate_verdict", exc)
 
     def _seal_plan_recheck(self) -> None:
         """Refresh stale bound-check evidence on the submitted tree.
