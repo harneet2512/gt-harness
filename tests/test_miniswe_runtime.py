@@ -1884,6 +1884,79 @@ def test_failing_test_attributed_to_edited_surface(monkeypatch, tmp_path):
     assert cov.test_files
 
 
+def test_probe_lane_none_still_attributes_models_failing_test(
+    monkeypatch, tmp_path
+):
+    """With live probes enabled the old `elif` skipped
+    attribute_test_failure entirely: run_covering_lane returning None
+    (no graph symbols, no selected test) discarded the model's own failing
+    test -- the cheapest covering signal -- and the producer journaled
+    no_covering_result_threaded. The fallback must still attribute."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "mod.py").write_text("def compute(values):\n    return 0\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+
+    class ScriptedEnv:
+        def execute(self, action):
+            cmd = action.get("command", "")
+            if "WRITE_NOW" in cmd:
+                (repo / "src" / "mod.py").write_text("def compute(values):\n    return 0.0\n")
+            elif "pytest" in cmd:
+                return {"output": (
+                    "tests/test_mod.py::test_compute FAILED - "
+                    "compute([]) broke src/mod.py\n1 failed\n"), "returncode": 1}
+            return {"output": "ok", "returncode": 0}
+
+    contract = extract_task_contract("compute() must pass the pytest suite.")
+    from gt_engine.verification_contract import compile_obligation_predicates
+
+    compiled = compile_obligation_predicates(contract)
+    # Live probes enabled, but run_covering_lane finds no graph symbols in
+    # this fixture and returns None -- the attribution fallback must run.
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    monkeypatch.setenv("GT_ALLOW_LIVE_PROBES", "1")
+    agent = FakeAgent()
+    agent.env = ScriptedEnv()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state",
+        predicates=[Predicate(compiled[o.obligation_id].predicate_id, o.text)
+                    for o in contract.obligations],
+        repo_root=str(repo), contract=contract,
+    )
+    install_runtime_hooks(agent, _session(adapter, GTMode.ASSISTIVE))
+    agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
+    agent.execute_actions({"extra": {"actions": [
+        {"command": "python - <<'WRITE_NOW'\nopen('src/mod.py','w').write('x')\nWRITE_NOW",
+         "tool_call_id": "c1"},
+    ]}})
+    assert "src/mod.py" in adapter._edited_files
+
+    captured = {}
+    import gt_engine.miniswe_runtime as rt
+    from gt_engine.miniswe_evidence import EvidenceResult
+
+    def spy(state, event, **kw):
+        captured["covering"] = event.covering
+        return EvidenceResult(rendered="", sealed=False)
+
+    monkeypatch.setattr(rt, "run_evidence_pipeline", spy)
+    agent.execute_actions({"extra": {"actions": [
+        {"command": "python -m pytest tests/ -q", "tool_call_id": "c2"},
+    ]}})
+    cov = captured.get("covering")
+    assert cov is not None, (
+        "probe lane returned None and the model's own failing test was "
+        "discarded -- the no_covering_result_threaded starvation shape"
+    )
+    assert cov.verdict == "fail"
+    assert cov.target == "src/mod.py"
+
+
 def test_syntax_probe_catches_broken_edit(monkeypatch, tmp_path):
     import subprocess
 
@@ -1925,6 +1998,54 @@ def test_syntax_probe_catches_broken_edit(monkeypatch, tmp_path):
     joined = "\n".join(str(m.get("content")) for m in prepared)
     assert "[GT_EVIDENCE:syntax_result]" in joined
     assert "syntax error" in joined
+
+
+def test_advisory_broken_edit_still_delivers_syntax_result(monkeypatch, tmp_path):
+    """The proactive probe is ASSISTIVE+GT_ALLOW_LIVE_PROBES gated, so on the
+    shipping advisory path a broken edit journaled as a transaction artifact
+    never reached the model -- a dead gate. The reactive lane emits the
+    already-computed syntax verdict from compile_transaction_artifacts with
+    no probe env at all."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "mod.py").write_text("def compute(values):\n    return 0\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+
+    class BrokenWriteEnv:
+        def execute(self, action):
+            cmd = action.get("command", "")
+            if "WRITE_BROKEN" in cmd:
+                (repo / "src" / "mod.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+            return {"output": "ok", "returncode": 0}
+
+    contract = extract_task_contract("compute() must pass the pytest suite.")
+    from gt_engine.verification_contract import compile_obligation_predicates
+
+    compiled = compile_obligation_predicates(contract)
+    monkeypatch.delenv("GT_VERIFY_EXECUTE", raising=False)
+    monkeypatch.delenv("GT_ALLOW_LIVE_PROBES", raising=False)
+    agent = FakeAgent()
+    agent.env = BrokenWriteEnv()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state",
+        predicates=[Predicate(compiled[o.obligation_id].predicate_id, o.text)
+                    for o in contract.obligations],
+        repo_root=str(repo), contract=contract,
+    )
+    install_runtime_hooks(agent, _session(adapter, GTMode.ADVISORY))
+    agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
+    msgs = agent.execute_actions({"extra": {"actions": [
+        {"command": "python - <<'WRITE_BROKEN'\nopen('src/mod.py','w').write('x')\nWRITE_BROKEN",
+         "tool_call_id": "c1"},
+    ]}})
+    prepared = agent.model._prepare_messages_for_api(msgs)
+    joined = "\n".join(str(m.get("content")) for m in prepared)
+    assert "[GT_EVIDENCE:syntax_result]" in joined
+    assert "src/mod.py" in joined and "syntax error" in joined
 
 
 def test_evidence_capsule_splices_into_observation(monkeypatch, tmp_path):

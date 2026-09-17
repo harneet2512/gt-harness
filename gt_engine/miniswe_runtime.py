@@ -729,6 +729,7 @@ def _run_evidence(
     additional_candidates: tuple[GTDecisionCandidate, ...] = (),
     output_artifact: dict | None = None,
     pre_edit_graph: str = "",
+    syntax_findings: tuple[dict, ...] = (),
 ) -> str:
     """Collect eligible producers for the session-owned decision packet.
 
@@ -766,18 +767,22 @@ def _run_evidence(
         from .miniswe_covering import run_covering_lane
 
         covering = run_covering_lane(adapter, changed_files)
-    elif test_outcome in ("fail", "env_fail"):
+    if test_outcome in ("fail", "env_fail"):
         # Attribute the model's OWN failing test to the edited surface without
         # executing any additional command. This is advisory provenance, not
         # independent proof and therefore never creates execution authority.
         # The observed outcome, not the shell's returncode: a piped
         # `pytest … | tail` exits with tail's status on a failing suite.
-        from .miniswe_covering import attribute_test_failure
+        # Runs whenever the probe lane produced nothing -- including when live
+        # probes are enabled but returned no covering result, where the old
+        # elif discarded the cheapest covering signal entirely.
+        if covering is None:
+            from .miniswe_covering import attribute_test_failure
 
-        covering = attribute_test_failure(
-            adapter, command, output,
-            returncode=returncode, observed=test_outcome,
-        )
+            covering = attribute_test_failure(
+                adapter, command, output,
+                returncode=returncode, observed=test_outcome,
+            )
         # A4/GT_HYPOTHESIS: track the failure fingerprint; a recurrence after
         # an edit schedules a bounded, transient recovery steer.
         try:
@@ -839,6 +844,7 @@ def _run_evidence(
         test_outcome=test_outcome,
         output_artifact=output_artifact,
     )
+    syntax = ""
     if changed_files and allow_live_probes:
         from .miniswe_covering import run_syntax_probe
 
@@ -858,6 +864,43 @@ def _run_evidence(
                 {"kind": "syntax_result", "dedup_key": f"syntax-{adapter.iteration}",
                  "target": first_file},
             ))
+    # Reactive lane: the transaction-observation layer already computes a
+    # certified syntax verdict on every edit (compile_transaction_artifacts).
+    # The proactive probe above is ASSISTIVE+GT_ALLOW_LIVE_PROBES gated, so in
+    # advisory runs a syntactically broken edit journaled as a transaction
+    # artifact but never reached the model -- a dead gate on the shipping
+    # path. Emit the already-computed finding as evidence; files the probe
+    # covered are skipped so a probe-enabled run never double-delivers.
+    probe_covered = {
+        line.split(":")[0]
+        for line in (syntax or "").splitlines()
+        if ": syntax error" in line
+    }
+    for row in syntax_findings:
+        rel = str(row.get("path") or "")
+        if not rel or rel in probe_covered:
+            continue
+        if row.get("error"):
+            detail = (
+                f"line {int(row.get('line') or 0)} "
+                f"col {int(row.get('column') or 0)}: {row.get('error')}"
+            )
+        else:
+            detail = "; ".join(
+                str(d) for d in (row.get("diagnostics") or ())[:8]
+            )
+        producer = str(row.get("producer") or "")
+        body = f"[GT_EVIDENCE:syntax_result]\n{rel}: syntax error\n{detail}"
+        if producer:
+            body += f"\nproducer={producer}"
+        candidates.append(_EvidenceCandidate(
+            90, "syntax_result", body,
+            {"kind": "syntax_result",
+             "dedup_key": (
+                 f"syntax-reactive-{rel}-{row.get('post_revision', '')}"
+             ),
+             "target": rel},
+        ))
     proposed_dedup, proposed_head = adapter.pending_evidence_chain()
     from .output_evidence import EvidenceStore
     from .request_history import store_history_evidence
@@ -2121,6 +2164,7 @@ def install_runtime_hooks(
                 # past several dedents and would raise NameError on any action
                 # that captured no pre-action snapshot.
                 pre_graph_snapshot = None
+                transaction_artifacts: dict | None = None
                 if pre_snapshot is not None:
                     post_snapshot = capture_workspace(
                         adapter.repo_root,
@@ -2298,6 +2342,17 @@ def install_runtime_hooks(
                             if pre_graph_snapshot is not None
                             and pre_graph_snapshot.graph_current
                             else ""
+                        ),
+                        syntax_findings=tuple(
+                            row for row in (
+                                (transaction_artifacts or {}).get("syntax") or ()
+                            )
+                            if row.get("valid") is False
+                            or (
+                                row.get("status") == "incomplete"
+                                and "syntax_tree_incomplete"
+                                in (row.get("diagnostics") or ())
+                            )
                         ),
                     )
                 else:
