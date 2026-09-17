@@ -914,7 +914,11 @@ commands produced no observation at all. Consolidated record:
    `dynaconf__dynaconf-1241` (the cited-base receipt failure) both reached
    the official verifier, **both GRADED, both solved (reward=1), attestation
    PASS**. All 5 capability rows WORKING on both tasks (`lsp_promotion`
-   `terminal_succeeded_published`); all 21 identities WITNESSED; strict
+   `terminal_succeeded_published`); all 21 identities WITNESSED in the
+   provider-free feature matrix, while live attestation witnessed
+   **6/21 and 8/21 per task** (the rest INELIGIBLE — trigger never held;
+   corrected 2026-09-17, this line previously conflated the matrix tier
+   with live attestation); strict
    fleet gate `lsp_watch --strict` PASS on both journals (no TIER_PARTIAL /
    SCHEDULED_NO_TERMINAL / AMEND_FAILURES / NO_LEG_ON_FINAL; dynaconf drove
    21 legs / 14 publications / 3 salvage merges to a clean seal). Readiness
@@ -1048,6 +1052,60 @@ route in `67cbf42e`; stale route-pin tests repointed in `1b0a0b5e`.
 
 Union-alpha smoke results cannot support solve-rate or token-efficiency
 claims; the free arm remains functional-verification only.
+
+## Swarm audit — capability, gates, boundaries, TB2 (2026-09-17)
+
+Four parallel audits against the local journal corpus and certified
+artifacts. Corrections and dispositions:
+
+**Capability truth table (canonical registry is 21 identities — "19"
+claims are stale; `persistent_plan` + `plan_gate` postdate the census).**
+Fully live-proven (request + response + consumption evidence):
+`caller_contract`, `cochange_prior`, `localization`, `obligations`,
+`persistent_plan`, `plan_gate`, `select_catalog` — 7/21. Delivered but
+weak: `covering_red` (one delivery in 35170780678; eligible-but-starved
+in three other runs), `recovery` (one delivery, seen_no_action),
+`newfile_precedent` (request-bound in runs lacking attestation). Never
+delivered into a model request in any recorded run: `def_partition`,
+`submit_refusal`, `syntax_result`, `signature_delta` — plus the four
+aliases owning through them (`GT_PATCH_DELTA`, `GT_EDIT_CHECK`,
+`GT_CERT_DELIVERY`, `GT_SS_SUBMIT_RED`). The 35170780678 refusals were
+`unmet_plan_rows` — `plan_gate`'s trigger, not `submit_refusal`'s; that
+identity's delivery path remains unproven live. `GT_*` aliases have never
+been WITNESSED as their own identity in any attestation; they resolve
+only via `CAPABILITY_OWNERS` in feature accounting — benchmark claims at
+alias granularity currently have zero direct live evidence.
+
+**Release gates:** all six mechanisms proven; every green predates the
+fix wave. `35178222629` (in flight, `e84d646b`) cannot certify release —
+`b02e06ca` landed after dispatch. Before the benchmark: provider-free
+acceptance + installed rehearsal must re-run on the final SHA (covers
+bundle identity, credential canary, conservation suite, static workflow,
+clean container); a fresh gate-one on `b02e06ca`+ produces live
+verifier/conservation evidence. `readiness_binding`, `image_digest_gate`,
+`provider_gate`, `attest` re-validate structurally per dispatch.
+
+**Boundary items:** multi-process graph-lock contention and the POSIX
+flock branch are already proven in-tree (fresh-interpreter lock test runs
+on the ubuntu suite leg). `gt-index` seam coverage is real (sleeper-child
+kill test + real-producer legs on Linux). Closable now: installed-Linux
+`_viewed_files` recheck — done via `99b6598a` (platform-split test; POSIX
+twin asserts `returned_fact`, removing a latent unguarded Windows pin
+that skipped on CI). Deferrable, typed-failure-safe: real ENOSPC,
+index-side `cgroup_oom` (agent side proven; fail-closed fallback tested).
+Genuinely open: bounded-memory semantic analysis (needs the streaming
+migration — adapter paths still materialize full artifacts);
+benchmark-scale dense-ranking quality (needs real workload + predeclared
+metric; blocks only the stronger efficacy claim, not dispatch).
+
+**TB2:** reproductions on `dff90fd8`/`tb2/host-route-offline-repro` bind
+to `eval.gt_central_agent` on the `embed-bakeoff` central product line —
+absent from this branch by design. Verdict: DEFER (no cherry-pick; the
+matrix already names it a separate-repo track). Salvage taken: the one
+portable file's two xfails pin real phase5-side defects; porting
+`test_tb2_runtime_observation.py` (~10-line import change) is queued.
+Dangling ref found: `docs/AUDIT-ABILITY-SPEC.md` is referenced by tests
+and docs but exists on neither branch.
 
 ## Outcome claims
 
