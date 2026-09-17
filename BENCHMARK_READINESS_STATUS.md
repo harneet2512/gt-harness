@@ -1034,6 +1034,17 @@ route in `67cbf42e`; stale route-pin tests repointed in `1b0a0b5e`.
   no-plan→refusal chain.
 - `35178222629` dispatched on `e84d646b` — cohort must bind to the SHA
   carrying the fix.
+- **Fix `b02e06ca`** — residual submit-evasion class closed observably.
+  A marker assembled at runtime (`echo COMPLETE_' + 'TASK…`) never
+  matches `is_submit_command`'s text check, so the command executes and
+  lands on the advisory post-execution path — which journaled no gate
+  verdict at all (35168421439's audit hole: "no gate row" and "gate saw
+  clean evidence" were indistinguishable). `request_submit()`'s advisory
+  branch now runs a read-only consult through `decide()` journaled as
+  `plan_gate_decision` with `enforcement="post_terminal"` — no suite
+  recheck, no directive, no refusal counter, no suppression claim. Every
+  advisory submit, literal-marker or assembled, now carries a gate
+  verdict row an audit can read.
 
 Union-alpha smoke results cannot support solve-rate or token-efficiency
 claims; the free arm remains functional-verification only.
