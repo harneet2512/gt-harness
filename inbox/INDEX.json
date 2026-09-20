@@ -153,8 +153,9 @@
   "har83-final-hardening-producer-9d0d8079f",
   "har83-unified-source-1ecd03674",
   "har87-groundtruth-green-ci-193b9d93b",
-  "har90-certified-producer-f43783fc",
   "har90-certified-producer-56106068",
+  "har90-certified-producer-5681eeae",
+  "har90-certified-producer-f43783fc",
   "merge-har70-ff578719",
   "merge-har70-ff578719-v2",
   "merge-har76-701a8472",
@@ -435,7 +436,8 @@
   ],
   "HAR-90": [
    "har90-certified-producer-f43783fc",
-   "har90-certified-producer-56106068"
+   "har90-certified-producer-56106068",
+   "har90-certified-producer-5681eeae"
   ]
  }
 }
