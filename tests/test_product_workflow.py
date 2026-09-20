@@ -55,10 +55,15 @@ def test_only_closed_supported_workflow_set_is_active() -> None:
     # path: workflow_dispatch-only, approval-gated by its own input, and bound
     # to the manifest pins -- registered on main so dispatch resolves, and
     # admitted by name rather than by loosening the rule.
+    # `producer_build.yml` is the certified producer build: workflow_dispatch-
+    # only, pinned to an exact upstream source_commit, artifact-only output --
+    # the sanctioned path that re-issues producer identity on a commit move,
+    # admitted by name rather than by loosening the rule.
     assert active == [
         "deepswe_cache_images.yml",
         "deepswe_gt_harness_product.yml",
         "deepswe_gt_harness_product_p0731.yaml",
+        "producer_build.yml",
         "swelive_gt_harness_paid.yaml",
         "task_progress.yml",
         "tb2_cache_images.yml",
