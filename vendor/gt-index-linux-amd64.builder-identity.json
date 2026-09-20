@@ -1,0 +1,8 @@
+{
+  "builder_image_digest": "3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+  "go": "go version go1.22.5 linux/amd64",
+  "musl_gcc": "13",
+  "runner": "Linux-X64",
+  "runner_image_version": "20260907.300.1",
+  "schema": "gt.producer_builder.v1"
+}
