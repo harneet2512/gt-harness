@@ -1,0 +1,44 @@
+{
+  "basis": "certified_producer_build_green",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64-56106068f909dd64f20c8e10fbe85e6ce7cb6122",
+    "build_info_sha256": "45eece97459de3ac5b5a7feb01d9423b5ff6dafbccc352fdee0440e6fea30eb3",
+    "builder_image_digest": "3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "go test -tags sqlite_fts5 ./... (producer-src/gt-index) green",
+      "static musl build with compile-time identity stamp",
+      "no dynamic-library dependency (readelf gate)"
+    ],
+    "conclusion": "success",
+    "confidence": "high",
+    "jobs_green": [
+      "producer"
+    ],
+    "paid_dispatch": false,
+    "producer_sha256": "bfac0d2231b18bce5ea5997b32df6319a1903e02a39b9fd649bc84cb8b7d8869",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "0fe7fc9e5813874df0e26ff4c43887268cb730531c49b539e394485b3035682f",
+    "workflow": "producer_build.yml",
+    "workflow_repo": "harneet2512/gt-harness",
+    "workflow_run_id": 35486204032
+  },
+  "head_sha": "56106068f909dd64f20c8e10fbe85e6ce7cb6122",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "92a010d305ec898a33f66f88d3d9da51c23491ff100e2b93f48e072e471f2415",
+  "packet_id": "har90-certified-producer-56106068",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
