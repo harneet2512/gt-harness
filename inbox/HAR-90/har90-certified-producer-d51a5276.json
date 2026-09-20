@@ -1,0 +1,47 @@
+{
+  "basis": "certified_producer_build_green",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64-d51a527614e8457c371c08aa793ee9a1364eafe7",
+    "build_info_sha256": "9a23d4ead730d7de778dcb9bbe266be8d1e711039e67f4f0cfedc6a228af5497",
+    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "go build -tags sqlite_fts5 ./... green",
+      "go test -tags sqlite_fts5 ./... green, including internal/store nodes_fts",
+      "static musl build with compile-time identity stamp",
+      "vendored source reproduces the binary's declared source_fingerprint over 209 files"
+    ],
+    "conclusion": "success",
+    "confidence": "high",
+    "fixes": "carries d2e4a1c3 (native nodes_fts rebuild + publication-time docsize parity) onto the HAR-90 lineage; without it a graph indexes only the nodes present at the definitions pass and the consumer refuses it as nodes_fts_desynced",
+    "jobs_green": [
+      "build"
+    ],
+    "paid_dispatch": false,
+    "parent_source_commit": "5681eeae99fb272e7e12b68e624e6f293878be97",
+    "producer_sha256": "f8610e4d4c600cfcf9ae17f6f5ad6edbb4c6d36a88dddb8a30e49798f2cd7b42",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "3d7b48817d1f7b55688c850598111f1e13648b0ffffc292073c3a13c1df9ef54",
+    "workflow": "build_producer_linux.yml",
+    "workflow_repo": "harneet2512/groundtruth",
+    "workflow_run_id": 35532775998
+  },
+  "head_sha": "d51a527614e8457c371c08aa793ee9a1364eafe7",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "b32eb7f22ed3a394ac2e8527a62e7e5a364ea7b0edcfc2a8bce4f3b4c9b4630a",
+  "packet_id": "har90-certified-producer-d51a5276",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
