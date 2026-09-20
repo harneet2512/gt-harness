@@ -58,6 +58,13 @@ var (
 )
 
 func repoCommit(root string) string {
+	// Fast path: skip the git subprocess when the root is not a worktree. The
+	// incremental `-file` path is latency-sensitive and a spawn costs ~100ms+
+	// on Windows even when it can only fail. `.git` may be a directory OR a
+	// file (linked worktrees, submodules), so existence — not IsDir — gates.
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return ""
+	}
 	cmd := exec.Command("git", "-C", root, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
@@ -104,7 +111,7 @@ func setRequiredMetadata(db *store.DB, values map[string]string) error {
 
 // FINAL_ARCH_V2 schema contract.
 // Bump when edges/nodes columns change; Python readers gate on >= this.
-const schemaVersion = "v15.2-trust-tier"
+const schemaVersion = "v15.4-callsite-actuals"
 
 // fileParseResult holds the output of parsing a single file.
 type fileParseResult struct {
@@ -235,6 +242,7 @@ func vtaCallsiteMechanism(vtaCandidates, publishedCandidates []int64) string {
 func main() {
 	root := flag.String("root", ".", "Project root directory")
 	output := flag.String("output", "graph.db", "Output SQLite database path")
+	amendParent := flag.String("amend-parent", "", "Build a batch amendment from a closed parent graph into a distinct output")
 	maxFiles := flag.Int("max-files", 10000, "Maximum files to index")
 	workers := flag.Int("workers", 0, "Parallel parse workers (0 = NumCPU)")
 	file := flag.String("file", "", "Incremental mode: re-index only this single file (relative to -root) into an existing -output graph.db")
@@ -244,6 +252,9 @@ func main() {
 	frameworkValidation := flag.Bool("framework-validation", false, "Print the HAR-70 framework overlay validation report and exit")
 	inspectJSONL := flag.Bool("inspect-jsonl", false, "Parse caller-supplied source bytes as pure JSONL without graph mutation")
 	flag.Parse()
+	if *amendParent != "" && (*file != "" || *rebuildClosure) {
+		log.Fatal("amend-parent cannot be combined with file or rebuild-closure")
+	}
 	if *inspectJSONL {
 		if err := runInspectionJSONL(os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("inspect-jsonl: %v", err)
@@ -341,6 +352,11 @@ func main() {
 		}
 	}()
 	*output = stagedOutput
+	if *amendParent != "" {
+		if err := copyBatchParent(*amendParent, stagedOutput, requestedOutput); err != nil {
+			abortStagedBuild(nil, stagedOutput, "batch parent: %v", err)
+		}
+	}
 
 	// Open database
 	db, err := store.Open(stagedOutput)
@@ -380,6 +396,14 @@ func main() {
 	// Parse files in parallel
 	results := make([]*parser.ParseResult, len(files))
 	resultCh := make(chan fileParseResult, len(files))
+	cache := parser.ParseCache{Root: os.Getenv("GT_PARSE_CACHE_ROOT"), ProducerFingerprint: sourceFingerprint}
+	if cache.ProducerFingerprint == "" || cache.ProducerFingerprint == "unknown" {
+		if identity, err := currentBuildIdentity(); err == nil {
+			cache.ProducerFingerprint = identity.ExecutableSHA256
+		}
+	}
+	var cacheMu sync.Mutex
+	cacheHits := 0
 
 	var wg sync.WaitGroup
 	fileCh := make(chan int, len(files))
@@ -394,7 +418,12 @@ func main() {
 				// Mark test AND non-source (benchmark/example/fixture/docs/vendored)
 				// nodes is_test so their call edges stay OUT of the fact surface.
 				isTest := walker.IsTestFile(sf.Path) || walker.IsNonSourceFile(sf.Path)
-				result, err := parser.ParseFile(sf, isTest)
+				result, hit, err := cache.ParseFile(sf, isTest)
+				if hit {
+					cacheMu.Lock()
+					cacheHits++
+					cacheMu.Unlock()
+				}
 				resultCh <- fileParseResult{fileIdx: idx, result: result, err: err}
 			}
 		}()
@@ -414,6 +443,7 @@ func main() {
 
 	// Collect results and preserve parser failures in project_meta.
 	results, parseFailures, failSample := collectParseResults(files, resultCh)
+	fmt.Fprintf(os.Stderr, "  Parse cache: %d hits, %d misses\n", cacheHits, len(files)-cacheHits)
 
 	parseElapsed := time.Since(parseStart)
 	parsedOK := len(files) - parseFailures
@@ -450,6 +480,7 @@ func main() {
 	var allAssignments []parser.AssignmentRef
 	var allModDecls []parser.ModDecl
 	var allReExports []parser.ReExportRef
+	var allCFGs []parser.CFGFunc            // HAR-90 items 5-8: per-function statement CFGs
 	callerNodeIndexMap := make(map[int]int) // call index → global node index
 
 	globalNodeIdx := 0
@@ -487,6 +518,11 @@ func main() {
 		allImports = append(allImports, result.Imports...)
 		allModDecls = append(allModDecls, result.ModDecls...)
 		allReExports = append(allReExports, result.ReExports...)
+		for _, cf := range result.CFGs {
+			c := cf
+			c.NodeIdx = fileNodeStartIdx + cf.NodeIdx
+			allCFGs = append(allCFGs, c)
+		}
 		// PyCG Rule 1: collect variable assignments for type tracking
 		for _, asgn := range result.Assignments {
 			allAssignments = append(allAssignments, asgn)
@@ -505,9 +541,27 @@ func main() {
 
 	// Batch insert all nodes in one transaction
 	insertStart := time.Now()
-	nodeDBIDs, err := db.BatchInsertNodes(allNodePtrs)
+	batchIdentity, err := currentBuildIdentity()
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "batch producer identity: %v", err)
+	}
+	// Coupling reuse must be decided while the staged copy still holds the
+	// parent's project_meta: ReplaceParsedStructure clears it below. The check
+	// is the recorded history-window key, not the working tree — a disabled
+	// derived stage declines reuse so an amend with the layers off produces
+	// the same empty tables a fresh disabled build would.
+	var couplingReusePlan *couplingReuse
+	if *amendParent != "" {
+		if dopts, derr := resolveDerivedOptions(os.LookupEnv); derr == nil && dopts.Enabled {
+			couplingReusePlan = resolveCouplingReuse(db, *root)
+		}
+	}
+	nodeDBIDs, retainedNodes, divergedNodes, err := db.ReplaceParsedStructure(allNodePtrs, *amendParent != "", batchIdentity.ExecutableSHA256, couplingReusePlan != nil)
 	if err != nil {
 		abortStagedBuild(db, stagedOutput, "batch insert nodes: %v", err)
+	}
+	if *amendParent != "" {
+		fmt.Fprintf(os.Stderr, "  Batch structure: %d retained, %d inserted, %d inventory-diverged; one full resolver pass\n", retainedNodes, len(nodeDBIDs)-retainedNodes, divergedNodes)
 	}
 
 	// Fix up parent IDs: map global index → DB ID
@@ -783,6 +837,7 @@ func main() {
 			CandidateCount:     rc.CandidateCount,
 			EvidenceType:       rc.EvidenceType,
 			VerificationStatus: "unverified",
+			ActualArgs:         actualArgsJSON(allCalls, rc.CallsiteOrdinal),
 		}
 	}
 	// Phase 1 (core): the files and symbols are already durable, and the
@@ -842,11 +897,6 @@ func main() {
 			}
 		}
 	}
-	if len(containsPtrs) > 0 {
-		if err := db.BatchInsertEdges(containsPtrs); err != nil {
-			log.Printf("WARNING: containment edges: %v", err)
-		}
-	}
 
 	// Symbol taxonomy edges (item 11, delta row 9): DECLARED_IMPLEMENTS,
 	// OVERRIDES, DECORATES, RETURNS_TYPE and PARAM_TYPE, derived in
@@ -858,11 +908,11 @@ func main() {
 	// the nodes, their assigned ids and the property rows, which is what keeps
 	// this call site short.
 	taxonomyPtrs := taxonomy.DeriveEdges(allNodePtrs, nodeDBIDs, allProps)
-	if len(taxonomyPtrs) > 0 {
-		if err := db.BatchInsertEdges(taxonomyPtrs); err != nil {
-			log.Printf("WARNING: taxonomy edges: %v", err)
-		}
+	retainedStructuralEdges, divergedEdges, err := db.ReconcileParsedEdges(append(containsPtrs, taxonomyPtrs...))
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser edges: %v", err)
 	}
+	fmt.Fprintf(os.Stderr, "  Parser structural edges retained: %d\n", retainedStructuralEdges)
 
 	edgeElapsed := time.Since(edgeStart)
 	fmt.Fprintf(os.Stderr, "  Inserted %d CALLS + %d CONTAINS edges in %s\n", len(edgePtrs), len(containsPtrs), edgeElapsed.Round(time.Millisecond))
@@ -885,8 +935,9 @@ func main() {
 			})
 		}
 	}
-	if err := db.BatchInsertProperties(propPtrs); err != nil {
-		log.Printf("WARNING: batch insert properties: %v", err)
+	retainedProperties, divergedProperties, err := db.ReconcileParsedProperties(propPtrs)
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser properties: %v", err)
 	}
 
 	// Convert AssertionRefs to store.Assertion with target resolution
@@ -960,13 +1011,72 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Assertion targets resolved: %d/%d (%.0f%%)\n",
 			resolvedCount, len(assertPtrs), 100.0*float64(resolvedCount)/float64(len(assertPtrs)))
 	}
-	if err := db.BatchInsertAssertions(assertPtrs); err != nil {
-		log.Printf("WARNING: batch insert assertions: %v", err)
+	retainedAssertions, divergedAssertions, err := db.ReconcileParsedAssertions(assertPtrs)
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser assertions: %v", err)
 	}
 
 	propElapsed := time.Since(propStart)
-	fmt.Fprintf(os.Stderr, "  Inserted %d properties, %d assertions in %s\n",
+	fmt.Fprintf(os.Stderr, "  Parser facts retained: %d properties, %d assertions\n", retainedProperties, retainedAssertions)
+	fmt.Fprintf(os.Stderr, "  Reconciled %d properties, %d assertions in %s\n",
 		len(propPtrs), len(assertPtrs), propElapsed.Round(time.Millisecond))
+
+	// ── Pass 4a: CFG — statement-level control flow (HAR-90 items 5-8) ────
+	// Runs after resolution publish (publishAnalysisPhase above): the cfg_*
+	// rows are additive sidecars keyed on node ids that now exist. Raw
+	// blocks/edges/defs only — dominators and control dependence stay with
+	// the Python consumer.
+	cfgStart := time.Now()
+	cfgBlocks := make([]*store.CFGBlock, 0, 256)
+	cfgEdges := make([]*store.CFGEdge, 0, 256)
+	cfgDefs := make([]*store.CFGDef, 0, 128)
+	cfgUses := make([]*store.CFGUse, 0, 256)
+	for _, cf := range allCFGs {
+		if cf.NodeIdx < 0 || cf.NodeIdx >= len(nodeDBIDs) {
+			continue
+		}
+		nodeID := nodeDBIDs[cf.NodeIdx]
+		for _, blk := range cf.Blocks {
+			lines, _ := json.Marshal(blk.StatementLines)
+			cfgBlocks = append(cfgBlocks, &store.CFGBlock{
+				NodeID:         nodeID,
+				BlockIndex:     blk.Index,
+				Kind:           blk.Kind,
+				StartLine:      blk.StartLine,
+				EndLine:        blk.EndLine,
+				StatementLines: string(lines),
+			})
+		}
+		for _, e := range cf.Edges {
+			cfgEdges = append(cfgEdges, &store.CFGEdge{
+				NodeID:    nodeID,
+				FromBlock: e.From,
+				ToBlock:   e.To,
+				Label:     e.Label,
+			})
+		}
+		for _, d := range cf.Defs {
+			cfgDefs = append(cfgDefs, &store.CFGDef{
+				NodeID:     nodeID,
+				BlockIndex: d.BlockIndex,
+				VarName:    d.VarName,
+				Line:       d.Line,
+			})
+		}
+		for _, u := range cf.Uses {
+			cfgUses = append(cfgUses, &store.CFGUse{
+				NodeID:     nodeID,
+				BlockIndex: u.BlockIndex,
+				VarName:    u.VarName,
+				Line:       u.Line,
+			})
+		}
+	}
+	if err := db.ReplaceCFG(cfgBlocks, cfgEdges, cfgDefs, cfgUses); err != nil {
+		abortStagedBuild(db, stagedOutput, "persist CFG facts: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  CFG: %d blocks, %d edges, %d defs, %d uses across %d functions in %s\n",
+		len(cfgBlocks), len(cfgEdges), len(cfgDefs), len(cfgUses), len(allCFGs), time.Since(cfgStart).Round(time.Millisecond))
 
 	// ── Pass 4b: API EDGES — cross-service route matching ───────────────
 	apiStart := time.Now()
@@ -1054,7 +1164,7 @@ func main() {
 		abortStagedBuild(db, stagedOutput, "%v", derivedOptionsErr)
 	}
 	fmt.Fprintf(os.Stderr, "Pass 4g: deriving co-change, communities and processes...\n")
-	derived := runDerivedLayers(context.Background(), db, stagedOutput, *root, derivedOptions)
+	derived := runDerivedLayers(context.Background(), db, stagedOutput, *root, derivedOptions, couplingReusePlan)
 	fmt.Fprintf(os.Stderr, "  %s\n", derived.Summary())
 	if err := setRequiredMetadata(db, derived.Metadata); err != nil {
 		abortStagedBuild(db, stagedOutput, "%v", err)
@@ -1119,6 +1229,12 @@ func main() {
 	// is missing (= old binary) or older than the version the reader expects.
 	// Bump on every breaking edges/nodes schema change.
 	requiredMetadata["schema_version"] = schemaVersion
+	// Additive-substrate capability flags: each names a fact family this
+	// build persisted, letting consumers gate on capability rather than
+	// probing table existence. Older graphs simply lack the key.
+	requiredMetadata["capability_cfg_uses"] = "v1"
+	requiredMetadata["capability_callsite_actuals"] = "v1"
+	requiredMetadata["capability_access_receiver"] = "v1"
 	// RC-17 (F-003): forensics-grade provenance. commitSHA / buildTimeUTC
 	// / goToolchain are injected by the build script via -ldflags. With
 	// "unknown" defaults, callers can still distinguish a stamped binary
@@ -1252,11 +1368,23 @@ func main() {
 	importResolved := methodCounts["import"]
 	sameFileResolved := methodCounts["same_file"]
 	nameMatchResolved := methodCounts["name_match"]
-	fmt.Printf(`{"files":%d,"nodes":%d,"edges":%d,"imports":%d,"properties":%d,"assertions":%d,"edges_import":%d,"edges_same_file":%d,"edges_name_match":%d,"time_ms":%d,"workers":%d}`,
+	buildMode := "full"
+	if *amendParent != "" {
+		buildMode = "batch"
+	}
+	inventoryDiverged := divergedNodes + divergedEdges + divergedProperties + divergedAssertions
+	if inventoryDiverged > 0 {
+		fmt.Fprintf(os.Stderr, "  Parser inventory diverged entries healed: %d nodes, %d edges, %d properties, %d assertions\n",
+			divergedNodes, divergedEdges, divergedProperties, divergedAssertions)
+	}
+	fmt.Printf(`{"files":%d,"nodes":%d,"edges":%d,"imports":%d,"properties":%d,"assertions":%d,"edges_import":%d,"edges_same_file":%d,"edges_name_match":%d,"time_ms":%d,"workers":%d,"build_mode":%q,"parser_nodes_retained":%d,"parser_nodes_inserted":%d,"parse_cache_hits":%d,"parse_cache_misses":%d,"resolver_passes":1,"parser_properties_retained":%d,"parser_assertions_retained":%d,"parser_edges_retained":%d,"inventory_diverged":%d}`,
 		len(files), nodeCount, edgeCount, len(allImports),
 		propertyCount, assertionCount,
 		importResolved, sameFileResolved, nameMatchResolved,
-		elapsed.Milliseconds(), *workers)
+		elapsed.Milliseconds(), *workers, buildMode, retainedNodes,
+		len(nodeDBIDs)-retainedNodes, cacheHits, len(files)-cacheHits,
+		retainedProperties, retainedAssertions, retainedStructuralEdges,
+		inventoryDiverged)
 	fmt.Println()
 
 	// Fail-closed stays fail-closed: an operator who requires the analysis layer
@@ -1326,6 +1454,12 @@ func candidateVTAFactID(prefix, sourceID, callsiteID, targetStableID string) str
 //  11. Print one JSON line to stdout.
 func runIncremental(root, relpath, dbPath string) error {
 	startWall := time.Now()
+	timing := os.Getenv("GT_INCREMENTAL_TIMING") != ""
+	mark := func(label string) {
+		if timing {
+			fmt.Fprintf(os.Stderr, "[incr-timing] %-28s %dms\n", label, time.Since(startWall).Milliseconds())
+		}
+	}
 
 	// Step 1 — db must already exist.
 	if _, err := os.Stat(dbPath); err != nil {
@@ -1336,6 +1470,7 @@ func runIncremental(root, relpath, dbPath string) error {
 		return fmt.Errorf("open db: %w", err)
 	}
 	defer db.Close()
+	mark("open_db")
 
 	// Resolve language spec from extension. If unsupported, surface an error
 	// rather than silently no-op (caller intent was clearly to reindex this file).
@@ -1386,14 +1521,22 @@ func runIncremental(root, relpath, dbPath string) error {
 	if pr == nil {
 		pr = &parser.ParseResult{}
 	}
+	mark("parse_file")
 	repositoryRevision := repoCommit(root)
 	if repositoryRevision == "" {
 		repositoryRevision = "unversioned"
 	}
-	producerIdentity, err := currentBuildIdentity()
-	if err != nil {
-		return fmt.Errorf("compute producer identity for incremental receipt: %w", err)
-	}
+	mark("repo_commit")
+	// declaredBuildIdentity (not currentBuildIdentity): the incremental path is
+	// latency-sensitive, and hashing the 64MB executable on every `-file` reparse
+	// costs ~1s — longer than the rest of the pipeline combined. ExecutableSHA256
+	// is never consumed here: the sealed receipt binds BuildID only, and the v2
+	// rebind/unresolved-fact ids derive from BuildID + RepositoryRevision. The
+	// declared identity carries the same BuildID; the exe hash stays empty, and
+	// any future receipt() over this identity fails closed rather than minting a
+	// wrong provenance claim.
+	producerIdentity := declaredBuildIdentity()
+	mark("build_identity")
 	const incrementalAnalysisReason = "incremental_reindex_requires_full_analysis"
 	analysisPayload, analysisSHA, err := store.AnalysisPhaseReceipt{
 		Schema:             store.AnalysisPhaseReceiptSchema,
@@ -1422,6 +1565,7 @@ func runIncremental(root, relpath, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("read distinct files: %w", err)
 	}
+	mark("prefetch_nodes")
 
 	// Step 4 — BEGIN TRANSACTION wrapping steps 5–9.
 	tx, err := db.BeginTx()
@@ -1456,28 +1600,30 @@ func runIncremental(root, relpath, dbPath string) error {
 	if _, err := tx.Exec(`INSERT INTO project_meta(key,value) VALUES('graph_resolution_revision','stale') ON CONFLICT(key) DO UPDATE SET value='stale'`); err != nil {
 		return fmt.Errorf("bind stale graph resolution revision: %w", err)
 	}
-	// A single-file refresh cannot prove repository-wide candidate parity because
-	// callers in other files may depend on the changed identities. Remove the
-	// entire attached resolution overlay in this same transaction. Metadata-only
-	// invalidation is insufficient: direct SQL and generic graph readers do not
-	// necessarily consult project_meta before traversing nodes and edges.
-	if _, err := tx.Exec(`DELETE FROM edges WHERE type IN ('HAS_CALLSITE','CANDIDATE','CANDIDATE_TARGET','HAS_DERIVATION_FACT','HAS_COMPLETENESS_FACT','HAS_UNRESOLVED_FACT') OR (type='CALLS' AND callsite_stable_id IS NOT NULL)`); err != nil {
-		return fmt.Errorf("remove stale attached resolution edges: %w", err)
-	}
-	if _, err := tx.Exec(`DELETE FROM nodes WHERE node_type IN ('callsite','derivation_fact','completeness_fact','unresolved_fact') OR label='Callsite'`); err != nil {
-		return fmt.Errorf("remove stale attached resolution nodes: %w", err)
-	}
-
-	// Step 4.5 — snapshot incoming cross-file edges BEFORE delete. These get
-	// stripped by the upcoming target_id-based DELETE; without this snapshot
-	// they'd be lost permanently because re-parsing this file does NOT
-	// re-emit the calls that originate in other files. Self-edges (within
-	// this same file) are excluded from the snapshot — they'll be re-emitted
-	// naturally when the parser re-runs over this file's body.
+	// The attached resolution overlay is torn down FILE-SCOPED, not wholesale:
+	// a single-file refresh cannot re-derive other files' callsites, but wiping
+	// every callsite in the graph both loses cross-file candidate evidence that
+	// could be rebound and — when a v2 edge type is missed by the delete list —
+	// leaves edges pointing at deleted callsite nodes (the orphan bug). The
+	// reparsed file's OWN callsite/fact overlay dies inside
+	// DeleteFileEdgesAndNodesTx (every node with file_path=F goes, and edges are
+	// deleted on node membership, which covers the source_file='' fact links).
+	// Cross-file CANDIDATE_TARGET/SELECTED_TARGET edges INTO the reparsed file
+	// are carved out of that delete and rebound in place by
+	// RebindIncomingV2EdgesTx — their target_symbol_id is a content-derived
+	// stable identity, not a row id. What cannot be rebound is deleted and
+	// recorded as an UnresolvedFact on the owning callsite — a dropped
+	// resolution is a fact, never a dangling edge.
 	incomingSnap, err := store.SnapshotIncomingEdgesTx(tx, relSlash, 0)
 	if err != nil {
 		return err
 	}
+	incomingV2Snap, err := store.SnapshotIncomingV2EdgesTx(tx, relSlash)
+	if err != nil {
+		return err
+	}
+
+	mark("snapshot_incoming")
 
 	// Steps 5+6 — delete edges (both directions), then nodes, for this file.
 	edgesDeleted, nodesDeleted, err := store.DeleteFileEdgesAndNodesTx(tx, relSlash)
@@ -1485,6 +1631,7 @@ func runIncremental(root, relpath, dbPath string) error {
 		return err
 	}
 	_ = nodesDeleted // captured for diagnostics; not surfaced beyond this scope
+	mark("delete_file")
 
 	// Step 8 — insert this file's new nodes, then resolve+insert its outgoing edges.
 	newNodePtrs := make([]*store.Node, len(pr.Nodes))
@@ -1599,9 +1746,11 @@ func runIncremental(root, relpath, dbPath string) error {
 		}
 		inhFiles = append(inhFiles, walker.SourceFile{Path: fp, Language: lang})
 	}
+	mark("build_indexes")
 	if inhMap := buildInheritanceMap(inhFiles, root, nameIndex, nodeMeta); len(inhMap) > 0 {
 		resolver.SetInheritanceMap(inhMap)
 	}
+	mark("inheritance_map")
 
 	// T1 on the incremental path: build the declared-type receiver index from the
 	// reparsed file's `param` properties (NodeIdx -> pr.Nodes, parallel to newDBIDs),
@@ -1625,7 +1774,9 @@ func runIncremental(root, relpath, dbPath string) error {
 		resolver.SetReturnShapeIndex(resolver.BuildReturnShapeIndex(pr.Properties, newDBIDs, classNames))
 	}
 
+	mark("prop_indexes")
 	resolved := resolver.Resolve(pr.Calls, nameIndex, fileIndex, callerDBIDs, pr.Imports, fileMap, nodeMeta)
+	mark("resolve_calls")
 	edgePtrs := make([]*store.Edge, len(resolved))
 	for i, rc := range resolved {
 		edgePtrs[i] = &store.Edge{
@@ -1640,11 +1791,13 @@ func runIncremental(root, relpath, dbPath string) error {
 			CandidateCount:     rc.CandidateCount,
 			EvidenceType:       rc.EvidenceType,
 			VerificationStatus: "unverified",
+			ActualArgs:         actualArgsJSON(pr.Calls, rc.CallsiteOrdinal),
 		}
 	}
 	if err := store.BatchInsertEdgesTx(tx, edgePtrs); err != nil {
 		return fmt.Errorf("insert new edges: %w", err)
 	}
+	mark("insert_edges")
 	// This transaction only re-resolves the edited file. Other callsites may
 	// depend on symbols whose identity changed, so the attached overlay remains
 	// absent until a subsequent full build restores repository-wide authority.
@@ -1678,6 +1831,60 @@ func runIncremental(root, relpath, dbPath string) error {
 	}
 	if err := store.BatchInsertPropertiesTx(tx, propPtrs); err != nil {
 		return fmt.Errorf("insert properties: %w", err)
+	}
+	mark("insert_props_fts")
+	// HAR-90 items 5-8: re-emit the reparsed file's CFG rows. The old rows
+	// were deleted by DeleteFileEdgesAndNodesTx upstream (keyed on node_id via
+	// the file-membership subquery); fresh node ids exist via newDBIDs.
+	{
+		var cfgBlocks []*store.CFGBlock
+		var cfgEdges []*store.CFGEdge
+		var cfgDefs []*store.CFGDef
+		var cfgUses []*store.CFGUse
+		for _, cf := range pr.CFGs {
+			if cf.NodeIdx < 0 || cf.NodeIdx >= len(newDBIDs) {
+				continue
+			}
+			nodeID := newDBIDs[cf.NodeIdx]
+			for _, blk := range cf.Blocks {
+				lines, _ := json.Marshal(blk.StatementLines)
+				cfgBlocks = append(cfgBlocks, &store.CFGBlock{
+					NodeID:         nodeID,
+					BlockIndex:     blk.Index,
+					Kind:           blk.Kind,
+					StartLine:      blk.StartLine,
+					EndLine:        blk.EndLine,
+					StatementLines: string(lines),
+				})
+			}
+			for _, e := range cf.Edges {
+				cfgEdges = append(cfgEdges, &store.CFGEdge{
+					NodeID:    nodeID,
+					FromBlock: e.From,
+					ToBlock:   e.To,
+					Label:     e.Label,
+				})
+			}
+			for _, d := range cf.Defs {
+				cfgDefs = append(cfgDefs, &store.CFGDef{
+					NodeID:     nodeID,
+					BlockIndex: d.BlockIndex,
+					VarName:    d.VarName,
+					Line:       d.Line,
+				})
+			}
+			for _, u := range cf.Uses {
+				cfgUses = append(cfgUses, &store.CFGUse{
+					NodeID:     nodeID,
+					BlockIndex: u.BlockIndex,
+					VarName:    u.VarName,
+					Line:       u.Line,
+				})
+			}
+		}
+		if err := store.InsertCFGTx(tx, cfgBlocks, cfgEdges, cfgDefs, cfgUses); err != nil {
+			return fmt.Errorf("insert cfg facts: %w", err)
+		}
 	}
 	// Build cross-file indexes for assertion resolution using ALL nodes
 	// (filteredNodes already contains all DB nodes minus stale file + fresh nodes)
@@ -1753,11 +1960,35 @@ func runIncremental(root, relpath, dbPath string) error {
 
 	// Step 8.5 — re-resolve the incoming-edge snapshot against the freshly
 	// inserted nodes. Edges whose target name no longer exists in this file
-	// (rename/removal) are dropped silently and counted in `incomingUnres`.
-	incomingRest, incomingUnres, err := store.ResolveIncomingEdgesTx(tx, incomingSnap, relSlash)
+	// (rename/removal) are dropped, counted in `incomingUnres`, and recorded
+	// as UnresolvedFact nodes on the surviving source symbol (never silent).
+	mark("cfg_assertions")
+	incrIdentity := store.GraphCompletionIdentity{
+		Schema: store.GraphCompletionSchema, RepositoryRevision: repositoryRevision,
+		BuildInfoSchema: producerIdentity.Schema, BuildID: producerIdentity.BuildID,
+		GitCommit: producerIdentity.GitCommit, BuildTimeUTC: producerIdentity.BuildTimeUTC,
+		SourceFingerprint: producerIdentity.SourceFingerprint, ExecutableSHA256: producerIdentity.ExecutableSHA256,
+		GoToolchain: producerIdentity.GoToolchain, BuildTags: producerIdentity.BuildTags,
+		GraphSchemaVersion: producerIdentity.SchemaVersion, ResolutionContract: store.CallResolutionContractV2,
+		Complete: producerIdentity.Complete,
+	}
+	incomingRest, incomingUnres, err := store.ResolveIncomingEdgesTx(tx, incomingSnap, relSlash, incrIdentity)
 	if err != nil {
 		return fmt.Errorf("re-resolve incoming edges: %w", err)
 	}
+	mark("restore_incoming")
+	// Rebind the surviving callsites' resolution-v2 edges (CANDIDATE_TARGET /
+	// SELECTED_TARGET) onto this file's new node ids. Unrebindable edges are
+	// deleted and recorded as unresolved facts on their owning callsites — the
+	// count surfaces in incoming_unresolved beside the core-edge drops.
+	v2Restored, v2Unres, err := store.RebindIncomingV2EdgesTx(tx, incomingV2Snap, relSlash, newNodePtrs, newDBIDs, incrIdentity)
+	if err != nil {
+		return fmt.Errorf("rebind incoming v2 edges: %w", err)
+	}
+	incomingRest += v2Restored
+	incomingUnres += v2Unres
+
+	mark("rebind_v2")
 
 	// Step 9 — record new content hash inside the same tx.
 	if err := store.InsertFileHashTx(tx, relSlash, newHash, spec.Name); err != nil {
@@ -1769,6 +2000,7 @@ func runIncremental(root, relpath, dbPath string) error {
 		return fmt.Errorf("commit: %w", err)
 	}
 	committed = true
+	mark("commit")
 
 	// Step 10.5 — re-converge depth edges (inv-7). DeleteFileEdgesAndNodesTx stripped
 	// this file's outbound promote_% edges and ResolveImportsTx re-emitted only IMPORTS
@@ -1781,6 +2013,7 @@ func runIncremental(root, relpath, dbPath string) error {
 	if _, promErr := resolver.PromotePropertyEdges(db); promErr != nil {
 		log.Printf("WARNING: incremental property->edge promotion: %v", promErr)
 	}
+	mark("promote_edges")
 
 	// Stamp schema_version + indexer provenance on every incremental run.
 	// The full-index path (Pass 5) writes these in project_meta, but an older
@@ -1795,16 +2028,19 @@ func runIncremental(root, relpath, dbPath string) error {
 		return err
 	}
 
+	mark("set_meta")
 	// Refresh FTS5 index after incremental node changes so BM25 queries
 	// stay current. Same call as the full-index path (idempotent).
 	if err := db.PopulateFTS5(); err != nil {
 		log.Printf("[WARN] FTS5 refresh after incremental reindex: %v", err)
 	}
+	mark("populate_fts5")
 	// RC-04: fold WAL frames into the main DB file immediately so concurrent
 	// readers (gt_query/gt_search/gt_navigate/gt_validate) never see a partial
 	// WAL after a SIGKILL between commits. The per-file incremental path is
 	// the only writer that overlaps with reader processes in practice.
 	db.CheckpointWAL()
+	mark("checkpoint_wal")
 
 	// Step 11 — JSON line on stdout. nodes_replaced = inserted count;
 	// edges_replaced = max(deleted, inserted) edges so callers see the size of
@@ -1826,6 +2062,21 @@ func runIncremental(root, relpath, dbPath string) error {
 // readers via project_meta.min_confidence. Falls back to 0.5 (parity with
 // gt_intel.MIN_CONFIDENCE in the brief layer) on empty input so the floor
 // never collapses to 0 on tiny / failed indexes.
+// actualArgsJSON renders the callsite's parser-exact top-level argument
+// texts as a JSON array for edges.actual_args. CallsiteOrdinal indexes the
+// same allCalls slice the resolver consumed; an out-of-range ordinal or an
+// arg-free call persists NULL (consumers keep the text-splitting fallback).
+func actualArgsJSON(calls []parser.CallRef, ord int) string {
+	if ord < 0 || ord >= len(calls) || len(calls[ord].ArgumentTexts) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(calls[ord].ArgumentTexts)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func computeMedianConfidence(rcs []resolver.ResolvedCall) float64 {
 	if len(rcs) == 0 {
 		return 0.5
@@ -1987,11 +2238,41 @@ func resolveAssertionTarget(
 		}
 	}
 
-	// Pick winner: highest score, break ties by lowest nodeID for determinism
+	// Pick winner: highest score, ties break on the CONTENT key (file_path,
+	// start_line, id) — not lowest nodeID. Node ids are AUTOINCREMENT artifacts
+	// a batch amend rewrites (the edited file's nodes re-enter at the top of the
+	// id space), so `id < best` flipped the winner between an amend and a full
+	// rebuild. The id→node map is built lazily, only when a tie needs it.
+	var nodeByID map[int64]*store.Node
+	contentLess := func(a, b int64) bool {
+		if nodeByID == nil {
+			nodeByID = make(map[int64]*store.Node, len(allNodes))
+			for i, n := range allNodes {
+				if i < len(nodeDBIDs) && n != nil {
+					nodeByID[nodeDBIDs[i]] = n
+				}
+			}
+		}
+		na, nb := nodeByID[a], nodeByID[b]
+		fa, fb, la, lb := "", "", 0, 0
+		if na != nil {
+			fa, la = na.FilePath, na.StartLine
+		}
+		if nb != nil {
+			fb, lb = nb.FilePath, nb.StartLine
+		}
+		if fa != fb {
+			return fa < fb
+		}
+		if la != lb {
+			return la < lb
+		}
+		return a < b
+	}
 	var bestID int64
 	var bestScore float64
 	for id, score := range candidates {
-		if score > bestScore || (score == bestScore && (bestID == 0 || id < bestID)) {
+		if score > bestScore || (score == bestScore && (bestID == 0 || contentLess(id, bestID))) {
 			bestScore = score
 			bestID = id
 		}
@@ -2067,11 +2348,12 @@ func resolveAssertionTarget(
 					}
 				}
 			}
-			// Pick best rescue candidate, threshold 2.0
+			// Pick best rescue candidate, threshold 2.0 — same CONTENT-keyed
+			// tie-break as the main pass (id order is not amend-stable).
 			var rescueBestID int64
 			var rescueBestScore float64
 			for id, score := range rescueCandidates {
-				if score > rescueBestScore || (score == rescueBestScore && (rescueBestID == 0 || id < rescueBestID)) {
+				if score > rescueBestScore || (score == rescueBestScore && (rescueBestID == 0 || contentLess(id, rescueBestID))) {
 					rescueBestScore = score
 					rescueBestID = id
 				}
@@ -2429,21 +2711,45 @@ func buildInheritanceMap(files []walker.SourceFile, root string, nameIndex map[s
 		if !ok {
 			return 0
 		}
-		for _, id := range ids {
+		isClass := func(id int64) (resolver.NodeMeta, bool) {
 			m, ok := nodeMeta[id]
-			if ok && (m.Label == "Class" || m.Label == "Struct" || m.Label == "Interface") {
-				if m.File == filePath {
-					return id
-				}
+			return m, ok && (m.Label == "Class" || m.Label == "Struct" || m.Label == "Interface")
+		}
+		// Same-file first: the content-smallest (start_line, id) class in THIS
+		// file — not first-in-slice. The nameIndex slice order is insertion
+		// order, which a batch amend / -file reindex turns into id-space order
+		// (the edited file's nodes re-enter at the top of AUTOINCREMENT), so a
+		// first-found pick flipped the resolved parent between an amend and a
+		// full rebuild.
+		best := int64(0)
+		var bm resolver.NodeMeta
+		for _, id := range ids {
+			m, ok := isClass(id)
+			if !ok || m.File != filePath {
+				continue
+			}
+			if best == 0 || m.StartLine < bm.StartLine ||
+				(m.StartLine == bm.StartLine && id < best) {
+				best, bm = id, m
 			}
 		}
+		if best != 0 {
+			return best
+		}
+		// Cross-file fallback: the content-smallest (file, start_line, id) class
+		// carrying the name — identical under an amend and a rebuild.
 		for _, id := range ids {
-			m, ok := nodeMeta[id]
-			if ok && (m.Label == "Class" || m.Label == "Struct" || m.Label == "Interface") {
-				return id
+			m, ok := isClass(id)
+			if !ok {
+				continue
+			}
+			if best == 0 || m.File < bm.File ||
+				(m.File == bm.File &&
+					(m.StartLine < bm.StartLine || (m.StartLine == bm.StartLine && id < best))) {
+				best, bm = id, m
 			}
 		}
-		return 0
+		return best
 	}
 
 	for _, sf := range files {

@@ -1,5 +1,5 @@
 {
-  "builder_image_digest": "3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+  "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
   "go": "go version go1.22.5 linux/amd64",
   "musl_gcc": "13",
   "runner": "Linux-X64",

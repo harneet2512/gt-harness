@@ -1,6 +1,8 @@
 package resolver
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -52,6 +54,14 @@ import (
 //                      existing CALLS edge (§2.6 line 262: "on CALLS.metadata ... Not a standalone edge";
 //                      adaptix: 725/774=93.7% of segments ride an existing CALLS edge -> annotation, ~49
 //                      no-CALLS hops -> standalone). Mirrors USES exactly (0 standalone where CALLS exists).
+//
+// READS/WRITES additionally carry a statement-level substrate in the additive
+// `edges.access_sites` column (JSON): the field (still == metadata, byte-exact),
+// the access kind, the primary access line (== source_line), the enclosing
+// method's node id + published stable id when one exists, and `sites` — every
+// (field,line) access row edge-dedup collapsed into the single edge. This is the
+// producer-side surface a statement-level consumer (a def-site->use-site join)
+// reads; `metadata` itself is untouched.
 //
 // Target resolution reuses the relationships.go pattern: a name+file(+line) index
 // built from the `nodes` table, prefer-same-file then global first-match.
@@ -142,9 +152,21 @@ type promoteIndexes struct {
 	// BuildFieldTypeIndex). PRECEDES receiver-type resolution reads this to turn a
 	// `self.<field>` receiver into the field's declared class.
 	fieldTypes map[int64]map[string]string
-	// classByName: typeName -> classNodeID (first writer wins, id-ordered), for
-	// resolving a declared receiver TYPE name to its class node when gating PRECEDES.
+	// classByName: typeName -> classNodeID — the CONTENT-smallest (file_path,
+	// start_line, id) class carrying the name, NOT first-writer on the id-ordered
+	// scan: a batch amend re-enters the edited file's nodes at the top of the
+	// AUTOINCREMENT space, so smallest-id names a different class under an amend
+	// than under a full rebuild. Used to turn a receiver TYPE name into the class
+	// node for PRECEDES receiver-type gating.
 	classByName map[string]int64
+	// stableIDs: nodeID -> the node's published stable identity, when one exists
+	// (nodes.stable_id, else the resolution_symbols sidecar keyed by
+	// native_id = nodes.id — the same fallback join process.go readStableIDs
+	// uses; on a real graph parsed symbol nodes carry stable_id NULL while
+	// resolution_symbols holds it). READS/WRITES access-site metadata stamps it
+	// as the enclosing method's rebuild-invariant scope identity
+	// (scope_stable_id); absent -> the key is omitted, never fabricated.
+	stableIDs map[int64]string
 }
 
 type fnlKey struct {
@@ -158,10 +180,11 @@ type fnlKey struct {
 var (
 	// 'partner:<name>@file:<line>|sig:...'  (CO_SERIALIZES)
 	serdePartnerRe = regexp.MustCompile(`^partner:([^@]+)@file:(\d+)`)
-	// 'reads: <prefix>.<field> [<ctx>]'  (READS) — capture the trailing field.
-	fieldReadRe = regexp.MustCompile(`^reads:\s*[A-Za-z_][\w.]*\.(\w+)`)
+	// 'reads: <recv>.<field> [<ctx>]'  (READS) — capture receiver chain AND the
+	// trailing field so the access-site payload can carry receiver identity.
+	fieldReadRe = regexp.MustCompile(`^reads:\s*([A-Za-z_][\w.]*)\.(\w+)`)
 	// 'mutates: <recv>.<field> = ...'  (WRITES)
-	fieldWriteRe = regexp.MustCompile(`^mutates:\s*[A-Za-z_][\w]*\.(\w+)`)
+	fieldWriteRe = regexp.MustCompile(`^mutates:\s*([A-Za-z_][\w]*)\.(\w+)`)
 	// 'WHEN ...: raise <Type>(...)'  (RAISES from exception_flow, Python). Capture the
 	// FULL dotted token (`[\w.]*`) so a qualified name (errors.New) reaches the drop-dotted
 	// guard intact instead of being silently truncated to its module prefix.
@@ -283,10 +306,14 @@ func PromotePropertyEdges(db *store.DB) (int, error) {
 	if err := promoteSerde(db, idx, addEdge); err != nil {
 		return 0, err
 	}
-	if err := promoteFieldReads(db, idx, addEdge); err != nil {
+	// READS/WRITES additionally return their per-edge access-site payloads (the
+	// statement-level rows edge dedup collapsed); keyed by the same edgeKey.
+	readSites, err := promoteFieldReads(db, idx, addEdge)
+	if err != nil {
 		return 0, err
 	}
-	if err := promoteWrites(db, idx, addEdge); err != nil {
+	writeSites, err := promoteWrites(db, idx, addEdge)
+	if err != nil {
 		return 0, err
 	}
 	if err := promoteRaises(db, idx, addEdge); err != nil {
@@ -304,6 +331,23 @@ func PromotePropertyEdges(db *store.DB) (int, error) {
 	dataFlowStandalone, err := promoteDataFlowStandalone(db, idx, addEdge)
 	if err != nil {
 		return 0, err
+	}
+
+	// Stamp the access-site payloads onto the minted READS/WRITES edges. The map
+	// key is the dedup edgeKey, so an entry applies only to an edge that was
+	// actually emitted; a payload whose edge never minted (non-invention drop)
+	// simply goes unused.
+	for _, e := range edges {
+		var payload string
+		switch e.Type {
+		case "READS":
+			payload = readSites[edgeKey{sourceID: e.SourceID, targetID: e.TargetID, typ: e.Type}]
+		case "WRITES":
+			payload = writeSites[edgeKey{sourceID: e.SourceID, targetID: e.TargetID, typ: e.Type}]
+		}
+		if payload != "" {
+			e.AccessSites = payload
+		}
 	}
 
 	// 4) Persist the new edges (additive — properties untouched).
@@ -348,6 +392,7 @@ func buildPromoteIndexes(db *store.DB) (*promoteIndexes, error) {
 		classFields: make(map[int64]map[string]bool),
 		fieldTypes:  make(map[int64]map[string]string),
 		classByName: make(map[string]int64),
+		stableIDs:   make(map[int64]string),
 	}
 
 	tx, err := db.BeginTx()
@@ -381,11 +426,20 @@ func buildPromoteIndexes(db *store.DB) (*promoteIndexes, error) {
 		if _, ok := idx.fnl[k]; !ok {
 			idx.fnl[k] = m.ID
 		}
-		// classByName: a class/struct/enum/interface name -> its node id (first
-		// writer wins, id-ordered scan). Used to turn a receiver TYPE name into the
-		// class node for PRECEDES receiver-type gating.
+		// classByName: a class/struct/enum/interface name -> its node id. Keep the
+		// CONTENT-smallest (file_path, start_line, id) candidate — first-writer on
+		// this id-ordered scan is not stable: a batch amend re-inserts the edited
+		// file's nodes at the top of the AUTOINCREMENT id space, so the named
+		// class flipped between an amend and a full rebuild. (idx.byID already
+		// holds the incumbent — it was populated in its own iteration.)
 		if classLabels[m.Label] {
-			if _, ok := idx.classByName[m.Name]; !ok {
+			cur, seen := idx.classByName[m.Name]
+			if !seen {
+				idx.classByName[m.Name] = m.ID
+			} else if pm, ok := idx.byID[cur]; ok &&
+				(m.FilePath < pm.FilePath ||
+					(m.FilePath == pm.FilePath &&
+						(m.Line < pm.Line || (m.Line == pm.Line && m.ID < pm.ID)))) {
 				idx.classByName[m.Name] = m.ID
 			}
 		}
@@ -426,7 +480,56 @@ func buildPromoteIndexes(db *store.DB) (*promoteIndexes, error) {
 	}
 	cfRows.Close()
 
+	// stableIDs (optional enrichment for the READS/WRITES site payload): a node's
+	// published stable identity lives in nodes.stable_id when the producer stamps
+	// it, else in the resolution_symbols sidecar keyed by native_id = nodes.id
+	// (the readStableIDs fallback join). Both probes are content-gated — an old
+	// graph.db missing either surface simply yields no scope_stable_id key.
+	if promoteColumnExists(tx, "nodes", "stable_id") {
+		sidSQL := `SELECT id, COALESCE(stable_id, '') FROM nodes`
+		if promoteTableExists(tx, "resolution_symbols") {
+			sidSQL = `SELECT n.id, COALESCE(NULLIF(n.stable_id, ''), rs.stable_id, '')
+			          FROM nodes n
+			          LEFT JOIN resolution_symbols rs
+			                 ON CAST(rs.native_id AS INTEGER) = n.id`
+		}
+		if sidRows, err := tx.Query(sidSQL); err == nil {
+			for sidRows.Next() {
+				var nid int64
+				var sid string
+				if err := sidRows.Scan(&nid, &sid); err != nil {
+					continue
+				}
+				if sid != "" {
+					idx.stableIDs[nid] = sid
+				}
+			}
+			sidRows.Close()
+		}
+	}
+
 	return idx, nil
+}
+
+// promoteTableExists / promoteColumnExists probe sqlite_master /
+// pragma_table_info so optional enrichment surfaces degrade to absence on an
+// old graph.db instead of erroring the whole pass (correct-or-quiet).
+func promoteTableExists(tx *sql.Tx, table string) bool {
+	var n int
+	if err := tx.QueryRow(
+		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
+}
+
+func promoteColumnExists(tx *sql.Tx, table, column string) bool {
+	var n int
+	if err := tx.QueryRow(
+		`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, table, column).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }
 
 // parseClassFieldType extracts (fieldName, typeName) from a class_field property
@@ -564,12 +667,7 @@ func promoteSerde(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error {
 		if tgt == 0 {
 			// Partner may live in another file — accept any file with that
 			// (name,line) pair, still EXACT on name+line (non-invention safe).
-			for k, id := range idx.fnl {
-				if k.name == partnerName && k.line == partnerLine {
-					tgt = id
-					break
-				}
-			}
+			tgt = idx.fnlAnyFile(partnerName, partnerLine)
 		}
 		if tgt == 0 {
 			return // partner unresolved -> stays a property
@@ -579,17 +677,165 @@ func promoteSerde(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error {
 	})
 }
 
+// fnlAnyFile resolves an exact (name, line) pair in ANY file — the content-
+// smallest (file_path, id) match. idx.fnl is a Go map: ranging it is run-order-
+// dependent (the previous `for k, id := range idx.fnl { ...; break }` picked a
+// random same-named match), and the ids it stores are AUTOINCREMENT values that
+// renumber when a batch amend re-inserts the edited file's nodes at the top of
+// the id space. (file_path, id) is the content key — identical under an amend
+// and a full rebuild, deterministic across runs. fnl is keyed by (file, name,
+// line), so two surviving matches always differ in file.
+func (idx *promoteIndexes) fnlAnyFile(name string, line int) int64 {
+	best := int64(0)
+	bestFile := ""
+	for k, id := range idx.fnl {
+		if k.name != name || k.line != line {
+			continue
+		}
+		if best == 0 || k.file < bestFile || (k.file == bestFile && id < best) {
+			best, bestFile = id, k.file
+		}
+	}
+	return best
+}
+
+// ---------------------------------------------------------------------------
+// READS/WRITES access-site substrate (statement-level identity for a
+// def-site->use-site join).
+//
+// The edge itself is SYMBOL-level (method -> owning class) and its `metadata`
+// column MUST stay the bare field name — contract_map.py matches it byte-exact
+// (`e.metadata = ?`) and promote_test's assertTier does too — so the
+// statement-level payload rides in the additive `access_sites` column instead
+// (JSON object, the api_edges.go convention):
+//
+//   {"v":1,"field":"count","access":"read","line":6,
+//    "scope_node_id":14,"scope_name":"validate",
+//    "scope_stable_id":"<node stable id, omitted when none is published>",
+//    "sites":[{"field":"count","line":6},{"field":"size","line":7}]}
+//
+// Edge dedup (edgeKey = source,target,type) collapses EVERY field_read /
+// side_effect row of a (method,class) pair into ONE edge — including DIFFERENT
+// fields of the same class and, for writes, repeated writes of one field. The
+// surviving row is the first in forEachProperty's content order
+// (node_id, value, line, id); the accumulator mirrors that first-writer-wins
+// pick for the payload's top-level field/line and records EVERY row as a site,
+// so the deduped edge still carries its full statement-level footprint.
+// `sites` is sorted (line, field) and exact (field,line) duplicates collapse —
+// deterministic across runs regardless of parse-worker insertion order.
+//
+// `column` is genuinely ABSENT at this layer: the parser records only
+// node.StartPoint().Row into PropertyRef.Line (the `properties` table has no
+// column field), so nothing per-site can be reported but the access line —
+// never fabricated.
+// ---------------------------------------------------------------------------
+
+// accessSiteEntry is one captured field access: the field touched, the
+// statement line it happens on, and the receiver chain it was read/written
+// through (``self``/``this``/named receiver — empty only when the producer
+// could not name one).
+type accessSiteEntry struct {
+	Field    string `json:"field"`
+	Line     int    `json:"line"`
+	Receiver string `json:"receiver,omitempty"`
+}
+
+// edgeAccessMeta is the JSON payload written to edges.access_sites on a
+// promoted READS/WRITES edge.
+type edgeAccessMeta struct {
+	V             int               `json:"v"`             // payload schema marker
+	Field         string            `json:"field"`         // == edges.metadata (first-writer-wins field)
+	Access        string            `json:"access"`        // "read" (READS) / "write" (WRITES)
+	Line          int               `json:"line"`          // == edges.source_line (primary access line)
+	ScopeNodeID   int64             `json:"scope_node_id"` // == edges.source_id (enclosing method)
+	ScopeName     string            `json:"scope_name"`    // enclosing method name
+	ScopeStableID string            `json:"scope_stable_id,omitempty"`
+	Receiver      string            `json:"receiver,omitempty"` // primary site's receiver chain
+	Sites         []accessSiteEntry `json:"sites"`
+}
+
+// accessSiteAccum accumulates the per-row access sites that edge dedup
+// collapses into one promoted edge. add() must be called AFTER the addEdge
+// call it shadows, once per candidate row.
+type accessSiteAccum struct {
+	byKey map[edgeKey]*edgeAccessMeta
+	seen  map[edgeKey]map[accessSiteEntry]bool
+}
+
+func newAccessSiteAccum() *accessSiteAccum {
+	return &accessSiteAccum{
+		byKey: make(map[edgeKey]*edgeAccessMeta),
+		seen:  make(map[edgeKey]map[accessSiteEntry]bool),
+	}
+}
+
+// add records one access row for key. The FIRST row in stream order becomes the
+// primary (field/line/scope) — the same row add()'s first-writer-wins dedup
+// mints the edge from, since forEachProperty streams a fixed content order and
+// add() marks the key seen on that first call.
+func (a *accessSiteAccum) add(key edgeKey, field, access, receiver string, line int, src promoteNodeMeta) {
+	m, ok := a.byKey[key]
+	if !ok {
+		m = &edgeAccessMeta{
+			V:           2,
+			Field:       field,
+			Access:      access,
+			Line:        line,
+			ScopeNodeID: src.ID,
+			ScopeName:   src.Name,
+			Receiver:    receiver,
+		}
+		a.byKey[key] = m
+	}
+	e := accessSiteEntry{Field: field, Line: line, Receiver: receiver}
+	if a.seen[key] == nil {
+		a.seen[key] = make(map[accessSiteEntry]bool)
+	}
+	if !a.seen[key][e] {
+		a.seen[key][e] = true
+		m.Sites = append(m.Sites, e)
+	}
+}
+
+// marshal renders each accumulated edge's payload as a deterministic JSON
+// object (struct field order is fixed; sites are sorted by (line, field);
+// scope_stable_id is stamped from idx.stableIDs when the enclosing method has a
+// published stable identity, else omitted).
+func (a *accessSiteAccum) marshal(idx *promoteIndexes) map[edgeKey]string {
+	out := make(map[edgeKey]string, len(a.byKey))
+	for key, m := range a.byKey {
+		if sid := idx.stableIDs[m.ScopeNodeID]; sid != "" {
+			m.ScopeStableID = sid
+		}
+		sort.Slice(m.Sites, func(i, j int) bool {
+			if m.Sites[i].Line != m.Sites[j].Line {
+				return m.Sites[i].Line < m.Sites[j].Line
+			}
+			return m.Sites[i].Field < m.Sites[j].Field
+		})
+		if b, err := json.Marshal(m); err == nil {
+			out[key] = string(b)
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Class 2 — READS  (field_read: Method reader -> owning Class)
 // ---------------------------------------------------------------------------
 
-func promoteFieldReads(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error {
-	return forEachProperty(db, "field_read", func(nodeID int64, value string, line int) {
+// promoteFieldReads mints READS edges exactly as before AND returns the
+// per-edge access-site payload each minted edge should carry (map keyed by the
+// same edgeKey the addEdge dedup uses). The edge's metadata stays the bare
+// field name; the JSON rides edges.access_sites.
+func promoteFieldReads(db *store.DB, idx *promoteIndexes, add addEdgeFunc) (map[edgeKey]string, error) {
+	sites := newAccessSiteAccum()
+	err := forEachProperty(db, "field_read", func(nodeID int64, value string, line int) {
 		m := fieldReadRe.FindStringSubmatch(value)
 		if m == nil {
 			return
 		}
-		field := m[1]
+		receiver, field := m[1], m[2]
 		src, ok := idx.byID[nodeID]
 		if !ok {
 			return
@@ -609,20 +855,32 @@ func promoteFieldReads(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error
 		}
 		add(nodeID, cls.ID, "READS", "promote_field_read", conf, 1, "field_read",
 			field, src.FilePath, line, false)
+		if nodeID != 0 && cls.ID != 0 && nodeID != cls.ID { // mirror add()'s non-invention guard
+			sites.add(edgeKey{sourceID: nodeID, targetID: cls.ID, typ: "READS"},
+				field, "read", receiver, line, src)
+		}
 	})
+	return sites.marshal(idx), err
 }
 
 // ---------------------------------------------------------------------------
 // Class 3 — WRITES  (side_effect field write: Method writer -> owning Class)
 // ---------------------------------------------------------------------------
 
-func promoteWrites(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error {
-	return forEachProperty(db, "side_effect", func(nodeID int64, value string, line int) {
+// promoteWrites is the WRITES twin of promoteFieldReads: same edge semantics,
+// plus the access-site payload map for the minted edges. Unlike field_read
+// (which the parser dedups to one property per (method, recv.field)), EVERY
+// `recv.field = ...` assignment mints its own side_effect property, so a
+// method's repeated writes of one field reach here as distinct rows — they
+// collapse into ONE edge via dedup, and `sites` keeps every write's line.
+func promoteWrites(db *store.DB, idx *promoteIndexes, add addEdgeFunc) (map[edgeKey]string, error) {
+	sites := newAccessSiteAccum()
+	err := forEachProperty(db, "side_effect", func(nodeID int64, value string, line int) {
 		m := fieldWriteRe.FindStringSubmatch(value)
 		if m == nil {
 			return // side_effect value with no resolvable field/target -> STAY property
 		}
-		field := m[1]
+		receiver, field := m[1], m[2]
 		src, ok := idx.byID[nodeID]
 		if !ok {
 			return
@@ -638,7 +896,12 @@ func promoteWrites(db *store.DB, idx *promoteIndexes, add addEdgeFunc) error {
 		}
 		add(nodeID, cls.ID, "WRITES", "promote_write", conf, 1, "side_effect",
 			field, src.FilePath, line, false)
+		if nodeID != 0 && cls.ID != 0 && nodeID != cls.ID { // mirror add()'s non-invention guard
+			sites.add(edgeKey{sourceID: nodeID, targetID: cls.ID, typ: "WRITES"},
+				field, "write", receiver, line, src)
+		}
 	})
+	return sites.marshal(idx), err
 }
 
 // ---------------------------------------------------------------------------
