@@ -1,0 +1,47 @@
+{
+  "basis": "certified_producer_build_green",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64-032014efb0ed986bfdeb5933f83d67ac0c3e41b2",
+    "build_info_sha256": "4a3c09688aec750638184fcc549006918880e955c46a4d50a7cf2cb3ca3a3d8d",
+    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "go build -tags sqlite_fts5 ./... green",
+      "go test -tags sqlite_fts5 ./... green, including internal/store nodes_fts",
+      "static musl build with compile-time identity stamp",
+      "vendored source reproduces the binary's declared source_fingerprint over 209 files"
+    ],
+    "conclusion": "success",
+    "confidence": "high",
+    "fixes": "d51a5276 (native nodes_fts rebuild) plus the labeled-statement CFG panic: emitLabeled popped pendingLabels unconditionally while takeLabels drains it, so one ordinary labeled loop computed [:-1] and killed the whole index build (run 35539578563, exit 2, three attempts, no graph)",
+    "jobs_green": [
+      "build"
+    ],
+    "paid_dispatch": false,
+    "parent_source_commit": "d51a527614e8457c371c08aa793ee9a1364eafe7",
+    "producer_sha256": "d56b58d83bb307f3512b836ee83e89b65f8a1bbdd5730b5e6a778511ae42cd24",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "6cd3d877daa21d523c4862e6a4e51218f35699fd21726297f1b9e902ffc671b9",
+    "workflow": "build_producer_linux.yml",
+    "workflow_repo": "harneet2512/groundtruth",
+    "workflow_run_id": 35543773645
+  },
+  "head_sha": "032014efb0ed986bfdeb5933f83d67ac0c3e41b2",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "41ed9caf699ca1051740ff4440d2b76579525c9894fdc7fe7b8090f24d7f3ccd",
+  "packet_id": "har90-certified-producer-032014ef",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
