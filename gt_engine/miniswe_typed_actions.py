@@ -63,7 +63,17 @@ GROUNDTRUTH_TOOL = {
                     "description": (
                         "Exact typed arguments. Literal search uses literal and paths; "
                         "syntax uses a certified file extension; "
-                        "patch impact uses edited_files; verification status uses plan and result."
+                        "patch impact uses edited_files; verification status uses plan and result; "
+                        "definition, references, and symbol_context use symbol with optional path and language; "
+                        "callers uses symbol with optional depth, path, and language; "
+                        "processes uses an optional concept and limit; "
+                        "route_map uses an optional path; api_impact uses route and/or handler; "
+                        "taint uses source with optional sink, path, language, and depth; "
+                        "rename uses symbol with optional new_name, path, and language; "
+                        "shape_check uses symbol with optional path and language; "
+                        "tool_map uses optional path and language; "
+                        "slice uses symbol and line with optional direction, path, "
+                        "language, and variables."
                     ),
                     "additionalProperties": True,
                 },
@@ -86,6 +96,18 @@ GROUNDTRUTH_TOOL = {
 }
 
 QUERY_MATCH_LIMIT = 20
+
+# Wire-kind aliases normalized to their certified canonical spellings. The
+# schema advertises only the canonical names; a call spelled with an alias is
+# still an explicitly selected typed action, so it is normalized before the
+# certification gate and request construction see it.
+_KIND_ALIASES = {
+    "find_definition": "definition",
+    "find_references": "references",
+    "find_callers": "callers",
+    "syntax_query": "syntax",
+}
+
 # 512 is the hard per-line ceiling. The fallback projection reserves half of
 # it so the canonical evidence and model-facing projection remain under the
 # 16 KiB whole-query ceiling even when all 20 slots are populated.
@@ -290,10 +312,12 @@ def _graph_revision(path: str | Path | None, root: Path, fallback: str) -> str:
             graph_path = root / graph_path
         uri = f"file:{graph_path.resolve().as_posix()}?mode=ro"
         with sqlite3.connect(uri, uri=True, timeout=5) as connection:
-            row = connection.execute(
-                "SELECT value FROM project_meta WHERE key='post_revision'"
-            ).fetchone()
-        revision = str(row[0] or "") if row else ""
+            # gt-index records the indexed commit as 'git_commit'; keep
+            # 'post_revision' readable for forward compatibility.
+            rows = dict(
+                connection.execute("SELECT key, value FROM project_meta").fetchall()
+            )
+        revision = str(rows.get("git_commit") or rows.get("post_revision") or "")
         return revision or fallback
     except (OSError, sqlite3.Error):
         return fallback
@@ -355,9 +379,18 @@ def _build_core_request(
     )
     kind_names = {
         "exact_literal_search": "EXACT_LITERAL_SEARCH",
-        "definition": "FIND_DEFINITION",
-        "references": "FIND_REFERENCES",
-        "callers": "FIND_CALLERS",
+        "definition": "DEFINITION",
+        "references": "REFERENCES",
+        "callers": "CALLERS",
+        "symbol_context": "SYMBOL_CONTEXT",
+        "processes": "PROCESSES",
+        "route_map": "ROUTE_MAP",
+        "api_impact": "API_IMPACT",
+        "taint": "TAINT",
+        "rename": "RENAME",
+        "shape_check": "SHAPE_CHECK",
+        "tool_map": "TOOL_MAP",
+        "slice": "SLICE",
         "syntax": "SYNTAX_QUERY",
         "patch_impact": "PATCH_IMPACT",
         "verification_status": "VERIFICATION_STATUS",
@@ -413,6 +446,7 @@ def build_action_request(
         "requested_fidelity": str(payload.get("requested_fidelity") or "exact"),
         "original_shell_form": "",
     }
+    wire["kind"] = _KIND_ALIASES.get(wire["kind"], wire["kind"])
     if not wire["action_id"]:
         wire["action_id"] = hashlib.sha256(_canonical_bytes(wire)).hexdigest()[:24]
 
@@ -578,12 +612,7 @@ def execute_typed_action(
     kind = str(wire.get("kind") or "")
     if kind.startswith("ActionKind."):
         kind = kind.rsplit(".", 1)[-1].lower()
-    kind = {
-        "find_definition": "definition",
-        "find_references": "references",
-        "find_callers": "callers",
-        "syntax_query": "syntax",
-    }.get(kind, kind)
+    kind = _KIND_ALIASES.get(kind, kind)
     root = Path(repo_root).resolve()
     core = _core_compiler()
     query_api = _deterministic_query_api()
@@ -872,7 +901,19 @@ def execute_typed_action(
                 evidence_map["anchors"].pop()
             if isinstance(evidence_map, dict) and isinstance(evidence_map.get("witnesses"), list):
                 evidence_map["witnesses"].pop()
+        # The delivered payload no longer equals the certified complete answer:
+        # the interception decision and honesty record must reflect the
+        # truncation, not the pre-truncation artifact.
         returncode = 2
+        decision = "AUGMENT"
+        if isinstance(decision_payload, dict):
+            decision_payload["mode"] = "AUGMENT"
+            reasons = list(decision_payload.get("reason_codes") or ())
+            if "QUERY_RESULT_TRUNCATED" not in reasons:
+                reasons.append("QUERY_RESULT_TRUNCATED")
+            decision_payload["reason_codes"] = reasons
+        if isinstance(honesty, dict):
+            honesty["completeness"] = "truncated"
         output = _canonical_bytes(result).decode("utf-8")
     return {
         "output": output,

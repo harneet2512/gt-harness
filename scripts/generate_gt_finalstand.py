@@ -66,6 +66,15 @@ OPERATIONS = (
     "definition",
     "references",
     "callers",
+    "symbol_context",
+    "processes",
+    "route_map",
+    "api_impact",
+    "taint",
+    "rename",
+    "shape_check",
+    "tool_map",
+    "slice",
     "syntax",
     "patch_impact",
     "verification_status",
@@ -182,7 +191,9 @@ def _language_operations() -> bytes:
     }
     expected_pairs = {(language, operation) for language in registered for operation in OPERATIONS}
     if set(by_pair) != expected_pairs:
-        raise RuntimeError("GroundTruth compatibility artifact is not the complete 30x7 product")
+        raise RuntimeError(
+            f"GroundTruth compatibility artifact is not the complete 30x{len(OPERATIONS)} product"
+        )
 
     rows: list[dict[str, object]] = []
     for language_id in registered:
@@ -201,13 +212,62 @@ def _language_operations() -> bytes:
                 basis = (
                     "execution-specific verification contract bound to exact command and revision"
                 )
-            elif operation == "patch_impact":
+            elif semantics == "removed":
                 basis = (
                     "current producer is incomplete/partial and cannot satisfy its "
                     "advertised contract"
+                    if operation == "patch_impact"
+                    else "no language/configuration completeness certificate exists"
+                )
+            elif operation == "patch_impact":
+                basis = (
+                    "diff-to-symbol mapping over the call graph returns depth-banded "
+                    "callers and affected flows; omissions flag unmapped edits"
+                )
+            elif operation in {"route_map", "api_impact"}:
+                basis = (
+                    "route/handler topology from producer HANDLES_ROUTE and API_CALL "
+                    "edges; consumer attribution and downstream calls; coverage limited "
+                    "to emitted framework edges"
+                )
+            elif operation == "taint":
+                basis = (
+                    "symbol-level source-to-sink CALLS reachability; always incomplete "
+                    "pending statement-level dataflow"
+                )
+            elif operation == "rename":
+                basis = (
+                    "graph-aware rename preview enumerating definition and reference "
+                    "edit sites by edge type; text references flagged unproven"
+                )
+            elif operation == "shape_check":
+                basis = (
+                    "contract checks provable from persisted edges: interface "
+                    "conformance and override arity; abstains when no contract exists"
+                )
+            elif operation == "tool_map":
+                basis = (
+                    "agent-tool surface detection via DECORATES edges on tool-registry "
+                    "names; undecorated registration sites flagged untracked"
+                )
+            elif operation == "slice":
+                basis = (
+                    "statement-level CFG/data/control-dependence slice; Python "
+                    "source AST substrate, js/ts/java/go over persisted cfg_* "
+                    "blocks with approximated use detection; limitations "
+                    "enumerate unmodeled constructs"
+                )
+            elif operation in {"definition", "references", "callers"}:
+                basis = (
+                    "graph-backed symbol lookup over certified/tiered edges; "
+                    "abstains incomplete on missing graph, unresolved symbol, "
+                    "or revision mismatch"
                 )
             else:
-                basis = "no language/configuration completeness certificate exists"
+                basis = (
+                    "composite graph view (definition + neighbors + detected "
+                    "execution flows); omissions flag partial coverage"
+                )
             rows.append(
                 {
                     "language": display[language_id],
@@ -254,6 +314,15 @@ def _typed_capability_module(certification: bytes) -> bytes:
         "definition",
         "references",
         "callers",
+        "symbol_context",
+        "processes",
+        "route_map",
+        "api_impact",
+        "taint",
+        "rename",
+        "shape_check",
+        "tool_map",
+        "slice",
     )
     certified = tuple(
         kind

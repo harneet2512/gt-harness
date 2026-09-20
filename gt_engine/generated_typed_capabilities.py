@@ -4,7 +4,7 @@ Do not edit by hand. Run ``python scripts/generate_gt_finalstand.py``.
 """
 
 CERTIFICATION_SCHEMA = "gt.typed_capability_certification.v1"
-CERTIFICATION_SHA256 = "945b86a5ac013ea48246399703a67400da4c2346b6ded4f8ae529f9dfbbca2dd"
+CERTIFICATION_SHA256 = "3a4d24b71f2aba3fcaa96f6a28ead3dc751847bd8137680d90aba3ed0331ed37"
 LANGUAGE_MANIFEST_SHA256 = "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631"
 REGISTERED_LANGUAGE_IDENTITIES = (
     'bash',
@@ -41,13 +41,22 @@ REGISTERED_LANGUAGE_IDENTITIES = (
 CERTIFIED_TYPED_KINDS = (
     'exact_literal_search',
     'syntax',
-    'verification_status',
-)
-REMOVED_TYPED_KINDS = (
     'patch_impact',
+    'verification_status',
     'definition',
     'references',
     'callers',
+    'symbol_context',
+    'processes',
+    'route_map',
+    'api_impact',
+    'taint',
+    'rename',
+    'shape_check',
+    'tool_map',
+    'slice',
+)
+REMOVED_TYPED_KINDS = (
 )
 CERTIFIED_SYNTAX_LANGUAGES = (
     'go',

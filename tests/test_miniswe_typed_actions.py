@@ -79,14 +79,22 @@ def test_native_model_declares_bash_and_groundtruth_tools(monkeypatch):
     assert parameters["properties"]["kind"]["enum"] == [
         "exact_literal_search",
         "syntax",
-        "verification_status",
-    ]
-    assert parameters["x-groundtruth-certification"]["removed_kinds"] == [
         "patch_impact",
+        "verification_status",
         "definition",
         "references",
         "callers",
+        "symbol_context",
+        "processes",
+        "route_map",
+        "api_impact",
+        "taint",
+        "rename",
+        "shape_check",
+        "tool_map",
+        "slice",
     ]
+    assert parameters["x-groundtruth-certification"]["removed_kinds"] == []
 
 
 def test_exact_literal_action_is_snapshot_bound_and_canonical(tmp_path):
@@ -159,14 +167,16 @@ def test_unavailable_typed_producer_returns_incomplete_without_shell_fallback(tm
     assert result["returncode"] == 2
     assert payload["decision"]["mode"] in {"PASS_THROUGH", "AUGMENT"}
     assert payload["evidence"]["semantics"] == "incomplete"
-    assert payload["evidence"]["omissions"] == ["typed_kind_removed"]
+    assert "graph_unavailable" in payload["evidence"]["omissions"]
 
 
-@pytest.mark.parametrize("kind", ["patch_impact", "definition", "references", "callers"])
-def test_removed_kind_is_never_dispatched_even_when_manually_constructed(tmp_path, kind):
+@pytest.mark.parametrize("kind", ["teleport", "find_everything", "raw_cypher"])
+def test_uncertified_kind_is_never_dispatched_even_when_manually_constructed(
+    tmp_path, kind
+):
     request = build_action_request(
         {
-            "tool_call_id": f"gt-removed-{kind}",
+            "tool_call_id": f"gt-uncertified-{kind}",
             "gt_action": {"kind": kind, "arguments": {}},
         },
         repo_root=tmp_path,
@@ -216,6 +226,12 @@ def test_exact_literal_search_never_certifies_unimplemented_semantics(
         ("exact_literal_search", {"literal": "value", "paths": ["."]}),
         ("syntax", {"path": "mod.py"}),
         ("verification_status", {"plan": {}, "result": {}}),
+        ("patch_impact", {"edited_files": {"mod.py": {"before": "a\n", "after": "b\n"}}}),
+        ("definition", {"symbol": "value"}),
+        ("references", {"symbol": "value"}),
+        ("callers", {"symbol": "value"}),
+        ("symbol_context", {"symbol": "value"}),
+        ("processes", {"concept": "value"}),
     ],
 )
 def test_canonical_dispatcher_owns_every_advertised_typed_kind(tmp_path, kind, arguments):

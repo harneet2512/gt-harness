@@ -712,20 +712,25 @@ def validate() -> dict[str, object]:
     pairs = {(row["registry_identity"], row["operation"]) for row in operation_rows}
     operations = {row["operation"] for row in operation_rows}
     _require(
-        len(operation_rows) == 210,
-        f"language-operation count is {len(operation_rows)}, expected 210",
+        len(operation_rows) == 480,
+        f"language-operation count is {len(operation_rows)}, expected 480",
         errors,
     )
-    _require(len(pairs) == 210, "language-operation pairs duplicate", errors)
+    _require(len(pairs) == 480, "language-operation pairs duplicate", errors)
     _require({language for language, _ in pairs} == language_ids,
              "language-operation identities differ from registry inventory", errors)
-    _require(len(operations) == 7, f"operation count is {len(operations)}, expected 7", errors)
+    _require(len(operations) == 16, f"operation count is {len(operations)}, expected 16", errors)
     for row in operation_rows:
         _require(row["terminal_semantics"] in ALLOWED_SEMANTICS,
                  f"invalid language semantics: {row}", errors)
     semantics_counts = Counter(row["terminal_semantics"] for row in operation_rows)
     _require(
-        semantics_counts == {"exact": 35, "execution_specific": 30, "removed": 145},
+        semantics_counts == {
+            "exact": 35,
+            "execution_specific": 30,
+            "sound_overapprox": 75,
+            "removed": 340,
+        },
         f"language semantics counts differ: {dict(semantics_counts)}",
         errors,
     )

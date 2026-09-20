@@ -3,6 +3,15 @@ Bash,bash,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic expl
 Bash,bash,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Bash,bash,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Bash,bash,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Bash,bash,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Bash,bash,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Bash,bash,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -10,6 +19,15 @@ C,c,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-s
 C,c,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C,c,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C,c,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C,c,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 C,c,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 C,c,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -17,6 +35,15 @@ C++,cpp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 C++,cpp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C++,cpp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C++,cpp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C++,cpp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 C++,cpp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 C++,cpp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -24,6 +51,15 @@ C#,csharp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic expl
 C#,csharp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C#,csharp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C#,csharp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 C#,csharp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 C#,csharp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 C#,csharp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -31,6 +67,15 @@ CSS,css,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 CSS,css,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CSS,css,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CSS,css,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CSS,css,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 CSS,css,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 CSS,css,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -38,6 +83,15 @@ CUE,cue,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 CUE,cue,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CUE,cue,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CUE,cue,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 CUE,cue,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 CUE,cue,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 CUE,cue,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -45,6 +99,15 @@ Elixir,elixir,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic 
 Elixir,elixir,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elixir,elixir,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elixir,elixir,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elixir,elixir,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Elixir,elixir,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Elixir,elixir,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -52,20 +115,47 @@ Elm,elm,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 Elm,elm,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elm,elm,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elm,elm,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Elm,elm,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Elm,elm,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Elm,elm,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Go,go,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Go,go,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Go,go,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Go,go,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Go,go,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Go,go,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Go,go,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Go,go,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Go,go,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Go,go,route_map,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Go,go,api_impact,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Go,go,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+Go,go,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+Go,go,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+Go,go,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+Go,go,slice,sound_overapprox,ADVERTISED_CERTIFIED,"statement-level CFG/data/control-dependence slice; Python source AST substrate, js/ts/java/go over persisted cfg_* blocks with approximated use detection; limitations enumerate unmodeled constructs"
 Go,go,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-Go,go,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Go,go,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 Go,go,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Groovy,groovy,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
 Groovy,groovy,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Groovy,groovy,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Groovy,groovy,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Groovy,groovy,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Groovy,groovy,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Groovy,groovy,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -73,6 +163,15 @@ HCL,hcl,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 HCL,hcl,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HCL,hcl,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HCL,hcl,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HCL,hcl,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 HCL,hcl,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 HCL,hcl,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -80,27 +179,63 @@ HTML,html,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic expl
 HTML,html,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HTML,html,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HTML,html,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 HTML,html,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 HTML,html,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 HTML,html,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Java,java,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Java,java,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Java,java,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Java,java,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Java,java,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Java,java,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Java,java,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Java,java,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Java,java,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Java,java,route_map,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Java,java,api_impact,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Java,java,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+Java,java,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+Java,java,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+Java,java,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+Java,java,slice,sound_overapprox,ADVERTISED_CERTIFIED,"statement-level CFG/data/control-dependence slice; Python source AST substrate, js/ts/java/go over persisted cfg_* blocks with approximated use detection; limitations enumerate unmodeled constructs"
 Java,java,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Java,java,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Java,java,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 Java,java,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 JavaScript,javascript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-JavaScript,javascript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-JavaScript,javascript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-JavaScript,javascript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+JavaScript,javascript,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+JavaScript,javascript,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+JavaScript,javascript,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+JavaScript,javascript,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+JavaScript,javascript,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+JavaScript,javascript,route_map,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+JavaScript,javascript,api_impact,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+JavaScript,javascript,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+JavaScript,javascript,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+JavaScript,javascript,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+JavaScript,javascript,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+JavaScript,javascript,slice,sound_overapprox,ADVERTISED_CERTIFIED,"statement-level CFG/data/control-dependence slice; Python source AST substrate, js/ts/java/go over persisted cfg_* blocks with approximated use detection; limitations enumerate unmodeled constructs"
 JavaScript,javascript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-JavaScript,javascript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+JavaScript,javascript,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 JavaScript,javascript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Kotlin,kotlin,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
 Kotlin,kotlin,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Kotlin,kotlin,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Kotlin,kotlin,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Kotlin,kotlin,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Kotlin,kotlin,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Kotlin,kotlin,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -108,6 +243,15 @@ Lua,lua,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 Lua,lua,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Lua,lua,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Lua,lua,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Lua,lua,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Lua,lua,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Lua,lua,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -115,6 +259,15 @@ Markdown,markdown,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnos
 Markdown,markdown,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Markdown,markdown,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Markdown,markdown,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Markdown,markdown,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Markdown,markdown,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Markdown,markdown,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -122,6 +275,15 @@ OCaml,ocaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic ex
 OCaml,ocaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 OCaml,ocaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 OCaml,ocaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 OCaml,ocaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 OCaml,ocaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 OCaml,ocaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -129,6 +291,15 @@ PHP,php,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 PHP,php,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 PHP,php,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 PHP,php,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 PHP,php,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 PHP,php,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 PHP,php,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -136,34 +307,79 @@ Protobuf,protobuf,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnos
 Protobuf,protobuf,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Protobuf,protobuf,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Protobuf,protobuf,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Protobuf,protobuf,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Protobuf,protobuf,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Protobuf,protobuf,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Python,python,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Python,python,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Python,python,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Python,python,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Python,python,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Python,python,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Python,python,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Python,python,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Python,python,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Python,python,route_map,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Python,python,api_impact,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+Python,python,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+Python,python,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+Python,python,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+Python,python,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+Python,python,slice,sound_overapprox,ADVERTISED_CERTIFIED,"statement-level CFG/data/control-dependence slice; Python source AST substrate, js/ts/java/go over persisted cfg_* blocks with approximated use detection; limitations enumerate unmodeled constructs"
 Python,python,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-Python,python,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Python,python,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 Python,python,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Ruby,ruby,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
 Ruby,ruby,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Ruby,ruby,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Ruby,ruby,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Ruby,ruby,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
 Ruby,ruby,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Ruby,ruby,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Rust,rust,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Rust,rust,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Rust,rust,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Rust,rust,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Rust,rust,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Rust,rust,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Rust,rust,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Rust,rust,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+Rust,rust,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+Rust,rust,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+Rust,rust,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+Rust,rust,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+Rust,rust,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Rust,rust,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Rust,rust,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Rust,rust,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 Rust,rust,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Scala,scala,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
 Scala,scala,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Scala,scala,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Scala,scala,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Scala,scala,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Scala,scala,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Scala,scala,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -171,6 +387,15 @@ SQL,sql,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explic
 SQL,sql,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 SQL,sql,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 SQL,sql,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 SQL,sql,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 SQL,sql,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 SQL,sql,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -178,6 +403,15 @@ Svelte,svelte,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic 
 Svelte,svelte,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Svelte,svelte,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Svelte,svelte,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Svelte,svelte,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Svelte,svelte,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Svelte,svelte,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -185,6 +419,15 @@ Swift,swift,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic ex
 Swift,swift,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Swift,swift,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Swift,swift,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 Swift,swift,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 Swift,swift,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 Swift,swift,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
@@ -192,20 +435,47 @@ TOML,toml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic expl
 TOML,toml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 TOML,toml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 TOML,toml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 TOML,toml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 TOML,toml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 TOML,toml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 TypeScript,typescript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-TypeScript,typescript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TypeScript,typescript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TypeScript,typescript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TypeScript,typescript,definition,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+TypeScript,typescript,references,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+TypeScript,typescript,callers,sound_overapprox,ADVERTISED_CERTIFIED,"graph-backed symbol lookup over certified/tiered edges; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+TypeScript,typescript,symbol_context,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+TypeScript,typescript,processes,sound_overapprox,ADVERTISED_CERTIFIED,composite graph view (definition + neighbors + detected execution flows); omissions flag partial coverage
+TypeScript,typescript,route_map,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+TypeScript,typescript,api_impact,sound_overapprox,ADVERTISED_CERTIFIED,route/handler topology from producer HANDLES_ROUTE and API_CALL edges; consumer attribution and downstream calls; coverage limited to emitted framework edges
+TypeScript,typescript,taint,sound_overapprox,ADVERTISED_CERTIFIED,symbol-level source-to-sink CALLS reachability; always incomplete pending statement-level dataflow
+TypeScript,typescript,rename,sound_overapprox,ADVERTISED_CERTIFIED,graph-aware rename preview enumerating definition and reference edit sites by edge type; text references flagged unproven
+TypeScript,typescript,shape_check,sound_overapprox,ADVERTISED_CERTIFIED,contract checks provable from persisted edges: interface conformance and override arity; abstains when no contract exists
+TypeScript,typescript,tool_map,sound_overapprox,ADVERTISED_CERTIFIED,agent-tool surface detection via DECORATES edges on tool-registry names; undecorated registration sites flagged untracked
+TypeScript,typescript,slice,sound_overapprox,ADVERTISED_CERTIFIED,"statement-level CFG/data/control-dependence slice; Python source AST substrate, js/ts/java/go over persisted cfg_* blocks with approximated use detection; limitations enumerate unmodeled constructs"
 TypeScript,typescript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-TypeScript,typescript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+TypeScript,typescript,patch_impact,sound_overapprox,ADVERTISED_CERTIFIED,diff-to-symbol mapping over the call graph returns depth-banded callers and affected flows; omissions flag unmapped edits
 TypeScript,typescript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 YAML,yaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
 YAML,yaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 YAML,yaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 YAML,yaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
 YAML,yaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
 YAML,yaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
 YAML,yaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
