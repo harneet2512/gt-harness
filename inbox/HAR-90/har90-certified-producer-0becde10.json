@@ -1,0 +1,47 @@
+{
+  "basis": "certified_producer_build_green",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64-0becde100410d4a1d61022e83306ec479590f5c8",
+    "build_info_sha256": "0984acb9617e07d1373b6dd7a6a98bfab9846888217d6abce091c88e95a62cac",
+    "builder_image_digest": "3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "go build ./... green",
+      "go test ./cmd/... ./internal/parser/... ./internal/resolver/... green",
+      "three new tests pin the retained/failed split in collectParseResults",
+      "vendored source reproduces the binary's declared source_fingerprint"
+    ],
+    "conclusion": "success",
+    "confidence": "high",
+    "fixes": "the empty-graph guard tested completeness rather than emptiness: gt-index aborted whenever no file parsed CLEANLY, although collectParseResults deliberately retains the facts of a recoverable tree and the resolver already abstains per callsite. TB2 write-compressor (run 35560215706) is one C file whose tree carried an ERROR node; gt-index extracted four functions, eleven callsites and thirteen properties from decomp.c, printed 'INDEX FAILED: 0/1 files parsed - graph would be empty', and discarded the graph it had just built, so the agent ran blind for the whole episode at three times the turns and five times the input tokens of the GT-off scaffold. The abort now fires on retained results, so a repository where every file hard-errors still aborts.",
+    "jobs_green": [
+      "producer"
+    ],
+    "paid_dispatch": false,
+    "parent_source_commit": "032014efb0ed986bfdeb5933f83d67ac0c3e41b2",
+    "producer_sha256": "b6aed45d24c6f034979095125930bb3e3d304cfc7d5d4bab8760038e307d9bdf",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "46ec02a8c47af96b347966e8d5e5f07f1ae6a50eb08b91491cdb071f9d0da794",
+    "workflow": "producer_build.yml",
+    "workflow_repo": "harneet2512/gt-harness",
+    "workflow_run_id": 35569792894
+  },
+  "head_sha": "0becde100410d4a1d61022e83306ec479590f5c8",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "a5a1904be17a708d8d6f6b171d8bb277d3d1f7a1f872091f4e79897a5688bd61",
+  "packet_id": "har90-certified-producer-0becde10",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
