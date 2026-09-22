@@ -138,3 +138,13 @@ Reasons that recur across rows are abbreviated in the table:
 UNION contains every non-blank line MAIN added to these files. The remaining UNION-vs-MAIN differences are UNION additions. Spot checks: `gt_engine/attribution.py` (MAIN +17 lines, all in UNION, which adds 237 more), `gt_engine/graph_context.py` (MAIN +175; UNION adds 205 more), `scripts/check_change_blast_radius.py` (MAIN +206; UNION adds 13), `pyproject.toml` (UNION adds only the `gt-plan` entry point).
 
 `gt_engine/attribution.py`, `gt_engine/dense_runtime.py`, `gt_engine/feature_matrix.py`, `gt_engine/graph_context.py`, `gt_engine/miniswe_covering.py`, `gt_engine/repository_identity.py`, `gt_harness/groundtruth_provenance.py`, `pyproject.toml`, `scripts/check_change_blast_radius.py`, `scripts/gt_live_gate.py`, `tests/conftest.py`, `tests/test_dense_runtime.py`, `tests/test_event_journal.py`, `tests/test_failure_id_validator.py`, `tests/test_feature_matrix_outcomes.py`, `tests/test_groundtruth_provenance.py`, `tests/test_gt_task_contract.py`, `tests/test_hybrid_retrieval.py`, `tests/test_miniswe_controller.py`, `tests/test_miniswe_smoke.py`, `tests/test_miniswe_supervisor.py`, `tests/test_paid_workflow_gates.py`, `tests/test_producer_binding.py`, `tests/test_red_evidence.py`, `tests/test_run_diagnostics.py`, `tests/test_runtime_observation.py`, `tests/test_smoke_stage.py`, `tests/test_terminal_outcomes.py`
+
+## Port status (class a)
+
+All class (a) rows were ported on `canonical/gt-har90` by W4. The details are in `docs/canonical/TYPED_SURFACE.md`. Three rows were deliberately ported with changes rather than copied:
+
+- **Certification:** MAIN's `sound_overapprox` label for 75 pairs is narrowed to `partial` by a harness ceiling in `generate_gt_finalstand.py`, and the counts are exact 35 / execution_specific 30 / partial 75 / removed 340. A `partial` kind never REPLACEs. Languages are gated per kind at runtime.
+- **`_graph_revision`:** this was replaced, not ported. It is the EngineState workspace revision (`graph_source_revision`), and gt-index receives it as `-source-revision` when the producer declares `source_revision_meta_v1`.
+- **Oversize truncation:** this was extended to dict answers (`gt_engine/typed_output_bounds.py`). Honesty completeness becomes `incomplete`, not MAIN's `truncated`. `HonestyEnvelope` rejects `truncated` without a known true total, which MAIN never supplied.
+
+Two files were left alone. MAIN's `gt_finalstand/FEATURE_MATRIX.md` and `feature_matrix.json` are an older witnessed run record (source revision 90101994, generated 2026-09-05), and UNION's is newer; neither describes the typed kinds.
