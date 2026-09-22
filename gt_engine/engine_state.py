@@ -113,6 +113,8 @@ class GraphQuerySnapshot:
     overlay: Mapping[str, OverlayEntry]
     masked_paths: tuple[str, ...]
     omissions: tuple[str, ...]
+    # The workspace revision the published graph was built from.
+    graph_source_revision: str = ""
 
     @property
     def graph_current(self) -> bool:
@@ -216,6 +218,7 @@ class EngineState:
             overlay=overlay,
             masked_paths=tuple(overlay),
             omissions=tuple(sorted(self._omissions)),
+            graph_source_revision=self.graph_source_revision,
         )
 
 

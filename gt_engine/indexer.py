@@ -394,6 +394,21 @@ AMEND_CAPABILITY = "incremental_amend_in_place"
 # different producer and must be re-probed.
 _AMEND_CAPABILITY_CACHE: dict[tuple[str, str, str], bool] = {}
 BATCH_AMEND_CAPABILITY = "batch_parser_node_reuse_v1"
+# A producer declaring this accepts ``-source-revision <rev>`` and persists it
+# as ``project_meta.source_revision`` on full builds, batch amends and -file
+# incrementals. That value is the graph's workspace identity: the typed
+# RevisionVector.graph the harness sends is the same EngineState revision, so
+# the producer's revision check compares like with like. A producer without
+# the capability gets no flag (it would reject an unknown one) and its graph
+# carries no source revision, which the query layer reports as unavailable.
+SOURCE_REVISION_CAPABILITY = "source_revision_meta_v1"
+
+
+def _source_revision_argv(source_revision: str) -> list[str]:
+    revision = str(source_revision or "").strip()
+    if not revision or not _producer_supports_amend_capability(SOURCE_REVISION_CAPABILITY):
+        return []
+    return ["-source-revision", revision]
 
 
 def _producer_supports_incremental_amend() -> bool:
@@ -1394,7 +1409,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path, *,
 
 
 def _build_index_with_attempts(
-    root: str, output: Path, log_dir: Path
+    root: str, output: Path, log_dir: Path, *, source_revision: str = ""
 ) -> tuple[IndexProcessResult, tuple[str, ...]]:
     """Build the graph, retrying a failed attempt before giving it up.
 
@@ -1408,8 +1423,18 @@ def _build_index_with_attempts(
 
     attempts: list[str] = []
     result: IndexProcessResult | None = None
+    revision_argv = _source_revision_argv(source_revision)
+
+    def with_revision(binary: str, argv_root: str, argv_output: str) -> list[str]:
+        return _index_command(binary, argv_root, argv_output) + revision_argv
+
     for attempt in range(1, _INDEX_BUILD_ATTEMPTS + 1):
-        result = _run_index_bounded(root, output, log_dir)
+        # No factory without a revision flag, so a test double for
+        # _index_command still intercepts the plain full-index path.
+        result = _run_index_bounded(
+            root, output, log_dir,
+            **({"command_factory": with_revision} if revision_argv else {}),
+        )
         attempts.append(f"{attempt}:{result.status}:{result.error_code or _OK}")
         if result.success:
             break
@@ -2074,7 +2099,8 @@ def _publish_candidate(
 def _ensure_index_unlocked(root: str, *, state_dir: str | None = None,
                            excluded_roots: tuple[Path, ...] = (),
                            layout: RuntimeLayout | None = None,
-                           diagnostics: list[str] | None = None) -> str | None:
+                           diagnostics: list[str] | None = None,
+                           source_revision: str = "") -> str | None:
     """Ensure a fresh graph.db exists for ``root``; return its path or None.
 
     When ``GT_STATE_DIR`` is set, the db lives in a root-identity subdirectory
@@ -2160,11 +2186,15 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None,
                 if source_manifest_digest(frozen) != reuse_key.source_manifest_sha256:
                     raise ValueError("producer input changed during snapshot")
                 process_result, build_attempts = _build_index_with_attempts(
-                    str(frozen), candidate, gt_dir,
+                    str(frozen), candidate, gt_dir, **(
+                        {"source_revision": source_revision} if source_revision else {}
+                    ),
                 )
         else:
             process_result, build_attempts = _build_index_with_attempts(
-                str(root), candidate, gt_dir,
+                str(root), candidate, gt_dir, **(
+                    {"source_revision": source_revision} if source_revision else {}
+                ),
             )
         published = _publish_candidate(
             candidate, root=root, logical_root=logical_root, gt_dir=gt_dir, db=db,
@@ -2349,6 +2379,7 @@ def _ensure_index_incremental_unlocked(
     root: str, *, layout: RuntimeLayout, parent_graph: Path,
     changed_paths: tuple[str, ...], excluded_roots: tuple[Path, ...] = (),
     diagnostics: list[str] | None = None,
+    source_revision: str = "",
 ) -> tuple[str | None, str, tuple[dict[str, object], ...]]:
     """Amend a copy of the published graph and publish it as a new revision.
 
@@ -2487,6 +2518,7 @@ def _ensure_index_incremental_unlocked(
     attempts: list[str] = []
     process_result: IndexProcessResult | None = None
     total_elapsed_ms = 0
+    revision_argv = _source_revision_argv(source_revision)
     try:
         if not batch:
             _copy_graph_for_amend(parent_graph, candidate)
@@ -2494,8 +2526,10 @@ def _ensure_index_incremental_unlocked(
             def build_argv(binary: str, argv_root: str, output: str,
                            _relative: str = relative) -> list[str]:
                 if batch:
-                    return _index_command(binary, argv_root, output) + ["-amend-parent", str(parent_graph)]
-                return _incremental_index_command(binary, argv_root, output, _relative)
+                    return (_index_command(binary, argv_root, output)
+                            + ["-amend-parent", str(parent_graph)] + revision_argv)
+                return (_incremental_index_command(binary, argv_root, output, _relative)
+                        + revision_argv)
 
             # No retry. A failed amend leaves the copy in an unknown state, and
             # the honest recovery is the caller's full rebuild rather than a
@@ -2569,7 +2603,8 @@ def ensure_index(root: str, *, state_dir: str | None = None,
                  excluded_roots: tuple[Path, ...] = (),
                  layout: RuntimeLayout | None = None,
                  reclaim: bool = True,
-                 diagnostics: list[str] | None = None) -> str | None:
+                 diagnostics: list[str] | None = None,
+                 source_revision: str = "") -> str | None:
     """Build/reuse one graph under an inter-process publication lock.
 
     Correct-or-quiet for local work; fail-closed for a benchmark-bound run,
@@ -2602,7 +2637,9 @@ def ensure_index(root: str, *, state_dir: str | None = None,
             with _graph_publication_lock(lock_root / ".graph.lock"):
                 graph = _ensure_index_unlocked(root, state_dir=state_dir, diagnostics=diagnostics, **(
                     {"excluded_roots": excluded_roots} if excluded_roots else {}
-                ), **({"layout": layout} if layout is not None else {}))
+                ), **({"layout": layout} if layout is not None else {}), **(
+                    {"source_revision": source_revision} if source_revision else {}
+                ))
                 if graph is not None and reclaim:
                     _prune_superseded_revisions(Path(graph).parent)
     except Exception as exc:  # noqa: BLE001 - indexing remains correct-or-quiet
@@ -3700,7 +3737,8 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None,
                              reclaim=reclaim,
                              **({"excluded_roots": excluded_roots} if excluded_roots else {}),
-                             **({"layout": layout} if layout is not None else {}))
+                             **({"layout": layout} if layout is not None else {}),
+                             **({"source_revision": source_revision} if source_revision else {}))
     except BenchmarkGraphRequired:
         # A benchmark without its graph is not a receipt outcome to record and
         # continue from; it stops the run.
@@ -3889,6 +3927,7 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
                 published, reason, results = _ensure_index_incremental_unlocked(
                     str(root_path), layout=layout, parent_graph=Path(graph),
                     changed_paths=tuple(changed_paths), excluded_roots=excluded_roots,
+                    **({"source_revision": source_revision} if source_revision else {}),
                 )
                 if published and reclaim:
                     _prune_superseded_revisions(Path(published).parent)

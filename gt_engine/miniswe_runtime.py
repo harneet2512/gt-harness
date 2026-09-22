@@ -155,10 +155,15 @@ _PERSISTENT_PLAN_REQUEST_TAG = "gt-internal-persistent-plan"
 
 _VIEW_COMMANDS = frozenset({"cat", "sed", "less", "head", "tail", "nl", "bat"})
 
-# These typed queries require a certified graph. Native action snapshots
-# independently schedule nonblocking refresh through the same coordinator.
+# Every typed kind that reads the graph. A stale graph is refreshed (a
+# synchronous amend) before the query so it is answered against the current
+# workspace instead of arriving with graph_db="" and answering
+# graph_unavailable. Only exact_literal_search, syntax and
+# verification_status read no graph.
 _GRAPH_DEPENDENT_TYPED_KINDS = frozenset({
-    "definition", "references", "callers", "patch_impact", "why_this_edge",
+    "definition", "references", "callers", "symbol_context", "processes",
+    "patch_impact", "route_map", "api_impact", "taint", "rename",
+    "shape_check", "tool_map", "slice", "why_this_edge",
 })
 
 
@@ -2014,6 +2019,15 @@ def install_runtime_hooks(
                             else ""
                         ),
                         "graph_fresh": graph_snapshot.graph_current,
+                        # RevisionVector.graph: the workspace revision the
+                        # graph was built from (passed to gt-index as
+                        # -source-revision), never a revision read back out
+                        # of the graph itself.
+                        "graph_source_revision": (
+                            graph_snapshot.graph_source_revision
+                            if graph_snapshot.graph_current
+                            else ""
+                        ),
                         "repository_revision": graph_snapshot.source_revision,
                         "gt_mode": session.mode.value,
                     },

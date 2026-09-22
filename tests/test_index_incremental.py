@@ -1256,9 +1256,10 @@ def test_edit_transaction_sync_amends_and_graph_stays_current(tmp_path, monkeypa
 
     calls = {}
     def fake_amend(root, *, layout, parent_graph, changed_paths,
-                   excluded_roots, diagnostics=None):
+                   excluded_roots, diagnostics=None, source_revision=""):
         calls["paths"] = changed_paths
         calls["parent"] = str(parent_graph)
+        calls["source_revision"] = source_revision
         return str(parent), "", ({"path": "a.py", "status": "ok"},)
     monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", fake_amend)
     monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
@@ -1267,6 +1268,9 @@ def test_edit_transaction_sync_amends_and_graph_stays_current(tmp_path, monkeypa
 
     assert calls["paths"] == ("a.py",)
     assert calls["parent"] == str(parent)
+    # The amend is built for the transaction's post revision; the indexer
+    # hands it to gt-index as -source-revision when the producer declares it.
+    assert calls["source_revision"] == "rev1"
     assert adapter.engine_state.graph_current
     assert adapter.graph_db == str(parent)
     rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
@@ -1283,7 +1287,7 @@ def test_sync_amend_dirty_set_covers_earlier_unpatched_edits(tmp_path, monkeypat
     calls = {}
 
     def flaky(root, *, layout, parent_graph, changed_paths,
-              excluded_roots, diagnostics=None):
+              excluded_roots, diagnostics=None, source_revision=""):
         calls["paths"] = changed_paths
         if state["fail"]:
             return None, "amend_failed:boom", ()
@@ -1322,7 +1326,7 @@ def test_sync_amend_skips_when_unaccounted_changes_exist(tmp_path, monkeypatch):
 
     calls = {}
     def forbidden(root, *, layout, parent_graph, changed_paths,
-                  excluded_roots, diagnostics=None):
+                  excluded_roots, diagnostics=None, source_revision=""):
         calls["paths"] = changed_paths
         return None, "", ()
     monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", forbidden)
@@ -1826,3 +1830,167 @@ def test_a_freshly_produced_graph_passes_preflight_and_ranks(tmp_path):
     assert ranking.available
     names = {entry.snippet for entry in ranking.ranking}
     assert {"save", "run"} <= names
+
+
+# ------------------------------------------------- graph source-revision flag
+#
+# Cross-stream contract: the harness passes the workspace revision it builds
+# for as gt-index -source-revision on full builds, batch amends and -file
+# incrementals, but only to a producer that declares source_revision_meta_v1;
+# an older producer would reject the unknown flag.
+
+
+def _revision_recording_producer(path: Path) -> None:
+    """A fake gt-index that persists -source-revision the way W2's producer does."""
+    path.write_text(
+        "import sqlite3, sys\n"
+        "output = sys.argv[sys.argv.index('-output') + 1]\n"
+        "with sqlite3.connect(output) as c:\n"
+        "    c.execute('create table if not exists project_meta (key text, value text)')\n"
+        "    c.execute('create table if not exists file_hashes (path text)')\n"
+        "    c.execute('create table if not exists nodes (id integer, file_path text)')\n"
+        "    c.execute(\"insert into nodes values (1, 'app.py')\")\n"
+        "    c.execute(\"insert into file_hashes values ('app.py')\")\n"
+        "    if '-source-revision' in sys.argv:\n"
+        "        value = sys.argv[sys.argv.index('-source-revision') + 1]\n"
+        "        c.execute(\"insert into project_meta values ('source_revision', ?)\", (value,))\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_source_revision_flag_follows_the_declared_capability(monkeypatch, declared):
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: declared and capability == indexer.SOURCE_REVISION_CAPABILITY,
+    )
+    argv = indexer._source_revision_argv("rev-7")
+    assert argv == (["-source-revision", "rev-7"] if declared else [])
+    assert indexer._source_revision_argv("") == []
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_full_build_persists_the_workspace_revision_only_when_declared(
+    tmp_path, monkeypatch, declared
+):
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    fake = tmp_path / "fake-index.py"
+    _revision_recording_producer(fake)
+    argvs: list[list[str]] = []
+
+    def command(binary, r, output):
+        argv = [binary, str(fake), "-root", r, "-output", output]
+        argvs.append(argv)
+        return argv
+
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: sys.executable)
+    monkeypatch.setattr(indexer, "_index_command", command)
+    monkeypatch.setattr(
+        indexer, "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: declared and capability == indexer.SOURCE_REVISION_CAPABILITY,
+    )
+
+    receipt = indexer.ensure_index_with_receipt(
+        root, layout=adapter.engine_state.layout, source_revision="ws-rev-1",
+    )
+
+    assert receipt.success, receipt.error_type
+    with sqlite3.connect(f"file:{Path(receipt.graph_db).as_posix()}?mode=ro", uri=True) as c:
+        stored = dict(c.execute("SELECT key, value FROM project_meta").fetchall())
+    if declared:
+        assert stored.get("source_revision") == "ws-rev-1"
+    else:
+        assert "source_revision" not in stored
+        assert all("-source-revision" not in argv for argv in argvs)
+
+
+def test_batch_amend_passes_the_workspace_revision(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    script = tmp_path / "batch.py"
+    script.write_text(
+        "import shutil,sys\nshutil.copyfile(sys.argv[sys.argv.index('-amend-parent') + 1], sys.argv[1])\n",
+        encoding="utf-8",
+    )
+
+    def command(binary, source, output):
+        return [binary, str(script), output]
+
+    real_popen = indexer.subprocess.Popen
+
+    def recording_popen(argv, *args, **kwargs):
+        if str(script) in [str(item) for item in argv]:
+            calls.append([str(item) for item in argv])
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(indexer.subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability in {
+            indexer.BATCH_AMEND_CAPABILITY, indexer.SOURCE_REVISION_CAPABILITY,
+        },
+    )
+    monkeypatch.setattr(indexer, "_index_command", command)
+
+    receipt = indexer.refresh_index_files(
+        root, parent, ("app.py",), layout=layout, source_revision="ws-rev-2",
+    )
+
+    assert receipt.success, receipt.error_type
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[argv.index("-source-revision") + 1] == "ws-rev-2"
+
+
+def test_file_incremental_passes_the_workspace_revision(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+    amend = tmp_path / "fake-amend.py"
+    amend.write_text(
+        "import json, sqlite3, sys\n"
+        "output = sys.argv[sys.argv.index('-output') + 1]\n"
+        "relpath = sys.argv[sys.argv.index('-file') + 1]\n"
+        "revision = sys.argv[sys.argv.index('-source-revision') + 1]\n"
+        "with sqlite3.connect(output) as c:\n"
+        "    c.execute(\"insert into project_meta values ('source_revision', ?)\", (revision,))\n"
+        "print(json.dumps({'file': relpath, 'nodes_replaced': 1, 'inserted': 0,\n"
+        "                  'updated': 1, 'removed': 0, 'symbols_reminted': 1,\n"
+        "                  'symbols_removed': 0, 'short_circuited': False}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        indexer, "_incremental_index_command",
+        lambda binary, r, output, relpath: [
+            binary, str(amend), "-root", r, "-output", output, "-file", relpath,
+        ],
+    )
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability in {
+            indexer.AMEND_CAPABILITY, indexer.SOURCE_REVISION_CAPABILITY,
+        },
+    )
+
+    receipt = indexer.refresh_index_files(
+        root, parent, ("app.py",), layout=layout, source_revision="ws-rev-3",
+    )
+
+    assert receipt.success, receipt.error_type
+    with sqlite3.connect(f"file:{Path(receipt.graph_db).as_posix()}?mode=ro", uri=True) as c:
+        stored = dict(c.execute("SELECT key, value FROM project_meta").fetchall())
+    assert stored.get("source_revision") == "ws-rev-3"

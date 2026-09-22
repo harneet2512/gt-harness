@@ -2643,6 +2643,17 @@ class MiniSweAdapter(GroundtruthController):
     SYNC_AMEND_MAX_GRAPH_BYTES = 512 * 1024 * 1024
     SYNC_AMEND_EMBEDDING_BUDGET_SECONDS = 8.0
 
+    @staticmethod
+    def _source_revision_kwargs(revision: str) -> dict[str, str]:
+        """The workspace revision an amend is built for.
+
+        The indexer turns it into gt-index ``-source-revision`` only when the
+        producer declares ``source_revision_meta_v1``. Omitted when unknown,
+        so test doubles of the amend seam need not accept it.
+        """
+        revision = str(revision or "")
+        return {"source_revision": revision} if revision else {}
+
     def _sync_amend_graph(self, transaction: Any) -> None:
         """Patch the adopted graph with every path dirtied since its revision.
 
@@ -2703,6 +2714,7 @@ class MiniSweAdapter(GroundtruthController):
                     str(self.repo_root), layout=layout,
                     parent_graph=Path(parent), changed_paths=dirty,
                     excluded_roots=tuple(layout.excluded_roots),
+                    **self._source_revision_kwargs(str(transaction.post_revision)),
                 )
         except Exception as exc:  # noqa: BLE001 - a refused amend degrades, never raises
             published, reason, results = None, f"{type(exc).__name__}: {exc}"[:200], ()
@@ -3536,6 +3548,7 @@ class MiniSweAdapter(GroundtruthController):
                     str(self.repo_root), layout=layout,
                     parent_graph=Path(parent), changed_paths=dirty,
                     excluded_roots=tuple(layout.excluded_roots),
+                    **self._source_revision_kwargs(self.engine_state.source_revision),
                 ) if parent else (None, "no_parent_graph", ())
         except Exception as exc:  # noqa: BLE001 - an amend failure is data
             published, reason, results = None, f"{type(exc).__name__}: {exc}"[:200], ()

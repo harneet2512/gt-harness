@@ -1037,6 +1037,81 @@ def test_graph_independent_typed_query_does_not_refresh_stale_graph(
     assert adapter.graph_fresh is False
 
 
+_GRAPH_READING_KINDS = (
+    "definition", "references", "callers", "symbol_context", "processes",
+    "patch_impact", "route_map", "api_impact", "taint", "rename",
+    "shape_check", "tool_map", "slice",
+)
+
+
+def test_every_graph_reading_certified_kind_is_graph_dependent():
+    from gt_engine.generated_typed_capabilities import CERTIFIED_TYPED_KINDS
+
+    graph_kinds = set(CERTIFIED_TYPED_KINDS) - {
+        "exact_literal_search", "syntax", "verification_status",
+    }
+    assert graph_kinds == set(_GRAPH_READING_KINDS)
+    assert graph_kinds <= rt._GRAPH_DEPENDENT_TYPED_KINDS
+    assert "why_this_edge" in rt._GRAPH_DEPENDENT_TYPED_KINDS
+    assert not {"exact_literal_search", "syntax", "verification_status"} & (
+        rt._GRAPH_DEPENDENT_TYPED_KINDS
+    )
+
+
+@pytest.mark.parametrize("kind", _GRAPH_READING_KINDS)
+def test_graph_dependent_typed_query_refreshes_and_binds_the_graph_revision(
+    monkeypatch, tmp_path, kind,
+):
+    """A stale graph is made current before a graph-reading kind runs, and
+    the query is bound to the workspace revision the graph was built from."""
+    from gt_engine import miniswe_typed_actions
+
+    (tmp_path / "mod.py").write_text("needle = 1\n", encoding="utf-8")
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t",
+        state_dir=tmp_path / "state",
+        predicates=[Predicate("p", "p")],
+        repo_root=str(tmp_path),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    adapter.engine_state.bind_initial_source("ws-rev-1")
+    adapter.graph_fresh = False
+    phases = []
+
+    def refresh_graph(*, phase="graph_query"):
+        phases.append(phase)
+        adapter.graph_fresh = True
+        return True
+
+    captured = {}
+
+    def fake_execute(action, *, repo_root, configuration=None):
+        captured.update(configuration or {})
+        return None, {"output": "{}", "returncode": 2, "extra": {"gt_typed_action": True}}
+
+    monkeypatch.setattr(adapter, "refresh_graph", refresh_graph)
+    monkeypatch.setattr(miniswe_typed_actions, "execute_typed_action_fail_open", fake_execute)
+    install_runtime_hooks(agent, adapter)
+    agent.execute_actions(
+        {
+            "extra": {
+                "actions": [
+                    {
+                        "tool_name": "groundtruth",
+                        "tool_call_id": f"gt-{kind}",
+                        "gt_action": {"kind": kind, "arguments": {"symbol": "needle"}},
+                    }
+                ]
+            }
+        }
+    )
+
+    assert phases == ["graph_query"]
+    assert captured["graph_db"] == str(tmp_path / "graph.db")
+    assert captured["graph_source_revision"] == "ws-rev-1"
+
+
 def test_ordinary_provider_turn_does_not_rebuild_a_stale_graph(monkeypatch, tmp_path):
     agent = FakeAgent()
     agent.model = TransportFakeModel()
