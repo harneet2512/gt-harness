@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -172,6 +173,79 @@ def query_why_this_edge(
         expected_source_revision=expected_source_revision,
         expected_graph_revision=expected_graph_revision,
     )
+
+
+GRAPH_LOOKUP_SCHEMA = "gt.why_this_edge.graph_lookup.v1"
+_GRAPH_EDGE_COLUMNS = (
+    "id", "stable_id", "type", "source_line", "source_file", "resolution_method",
+    "confidence", "trust_tier", "candidate_count", "resolution_reason",
+    "selection_rule_id", "viability", "callsite_stable_id",
+)
+
+
+def lookup_graph_edge(
+    graph_db: str | os.PathLike[str] | None, arguments: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Read one edge from the live graph by its ``edge_id``.
+
+    This is what the typed ``why_this_edge`` path answers with. It reports
+    only what the graph stores for that edge; it never echoes or certifies
+    caller-supplied facts, and it is not a complete explanation (candidate
+    sets and flow-witness conservation are not re-derived here).
+    """
+    edge_id = arguments.get("edge_id")
+    if isinstance(edge_id, int) and not isinstance(edge_id, bool):
+        edge_id = str(edge_id)
+    if not isinstance(edge_id, str) or not edge_id.strip():
+        raise WhyThisEdgeAbstention("edge_id_identity")
+    edge_id = edge_id.strip()
+    if not graph_db or not Path(graph_db).is_file():
+        raise WhyThisEdgeAbstention("graph_unavailable")
+    uri = f"file:{Path(graph_db).resolve().as_posix()}?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=5) as connection:
+            available = {row[1] for row in connection.execute("PRAGMA table_info(edges)")}
+            if not {"id", "source_id", "target_id", "type"} <= available:
+                raise WhyThisEdgeAbstention("graph_edges_unavailable")
+            columns = [name for name in _GRAPH_EDGE_COLUMNS if name in available]
+            select = ", ".join(f"e.{name}" for name in columns)
+            clauses: list[str] = []
+            params: list[Any] = []
+            if "stable_id" in available:
+                clauses.append("e.stable_id = ?")
+                params.append(edge_id)
+            if edge_id.isdigit():
+                clauses.append("e.id = ?")
+                params.append(int(edge_id))
+            if not clauses:
+                raise WhyThisEdgeAbstention("edge_not_in_graph")
+            where = "(" + " OR ".join(clauses) + ")"
+            rows = connection.execute(
+                f"SELECT {select}, s.name, s.file_path, s.start_line, "
+                f"t.name, t.file_path, t.start_line FROM edges e "
+                f"LEFT JOIN nodes s ON s.id = e.source_id "
+                f"LEFT JOIN nodes t ON t.id = e.target_id "
+                f"WHERE {where} ORDER BY e.id LIMIT 2",
+                params,
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise WhyThisEdgeAbstention("graph_read_failed") from exc
+    if not rows:
+        raise WhyThisEdgeAbstention("edge_not_in_graph")
+    if len(rows) > 1:
+        raise WhyThisEdgeAbstention("edge_identity_ambiguous")
+    row = rows[0]
+    edge = dict(zip(columns, row[: len(columns)]))
+    source_name, source_file, source_line, target_name, target_file, target_line = row[
+        len(columns):
+    ]
+    return {
+        "schema": GRAPH_LOOKUP_SCHEMA,
+        "edge_id": edge_id,
+        "edge": {key: value for key, value in sorted(edge.items()) if value not in (None, "")},
+        "source": {"name": source_name, "file": source_file, "line": source_line},
+        "target": {"name": target_name, "file": target_file, "line": target_line},
+    }
 
 
 def verify_why_this_edge(result: Mapping[str, Any]) -> bool:

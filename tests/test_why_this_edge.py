@@ -101,9 +101,12 @@ def test_private_wire_action_returns_typed_result_and_never_shell_fallback(tmp_p
     }
     request, result = execute_typed_action_fail_open(action, repo_root=tmp_path)
     assert request["kind"] == "why_this_edge"
-    assert result["returncode"] == 0
-    assert result["extra"]["interception_decision"] == "REPLACE"
-    assert "typed_why_this_edge_exact" in result["output"]
+    # The typed path reads the edge from the live graph; a complete-looking
+    # record supplied by the caller is never certified back as exact.
+    assert result["returncode"] == 2
+    assert result["extra"]["interception_decision"] == "PASS_THROUGH"
+    assert "typed_why_this_edge_exact" not in result["output"]
+    assert "abstention:graph_unavailable" in result["output"]
     bad = {"tool_call_id": "tc-2", "gt_action": {"kind": "why_this_edge", "arguments": {}}}
     _, abstained = execute_typed_action_fail_open(bad, repo_root=tmp_path)
     assert abstained["returncode"] == 2
