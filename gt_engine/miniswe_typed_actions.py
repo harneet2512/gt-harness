@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import time
 from collections.abc import Mapping
@@ -33,14 +32,67 @@ from gt_engine.generated_typed_capabilities import (
     CERTIFICATION_SHA256,
     CERTIFIED_SYNTAX_EXTENSIONS,
     CERTIFIED_SYNTAX_LANGUAGES,
+    CERTIFIED_TYPED_KIND_LANGUAGES,
+    CERTIFIED_TYPED_KIND_SEMANTICS,
     CERTIFIED_TYPED_KINDS,
+    EXTENSION_LANGUAGES,
     LANGUAGE_MANIFEST_SHA256,
+    REGISTERED_LANGUAGE_IDENTITIES,
     REMOVED_TYPED_KINDS,
 )
 from gt_engine.result_envelope import envelope_for_result
+from gt_engine.typed_output_bounds import bound_compiled_observation
 
 if TYPE_CHECKING:
     from types import ModuleType
+
+
+# Argument contract per kind, as the wheel's ``_ALLOWED_ARGUMENTS`` accepts
+# it. The tool description is generated from the certified kinds only, so a
+# removed kind can never be advertised in prose either.
+KIND_ARGUMENT_DOCS = {
+    "exact_literal_search": (
+        "literal (single-line text) and paths (array of repository paths, "
+        "default [\".\"]); at most 20 matches, 256 bytes per line"
+    ),
+    "syntax": "path with a certified file extension",
+    "verification_status": "plan and result",
+    "patch_impact": (
+        "edited_files (object mapping each repository path to {before: text or "
+        "null, after: text})"
+    ),
+    "definition": "symbol with optional path and language",
+    "references": "symbol with optional path and language",
+    "callers": "symbol with optional depth (1-6, default 3), path, and language",
+    "symbol_context": "symbol with optional path and language",
+    "processes": "optional concept and limit (1-25, default 10)",
+    "route_map": "optional path (handler file prefix)",
+    "api_impact": "route and/or handler",
+    "taint": (
+        "source with optional sink, path, language, and depth (1-10, default 6); "
+        "symbol-level call reachability, not statement dataflow"
+    ),
+    "rename": "symbol with optional new_name, path, and language",
+    "shape_check": "symbol with optional path and language",
+    "tool_map": "optional path and language",
+    "slice": (
+        "symbol and line with optional direction (backward or forward, default "
+        "backward), path, language, variables (array of names), interprocedural "
+        "(boolean, default false), max_hops (default 25), and max_depth (default 3)"
+    ),
+}
+# Kinds whose certification is not exact are answered as evidence to weigh,
+# never as a replacement for the model's own inspection.
+_NON_EXACT_SEMANTICS = frozenset({"partial", "sound_overapprox"})
+
+
+def _arguments_description() -> str:
+    parts = [
+        f"{kind}: {KIND_ARGUMENT_DOCS[kind]}"
+        for kind in CERTIFIED_TYPED_KINDS
+        if kind in KIND_ARGUMENT_DOCS
+    ]
+    return "Exact typed arguments per kind. " + "; ".join(parts) + "."
 
 
 GROUNDTRUTH_TOOL = {
@@ -60,11 +112,7 @@ GROUNDTRUTH_TOOL = {
                 },
                 "arguments": {
                     "type": "object",
-                    "description": (
-                        "Exact typed arguments. Literal search uses literal and paths; "
-                        "syntax uses a certified file extension; "
-                        "patch impact uses edited_files; verification status uses plan and result."
-                    ),
+                    "description": _arguments_description(),
                     "additionalProperties": True,
                 },
                 "requested_fidelity": {
@@ -86,6 +134,18 @@ GROUNDTRUTH_TOOL = {
 }
 
 QUERY_MATCH_LIMIT = 20
+
+# Wire-kind aliases normalized to their certified canonical spellings. The
+# schema advertises only the canonical names; a call spelled with an alias is
+# still an explicitly selected typed action, so it is normalized before the
+# certification gate and request construction see it.
+_KIND_ALIASES = {
+    "find_definition": "definition",
+    "find_references": "references",
+    "find_callers": "callers",
+    "syntax_query": "syntax",
+}
+
 # 512 is the hard per-line ceiling. The fallback projection reserves half of
 # it so the canonical evidence and model-facing projection remain under the
 # 16 KiB whole-query ceiling even when all 20 slots are populated.
@@ -285,23 +345,23 @@ def _file_snapshot(repo_root: Path) -> str:
     return _snapshot_authority(repo_root)[0]
 
 
-def _graph_revision(path: str | Path | None, root: Path, fallback: str) -> str:
-    """Read the graph's semantic revision; its container hash is not equivalent."""
-    if not path:
-        return fallback
-    try:
-        graph_path = Path(path)
-        if not graph_path.is_absolute():
-            graph_path = root / graph_path
-        uri = f"file:{graph_path.resolve().as_posix()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5) as connection:
-            row = connection.execute(
-                "SELECT value FROM project_meta WHERE key='post_revision'"
-            ).fetchone()
-        revision = str(row[0] or "") if row else ""
-        return revision or fallback
-    except (OSError, sqlite3.Error):
-        return fallback
+# RevisionVector requires every dimension. When no EngineState authority is
+# bound, the graph dimension names that fact instead of borrowing an identity
+# the graph could trivially match.
+GRAPH_REVISION_UNBOUND = "graph-source-revision-unbound"
+
+
+def _graph_revision(configuration: Mapping[str, Any]) -> str:
+    """The workspace revision the live graph was built from (EngineState).
+
+    This is the value the indexer passes to gt-index as ``-source-revision``
+    and the producer persists as ``project_meta.source_revision``. It is never
+    read back from the graph itself: ``project_meta.git_commit`` is the
+    producer binary's build commit, and a graph-read identity would make the
+    producer's revision check compare the graph with itself.
+    """
+    revision = str(configuration.get("graph_source_revision") or "").strip()
+    return revision or GRAPH_REVISION_UNBOUND
 
 
 def _git_revision(repo_root: Path) -> str:
@@ -340,7 +400,7 @@ def _build_core_request(
         language_manifest_sha256=language_manifest,
         build_system=str(configuration.get("build_system") or "unspecified"),
     )
-    graph_revision = _graph_revision(configuration.get("graph_db"), root, working_tree)
+    graph_revision = _graph_revision(configuration)
     snapshot = core.RepositorySnapshot(
         schema=core.REPOSITORY_SNAPSHOT_SCHEMA,
         repository_id=hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
@@ -360,9 +420,18 @@ def _build_core_request(
     )
     kind_names = {
         "exact_literal_search": "EXACT_LITERAL_SEARCH",
-        "definition": "FIND_DEFINITION",
-        "references": "FIND_REFERENCES",
-        "callers": "FIND_CALLERS",
+        "definition": "DEFINITION",
+        "references": "REFERENCES",
+        "callers": "CALLERS",
+        "symbol_context": "SYMBOL_CONTEXT",
+        "processes": "PROCESSES",
+        "route_map": "ROUTE_MAP",
+        "api_impact": "API_IMPACT",
+        "taint": "TAINT",
+        "rename": "RENAME",
+        "shape_check": "SHAPE_CHECK",
+        "tool_map": "TOOL_MAP",
+        "slice": "SLICE",
         "syntax": "SYNTAX_QUERY",
         "patch_impact": "PATCH_IMPACT",
         "verification_status": "VERIFICATION_STATUS",
@@ -418,6 +487,7 @@ def build_action_request(
         "requested_fidelity": str(payload.get("requested_fidelity") or "exact"),
         "original_shell_form": "",
     }
+    wire["kind"] = _KIND_ALIASES.get(wire["kind"], wire["kind"])
     if not wire["action_id"]:
         wire["action_id"] = hashlib.sha256(_canonical_bytes(wire)).hexdigest()[:24]
 
@@ -557,6 +627,49 @@ def _literal_search(request: Mapping[str, Any], root: Path) -> tuple[list[dict],
     return answer, sorted(set(omissions))
 
 
+# Kinds that are not language-scoped: they take explicit scopes or plans, or
+# (syntax) carry their own extension gate.
+_LANGUAGE_UNSCOPED_KINDS = frozenset(
+    {"exact_literal_search", "syntax", "verification_status", "patch_impact"}
+)
+_LANGUAGE_NAME_ALIASES = {
+    "golang": "go",
+    "js": "javascript",
+    "py": "python",
+    "ts": "typescript",
+}
+
+
+def _language_certification_omission(kind: str, arguments: Any) -> str:
+    """Refuse a request scoped to a registered language the kind is not certified for.
+
+    The certification matrix is per (language, operation). A ``language`` or
+    ``path`` argument that names a registered language outside the kind's
+    certified set would otherwise be answered on kind name alone.
+    """
+    if kind in _LANGUAGE_UNSCOPED_KINDS:
+        return ""
+    certified = CERTIFIED_TYPED_KIND_LANGUAGES.get(kind)
+    if certified is None or not isinstance(arguments, Mapping):
+        return ""
+    named: list[str] = []
+    language = arguments.get("language")
+    if isinstance(language, str) and language.strip():
+        name = language.strip().lower()
+        name = _LANGUAGE_NAME_ALIASES.get(name, name)
+        if name in REGISTERED_LANGUAGE_IDENTITIES:
+            named.append(name)
+    path = arguments.get("path")
+    if isinstance(path, str) and path.strip():
+        mapped = EXTENSION_LANGUAGES.get(Path(path.strip()).suffix.lower())
+        if mapped:
+            named.append(mapped)
+    for name in named:
+        if name not in certified:
+            return f"typed_language_not_certified:{name}"
+    return ""
+
+
 def _deterministic_query_api() -> tuple[type, Any] | None:
     """Return the canonical dispatcher, falling back only for a genuinely old wheel."""
     try:
@@ -572,6 +685,18 @@ def _deterministic_query_api() -> tuple[type, Any] | None:
         raise
 
 
+def _demote_decision(payload: Mapping[str, Any], reason_code: str) -> dict[str, Any]:
+    """A REPLACE decision becomes AUGMENT; other modes keep their mode."""
+    demoted = dict(payload)
+    if demoted.get("mode") == "REPLACE":
+        demoted["mode"] = "AUGMENT"
+    reasons = list(demoted.get("reason_codes") or ())
+    if reason_code not in reasons:
+        reasons.append(reason_code)
+    demoted["reason_codes"] = reasons
+    return demoted
+
+
 def execute_typed_action(
     request: Any,
     *,
@@ -583,21 +708,15 @@ def execute_typed_action(
     kind = str(wire.get("kind") or "")
     if kind.startswith("ActionKind."):
         kind = kind.rsplit(".", 1)[-1].lower()
-    kind = {
-        "find_definition": "definition",
-        "find_references": "references",
-        "find_callers": "callers",
-        "syntax_query": "syntax",
-    }.get(kind, kind)
+    kind = _KIND_ALIASES.get(kind, kind)
     root = Path(repo_root).resolve()
     core = _core_compiler()
     query_api = _deterministic_query_api()
     certification_omission = ""
     reason = ""
     if kind == "why_this_edge":
-        # HAR-63 private compatibility path: an old wheel cannot expose the
-        # producer-owned query kind, but the harness may consume a complete
-        # producer record without laundering it into shell text.
+        # HAR-63 private compatibility path, never advertised: it reads the
+        # edge from the live graph and certifies nothing the caller supplied.
         certification_omission = ""
     elif kind not in CERTIFIED_TYPED_KINDS:
         certification_omission = "typed_kind_removed"
@@ -607,6 +726,10 @@ def execute_typed_action(
         extension = Path(str(arguments.get("path") or "")).suffix.lower()
         if extension not in CERTIFIED_SYNTAX_EXTENSIONS:
             certification_omission = "syntax_language_removed"
+    else:
+        certification_omission = _language_certification_omission(
+            kind, wire.get("arguments")
+        )
     if certification_omission:
         evidence = {
             "schema": "gt.evidence_artifact.v1",
@@ -630,36 +753,34 @@ def execute_typed_action(
             "reason_codes": [reason],
         }
     elif kind == "why_this_edge":
-        from gt_engine.why_this_edge import WhyThisEdgeAbstention, query_why_this_edge
+        from gt_engine.why_this_edge import WhyThisEdgeAbstention, lookup_graph_edge
 
         arguments = wire.get("arguments")
         arguments = dict(arguments) if isinstance(arguments, Mapping) else {}
+        graph_path = Path(graph_db) if graph_db else None
+        if graph_path is not None and not graph_path.is_absolute():
+            graph_path = root / graph_path
         try:
-            certified = query_why_this_edge(arguments)
+            looked_up = lookup_graph_edge(graph_path, arguments)
+            # The graph attests that this edge exists with these stored
+            # properties. It does not re-derive the candidate set or flow
+            # witnesses, so the answer is evidence, never an exact REPLACE.
             evidence = {
                 "schema": "gt.evidence_artifact.v1",
                 "action_id": wire.get("action_id", ""),
-                "answer": certified,
-                "anchors": [certified["edge_id"], certified["callsite_id"]],
-                "witnesses": sorted(
-                    witness
-                    for values in certified["flow_witnesses"].values()
-                    for witness in values
-                ),
-                "producer": "groundtruth.why_this_edge.v1",
-                "freshness": {
-                    "source_revision": certified["source_revision"],
-                    "graph_revision": certified["graph_revision"],
-                    "completion_identity": certified["completion_identity"],
-                },
-                "semantics": "exact",
-                "coverage": {"candidate_count": certified["candidate_count"]},
+                "answer": looked_up,
+                "anchors": [looked_up["edge_id"]],
+                "witnesses": [],
+                "producer": "gt-harness.why_this_edge.graph_lookup.v1",
+                "freshness": {"repository_snapshot": wire.get("repository_snapshot", "")},
+                "semantics": "incomplete",
+                "coverage": {},
                 "ambiguity": [],
-                "omissions": [],
+                "omissions": ["why_this_edge_graph_lookup_only"],
                 "raw_fallback": None,
             }
-            direct_answer = certified
-            decision, reason, returncode = "REPLACE", "typed_why_this_edge_exact", 0
+            direct_answer = looked_up
+            decision, reason, returncode = "AUGMENT", "why_this_edge_graph_lookup", 2
         except WhyThisEdgeAbstention as exc:
             evidence = {
                 "schema": "gt.evidence_artifact.v1",
@@ -667,7 +788,7 @@ def execute_typed_action(
                 "answer": None,
                 "anchors": [],
                 "witnesses": [],
-                "producer": "groundtruth.why_this_edge.v1",
+                "producer": "gt-harness.why_this_edge.graph_lookup.v1",
                 "freshness": {},
                 "semantics": "incomplete",
                 "coverage": {},
@@ -734,6 +855,22 @@ def execute_typed_action(
             returncode = 2
         wire = json.loads(core.canonical_bytes(request))
         decision_payload = json.loads(core.canonical_bytes(canonical_decision))
+        if (
+            decision == "REPLACE"
+            and CERTIFIED_TYPED_KIND_SEMANTICS.get(kind) in _NON_EXACT_SEMANTICS
+        ):
+            # The producer may label an answer exact (route_map does whenever
+            # its fixed framework manifest matched), but the kind's
+            # certification is only partial: the answer augments, it never
+            # replaces the model's own inspection.
+            decision, returncode = "AUGMENT", 2
+            decision_payload = _demote_decision(decision_payload, "CERTIFICATION_NOT_EXACT")
+            if isinstance(evidence, dict):
+                omissions = list(evidence.get("omissions") or ())
+                omissions.append(
+                    f"certified_semantics:{CERTIFIED_TYPED_KIND_SEMANTICS[kind]}"
+                )
+                evidence["omissions"] = omissions
     elif kind == "exact_literal_search":
         # Compatibility fallback for a vendored wheel that genuinely predates
         # the canonical deterministic-query dispatcher.
@@ -790,9 +927,14 @@ def execute_typed_action(
     freshness = evidence.get("freshness", {}) if isinstance(evidence, Mapping) else {}
     if not isinstance(freshness, Mapping):
         freshness = {}
+    snapshot_identity = wire.get("repository_snapshot")
+    if isinstance(snapshot_identity, Mapping):
+        # A core request carries the whole RepositorySnapshot; its working
+        # tree identity is the revision, not the mapping's repr.
+        snapshot_identity = snapshot_identity.get("working_tree_sha256")
     source_revision = str(
         freshness.get("source_revision")
-        or wire.get("repository_snapshot")
+        or snapshot_identity
         or ""
     )
     workspace_revision = _file_snapshot(root)
@@ -855,30 +997,22 @@ def execute_typed_action(
         "decision": decision_payload,
         "honesty": honesty,
     }
-    output = _canonical_bytes(result).decode("utf-8")
-    if len(output.encode("utf-8")) > QUERY_RESULT_MAX_BYTES:
-        evidence_map = result.get("evidence")
-        if isinstance(evidence_map, dict):
-            omissions = list(evidence_map.get("omissions") or ())
-            if "query_result_byte_limit" not in omissions:
-                omissions.append("query_result_byte_limit")
-            evidence_map["omissions"] = omissions
-        # Both projections contain the same fallback rows. Remove tail rows
-        # deterministically until the complete model-visible envelope fits.
-        while (
-            len(_canonical_bytes(result)) > QUERY_RESULT_MAX_BYTES
-            and isinstance(result.get("direct_answer"), list)
-            and result["direct_answer"]
-        ):
-            result["direct_answer"].pop()
-            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("answer"), list):
-                evidence_map["answer"].pop()
-            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("anchors"), list):
-                evidence_map["anchors"].pop()
-            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("witnesses"), list):
-                evidence_map["witnesses"].pop()
+    result, bounded = bound_compiled_observation(
+        result, max_bytes=QUERY_RESULT_MAX_BYTES, kind=kind
+    )
+    if bounded:
+        # The delivered payload is no longer the producer's whole answer: the
+        # decision and honesty record must say so, not describe the artifact
+        # as it was before the bound.
         returncode = 2
-        output = _canonical_bytes(result).decode("utf-8")
+        if decision == "REPLACE":
+            decision = "AUGMENT"
+        if isinstance(decision_payload, dict):
+            decision_payload = _demote_decision(decision_payload, "QUERY_RESULT_TRUNCATED")
+            result["decision"] = decision_payload
+        if isinstance(honesty, dict):
+            honesty["completeness"] = "incomplete"
+    output = _canonical_bytes(result).decode("utf-8")
     return {
         "output": output,
         "returncode": returncode,
