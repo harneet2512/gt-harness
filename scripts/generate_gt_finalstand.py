@@ -66,10 +66,149 @@ OPERATIONS = (
     "definition",
     "references",
     "callers",
+    "symbol_context",
+    "processes",
+    "route_map",
+    "api_impact",
+    "taint",
+    "rename",
+    "shape_check",
+    "tool_map",
+    "slice",
     "syntax",
     "patch_impact",
     "verification_status",
 )
+# The harness certification may narrow the GroundTruth compatibility
+# authority, never widen it. The producer labels every graph-backed kind
+# ``sound_overapprox``; none of them is sound. They read name-resolved
+# resolver edges (false CALLS edges such as a stdlib ``subprocess.run``
+# resolved to a same-file ``run`` method are CERTIFIED), miss dynamic
+# dispatch and unresolved calls, and several producers carry fixed
+# framework/registry manifests. Every such pair is certified ``partial``:
+# advertised, answered with its omissions, never ``REPLACE``.
+SEMANTICS_RANK = {
+    "removed": 0,
+    "not_applicable": 0,
+    "partial": 1,
+    "sound_overapprox": 2,
+    "execution_specific": 2,
+    "exact": 3,
+}
+HARNESS_SEMANTICS_CEILING = {
+    operation: "partial"
+    for operation in (
+        "definition",
+        "references",
+        "callers",
+        "symbol_context",
+        "processes",
+        "route_map",
+        "api_impact",
+        "taint",
+        "rename",
+        "shape_check",
+        "tool_map",
+        "slice",
+        "patch_impact",
+    )
+}
+CERTIFICATION_BASIS = {
+    "exact_literal_search": (
+        "language-agnostic explicit-scope byte scanner; omissions prevent exactness"
+    ),
+    "syntax": "registered parse-only checker with positive-error and unavailable outcomes",
+    "verification_status": (
+        "execution-specific verification contract bound to exact command and revision"
+    ),
+    "definition": (
+        "partial: exact name/qualified-name lookup over producer graph nodes; "
+        "abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+    ),
+    "references": (
+        "partial: incoming resolver edges by name resolution; misses dynamic "
+        "dispatch and unresolved references, may include false name-matched edges"
+    ),
+    "callers": (
+        "partial: CALLS edges from name-level resolution (trust tier carried, "
+        "not filtered); misses dynamic dispatch, may include false edges"
+    ),
+    "symbol_context": (
+        "partial: composite of definition, graph neighbors and detected "
+        "execution flows; inherits the resolver's name-level limits"
+    ),
+    "processes": (
+        "partial: heuristic execution-flow detection from graph entry points; "
+        "no completeness certificate"
+    ),
+    "route_map": (
+        "partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by "
+        "re-reading source lines against a fixed framework manifest (Python "
+        "@app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb "
+        "decorators, Express app/router.<verb>, Go HandleFunc/Handle/router "
+        "verbs); other frameworks are absent or render route unknown; "
+        "MIDDLEWARE_ON is not surfaced"
+    ),
+    "api_impact": (
+        "partial: route_map manifest limits apply; consumer attribution is "
+        "route-level only when the client literal equals the parsed route, "
+        "otherwise file-level"
+    ),
+    "taint": (
+        "partial: symbol-level reachability only (BFS over name-resolved CALLS "
+        "edges, trust tier unused) plus field writer/reader channels; not "
+        "statement- or value-level dataflow and not an over-approximation"
+    ),
+    "rename": (
+        "partial: rename preview from definitions and incoming graph edges by "
+        "edge type; text references are not enumerated"
+    ),
+    "shape_check": (
+        "partial: interface conformance and override arity provable from "
+        "persisted edges; arity is text-split; an interface whose members the "
+        "producer does not record passes vacuously; abstains when no contract exists"
+    ),
+    "tool_map": (
+        "partial: DECORATES edges on a fixed tool-registry name list; the "
+        "producer emits DECORATES only for class decorators resolving to an "
+        "in-repository callable, so function registrations such as "
+        "@mcp.tool() and undecorated registration sites are untracked"
+    ),
+    "slice": (
+        "partial: statement-level CFG data/control-dependence slice, only for "
+        "languages with a CFG substrate (Python source AST; go/java/js/ts "
+        "persisted cfg_* blocks with approximate use detection); "
+        "interprocedural hops are name-matched, not type-proven"
+    ),
+    "patch_impact": (
+        "partial: diff-to-symbol mapping over the call graph plus Python-only "
+        "forward statement slices; omissions flag unmapped edits"
+    ),
+}
+REMOVED_BASIS = "producer compatibility authority removes this language/operation pair"
+# Extension -> registry identity, used to enforce per-language certification
+# at the typed gate. Extensions absent here are not gated by language.
+LANGUAGE_EXTENSIONS = {
+    "bash": (".bash", ".sh"),
+    "c": (".c", ".h"),
+    "cpp": (".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"),
+    "csharp": (".cs",),
+    "elixir": (".ex", ".exs"),
+    "go": (".go",),
+    "groovy": (".gradle", ".groovy"),
+    "java": (".java",),
+    "javascript": (".cjs", ".js", ".jsx", ".mjs"),
+    "kotlin": (".kt", ".kts"),
+    "lua": (".lua",),
+    "ocaml": (".ml", ".mli"),
+    "php": (".php",),
+    "python": (".py", ".pyi"),
+    "ruby": (".rb",),
+    "rust": (".rs",),
+    "scala": (".scala",),
+    "swift": (".swift",),
+    "typescript": (".ts", ".tsx"),
+}
 SYNTAX_CERTIFIED = {"go", "javascript", "python", "ruby", "typescript"}
 SYNTAX_EXTENSIONS_BY_LANGUAGE = {
     "go": (".go",),
@@ -182,32 +321,20 @@ def _language_operations() -> bytes:
     }
     expected_pairs = {(language, operation) for language in registered for operation in OPERATIONS}
     if set(by_pair) != expected_pairs:
-        raise RuntimeError("GroundTruth compatibility artifact is not the complete 30x7 product")
+        raise RuntimeError(
+            f"GroundTruth compatibility artifact is not the complete 30x{len(OPERATIONS)} product"
+        )
 
     rows: list[dict[str, object]] = []
     for language_id in registered:
         for operation in OPERATIONS:
-            semantics = by_pair[(language_id, operation)]
+            semantics = _harness_semantics(operation, by_pair[(language_id, operation)])
             current_state = (
                 "ADVERTISED_CERTIFIED"
                 if semantics != "removed"
                 else "REMOVED_FROM_ADVERTISED_SCHEMA"
             )
-            if operation == "exact_literal_search":
-                basis = "language-agnostic explicit-scope byte scanner; omissions prevent exactness"
-            elif operation == "syntax":
-                basis = "registered parse-only checker with positive-error and unavailable outcomes"
-            elif operation == "verification_status":
-                basis = (
-                    "execution-specific verification contract bound to exact command and revision"
-                )
-            elif operation == "patch_impact":
-                basis = (
-                    "current producer is incomplete/partial and cannot satisfy its "
-                    "advertised contract"
-                )
-            else:
-                basis = "no language/configuration completeness certificate exists"
+            basis = CERTIFICATION_BASIS[operation] if semantics != "removed" else REMOVED_BASIS
             rows.append(
                 {
                     "language": display[language_id],
@@ -229,6 +356,14 @@ def _language_operations() -> bytes:
         ),
         rows,
     )
+
+
+def _harness_semantics(operation: str, upstream: str) -> str:
+    """Apply the harness ceiling; it can only lower the producer's label."""
+    ceiling = HARNESS_SEMANTICS_CEILING.get(operation)
+    if ceiling is None or SEMANTICS_RANK[upstream] <= SEMANTICS_RANK[ceiling]:
+        return upstream
+    return ceiling
 
 
 def _compatibility_source() -> dict[str, object]:
@@ -254,6 +389,15 @@ def _typed_capability_module(certification: bytes) -> bytes:
         "definition",
         "references",
         "callers",
+        "symbol_context",
+        "processes",
+        "route_map",
+        "api_impact",
+        "taint",
+        "rename",
+        "shape_check",
+        "tool_map",
+        "slice",
     )
     certified = tuple(
         kind
@@ -278,6 +422,34 @@ def _typed_capability_module(certification: bytes) -> bytes:
             for extension in SYNTAX_EXTENSIONS_BY_LANGUAGE[language]
         )
     )
+    kind_semantics = {
+        kind: sorted(
+            {
+                row["terminal_semantics"]
+                for row in rows
+                if row["operation"] == kind and row["terminal_semantics"] != "removed"
+            }
+        )
+        for kind in certified
+    }
+    kind_languages = {
+        kind: tuple(
+            sorted(
+                row["registry_identity"]
+                for row in rows
+                if row["operation"] == kind and row["terminal_semantics"] != "removed"
+            )
+        )
+        for kind in certified
+    }
+    for kind, labels in kind_semantics.items():
+        if len(labels) != 1:
+            raise ValueError(f"typed kind {kind} has mixed certified semantics {labels}")
+    extension_languages = {
+        extension: language
+        for language, extensions in LANGUAGE_EXTENSIONS.items()
+        for extension in extensions
+    }
     digest = hashlib.sha256(certification).hexdigest()
     compatibility = json.loads(COMPATIBILITY_SOURCE.read_text(encoding="utf-8"))
     manifest_sha256 = str(compatibility["source_manifest_sha256"])
@@ -292,6 +464,11 @@ def _typed_capability_module(certification: bytes) -> bytes:
     def tuple_literal(values: tuple[str, ...]) -> str:
         return "(\n" + "".join(f"    {value!r},\n" for value in values) + ")"
 
+    def mapping_literal(values: dict[str, object]) -> str:
+        return "{\n" + "".join(
+            f"    {key!r}: {value!r},\n" for key, value in sorted(values.items())
+        ) + "}"
+
     source = f'''"""Generated from gt_finalstand/language_operation_certification.csv.
 
 Do not edit by hand. Run ``python scripts/generate_gt_finalstand.py``.
@@ -305,6 +482,13 @@ CERTIFIED_TYPED_KINDS = {tuple_literal(certified)}
 REMOVED_TYPED_KINDS = {tuple_literal(removed)}
 CERTIFIED_SYNTAX_LANGUAGES = {tuple_literal(syntax_languages)}
 CERTIFIED_SYNTAX_EXTENSIONS = {tuple_literal(syntax_extensions)}
+# Certified semantics per kind. ``partial`` kinds are advertised but can
+# never produce a REPLACE decision.
+CERTIFIED_TYPED_KIND_SEMANTICS = {mapping_literal({k: v[0] for k, v in kind_semantics.items()})}
+# Registry languages certified per kind; a request whose language or path
+# names another registered language is refused at the typed gate.
+CERTIFIED_TYPED_KIND_LANGUAGES = {mapping_literal(kind_languages)}
+EXTENSION_LANGUAGES = {mapping_literal(extension_languages)}
 '''
     return source.encode("utf-8")
 

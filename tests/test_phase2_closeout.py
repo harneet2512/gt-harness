@@ -102,7 +102,7 @@ def _language_manifest() -> dict:
     }
 
 
-def test_live_go_manifest_contract_matches_210_pair_matrix() -> None:
+def test_live_go_manifest_contract_matches_480_pair_matrix() -> None:
     offline = _load("finalstand_offline")
     assert offline.validate_language_manifest(
         _language_manifest(), _certification_rows()

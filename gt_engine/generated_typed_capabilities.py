@@ -4,7 +4,7 @@ Do not edit by hand. Run ``python scripts/generate_gt_finalstand.py``.
 """
 
 CERTIFICATION_SCHEMA = "gt.typed_capability_certification.v1"
-CERTIFICATION_SHA256 = "945b86a5ac013ea48246399703a67400da4c2346b6ded4f8ae529f9dfbbca2dd"
+CERTIFICATION_SHA256 = "d71e12dc46fcbaa76f8ef627bc885d013e78330fde2b98ec048384bc011bf81e"
 LANGUAGE_MANIFEST_SHA256 = "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631"
 REGISTERED_LANGUAGE_IDENTITIES = (
     'bash',
@@ -41,13 +41,22 @@ REGISTERED_LANGUAGE_IDENTITIES = (
 CERTIFIED_TYPED_KINDS = (
     'exact_literal_search',
     'syntax',
-    'verification_status',
-)
-REMOVED_TYPED_KINDS = (
     'patch_impact',
+    'verification_status',
     'definition',
     'references',
     'callers',
+    'symbol_context',
+    'processes',
+    'route_map',
+    'api_impact',
+    'taint',
+    'rename',
+    'shape_check',
+    'tool_map',
+    'slice',
+)
+REMOVED_TYPED_KINDS = (
 )
 CERTIFIED_SYNTAX_LANGUAGES = (
     'go',
@@ -68,3 +77,80 @@ CERTIFIED_SYNTAX_EXTENSIONS = (
     '.ts',
     '.tsx',
 )
+# Certified semantics per kind. ``partial`` kinds are advertised but can
+# never produce a REPLACE decision.
+CERTIFIED_TYPED_KIND_SEMANTICS = {
+    'api_impact': 'partial',
+    'callers': 'partial',
+    'definition': 'partial',
+    'exact_literal_search': 'exact',
+    'patch_impact': 'partial',
+    'processes': 'partial',
+    'references': 'partial',
+    'rename': 'partial',
+    'route_map': 'partial',
+    'shape_check': 'partial',
+    'slice': 'partial',
+    'symbol_context': 'partial',
+    'syntax': 'exact',
+    'taint': 'partial',
+    'tool_map': 'partial',
+    'verification_status': 'execution_specific',
+}
+# Registry languages certified per kind; a request whose language or path
+# names another registered language is refused at the typed gate.
+CERTIFIED_TYPED_KIND_LANGUAGES = {
+    'api_impact': ('go', 'java', 'javascript', 'python', 'typescript'),
+    'callers': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'definition': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'exact_literal_search': ('bash', 'c', 'cpp', 'csharp', 'css', 'cue', 'elixir', 'elm', 'go', 'groovy', 'hcl', 'html', 'java', 'javascript', 'kotlin', 'lua', 'markdown', 'ocaml', 'php', 'protobuf', 'python', 'ruby', 'rust', 'scala', 'sql', 'svelte', 'swift', 'toml', 'typescript', 'yaml'),
+    'patch_impact': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'processes': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'references': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'rename': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'route_map': ('go', 'java', 'javascript', 'python', 'typescript'),
+    'shape_check': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'slice': ('go', 'java', 'javascript', 'python', 'typescript'),
+    'symbol_context': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'syntax': ('go', 'javascript', 'python', 'ruby', 'typescript'),
+    'taint': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'tool_map': ('go', 'java', 'javascript', 'python', 'rust', 'typescript'),
+    'verification_status': ('bash', 'c', 'cpp', 'csharp', 'css', 'cue', 'elixir', 'elm', 'go', 'groovy', 'hcl', 'html', 'java', 'javascript', 'kotlin', 'lua', 'markdown', 'ocaml', 'php', 'protobuf', 'python', 'ruby', 'rust', 'scala', 'sql', 'svelte', 'swift', 'toml', 'typescript', 'yaml'),
+}
+EXTENSION_LANGUAGES = {
+    '.bash': 'bash',
+    '.c': 'c',
+    '.cc': 'cpp',
+    '.cjs': 'javascript',
+    '.cpp': 'cpp',
+    '.cs': 'csharp',
+    '.cxx': 'cpp',
+    '.ex': 'elixir',
+    '.exs': 'elixir',
+    '.go': 'go',
+    '.gradle': 'groovy',
+    '.groovy': 'groovy',
+    '.h': 'c',
+    '.hh': 'cpp',
+    '.hpp': 'cpp',
+    '.hxx': 'cpp',
+    '.java': 'java',
+    '.js': 'javascript',
+    '.jsx': 'javascript',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
+    '.lua': 'lua',
+    '.mjs': 'javascript',
+    '.ml': 'ocaml',
+    '.mli': 'ocaml',
+    '.php': 'php',
+    '.py': 'python',
+    '.pyi': 'python',
+    '.rb': 'ruby',
+    '.rs': 'rust',
+    '.scala': 'scala',
+    '.sh': 'bash',
+    '.swift': 'swift',
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+}

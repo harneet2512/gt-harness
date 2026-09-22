@@ -1,211 +1,481 @@
 language,registry_identity,operation,terminal_semantics,current_state,certification_basis
 Bash,bash,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Bash,bash,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Bash,bash,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Bash,bash,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Bash,bash,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Bash,bash,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Bash,bash,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Bash,bash,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Bash,bash,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 C,c,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-C,c,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C,c,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C,c,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C,c,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-C,c,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C,c,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C,c,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 C,c,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 C++,cpp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-C++,cpp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C++,cpp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C++,cpp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C++,cpp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-C++,cpp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C++,cpp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C++,cpp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 C++,cpp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 C#,csharp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-C#,csharp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C#,csharp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C#,csharp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-C#,csharp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-C#,csharp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C#,csharp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+C#,csharp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 C#,csharp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 CSS,css,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-CSS,css,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CSS,css,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CSS,css,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CSS,css,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-CSS,css,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+CSS,css,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CSS,css,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 CSS,css,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 CUE,cue,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-CUE,cue,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CUE,cue,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CUE,cue,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-CUE,cue,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-CUE,cue,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+CUE,cue,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+CUE,cue,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 CUE,cue,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Elixir,elixir,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Elixir,elixir,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elixir,elixir,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elixir,elixir,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elixir,elixir,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Elixir,elixir,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Elixir,elixir,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elixir,elixir,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Elixir,elixir,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Elm,elm,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Elm,elm,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elm,elm,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elm,elm,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Elm,elm,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Elm,elm,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Elm,elm,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Elm,elm,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Elm,elm,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Go,go,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Go,go,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Go,go,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Go,go,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Go,go,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Go,go,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+Go,go,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+Go,go,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+Go,go,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+Go,go,route_map,partial,ADVERTISED_CERTIFIED,"partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by re-reading source lines against a fixed framework manifest (Python @app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb decorators, Express app/router.<verb>, Go HandleFunc/Handle/router verbs); other frameworks are absent or render route unknown; MIDDLEWARE_ON is not surfaced"
+Go,go,api_impact,partial,ADVERTISED_CERTIFIED,"partial: route_map manifest limits apply; consumer attribution is route-level only when the client literal equals the parsed route, otherwise file-level"
+Go,go,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+Go,go,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+Go,go,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+Go,go,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+Go,go,slice,partial,ADVERTISED_CERTIFIED,"partial: statement-level CFG data/control-dependence slice, only for languages with a CFG substrate (Python source AST; go/java/js/ts persisted cfg_* blocks with approximate use detection); interprocedural hops are name-matched, not type-proven"
 Go,go,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-Go,go,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Go,go,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 Go,go,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Groovy,groovy,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Groovy,groovy,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Groovy,groovy,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Groovy,groovy,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Groovy,groovy,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Groovy,groovy,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Groovy,groovy,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Groovy,groovy,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Groovy,groovy,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 HCL,hcl,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-HCL,hcl,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HCL,hcl,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HCL,hcl,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HCL,hcl,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-HCL,hcl,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+HCL,hcl,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HCL,hcl,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 HCL,hcl,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 HTML,html,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-HTML,html,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HTML,html,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HTML,html,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-HTML,html,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-HTML,html,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+HTML,html,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+HTML,html,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 HTML,html,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Java,java,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Java,java,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Java,java,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Java,java,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Java,java,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Java,java,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Java,java,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Java,java,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+Java,java,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+Java,java,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+Java,java,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+Java,java,route_map,partial,ADVERTISED_CERTIFIED,"partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by re-reading source lines against a fixed framework manifest (Python @app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb decorators, Express app/router.<verb>, Go HandleFunc/Handle/router verbs); other frameworks are absent or render route unknown; MIDDLEWARE_ON is not surfaced"
+Java,java,api_impact,partial,ADVERTISED_CERTIFIED,"partial: route_map manifest limits apply; consumer attribution is route-level only when the client literal equals the parsed route, otherwise file-level"
+Java,java,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+Java,java,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+Java,java,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+Java,java,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+Java,java,slice,partial,ADVERTISED_CERTIFIED,"partial: statement-level CFG data/control-dependence slice, only for languages with a CFG substrate (Python source AST; go/java/js/ts persisted cfg_* blocks with approximate use detection); interprocedural hops are name-matched, not type-proven"
+Java,java,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Java,java,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 Java,java,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 JavaScript,javascript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-JavaScript,javascript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-JavaScript,javascript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-JavaScript,javascript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+JavaScript,javascript,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+JavaScript,javascript,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+JavaScript,javascript,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+JavaScript,javascript,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+JavaScript,javascript,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+JavaScript,javascript,route_map,partial,ADVERTISED_CERTIFIED,"partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by re-reading source lines against a fixed framework manifest (Python @app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb decorators, Express app/router.<verb>, Go HandleFunc/Handle/router verbs); other frameworks are absent or render route unknown; MIDDLEWARE_ON is not surfaced"
+JavaScript,javascript,api_impact,partial,ADVERTISED_CERTIFIED,"partial: route_map manifest limits apply; consumer attribution is route-level only when the client literal equals the parsed route, otherwise file-level"
+JavaScript,javascript,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+JavaScript,javascript,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+JavaScript,javascript,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+JavaScript,javascript,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+JavaScript,javascript,slice,partial,ADVERTISED_CERTIFIED,"partial: statement-level CFG data/control-dependence slice, only for languages with a CFG substrate (Python source AST; go/java/js/ts persisted cfg_* blocks with approximate use detection); interprocedural hops are name-matched, not type-proven"
 JavaScript,javascript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-JavaScript,javascript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+JavaScript,javascript,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 JavaScript,javascript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Kotlin,kotlin,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Kotlin,kotlin,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Kotlin,kotlin,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Kotlin,kotlin,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Kotlin,kotlin,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Kotlin,kotlin,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Kotlin,kotlin,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Kotlin,kotlin,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Kotlin,kotlin,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Lua,lua,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Lua,lua,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Lua,lua,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Lua,lua,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Lua,lua,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Lua,lua,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Lua,lua,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Lua,lua,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Lua,lua,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Markdown,markdown,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Markdown,markdown,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Markdown,markdown,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Markdown,markdown,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Markdown,markdown,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Markdown,markdown,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Markdown,markdown,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Markdown,markdown,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Markdown,markdown,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 OCaml,ocaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-OCaml,ocaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-OCaml,ocaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-OCaml,ocaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-OCaml,ocaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-OCaml,ocaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+OCaml,ocaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+OCaml,ocaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 OCaml,ocaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 PHP,php,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-PHP,php,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-PHP,php,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-PHP,php,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-PHP,php,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-PHP,php,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+PHP,php,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+PHP,php,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 PHP,php,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Protobuf,protobuf,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Protobuf,protobuf,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Protobuf,protobuf,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Protobuf,protobuf,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Protobuf,protobuf,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Protobuf,protobuf,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Protobuf,protobuf,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Protobuf,protobuf,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Protobuf,protobuf,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Python,python,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Python,python,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Python,python,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Python,python,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Python,python,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Python,python,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+Python,python,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+Python,python,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+Python,python,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+Python,python,route_map,partial,ADVERTISED_CERTIFIED,"partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by re-reading source lines against a fixed framework manifest (Python @app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb decorators, Express app/router.<verb>, Go HandleFunc/Handle/router verbs); other frameworks are absent or render route unknown; MIDDLEWARE_ON is not surfaced"
+Python,python,api_impact,partial,ADVERTISED_CERTIFIED,"partial: route_map manifest limits apply; consumer attribution is route-level only when the client literal equals the parsed route, otherwise file-level"
+Python,python,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+Python,python,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+Python,python,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+Python,python,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+Python,python,slice,partial,ADVERTISED_CERTIFIED,"partial: statement-level CFG data/control-dependence slice, only for languages with a CFG substrate (Python source AST; go/java/js/ts persisted cfg_* blocks with approximate use detection); interprocedural hops are name-matched, not type-proven"
 Python,python,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-Python,python,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Python,python,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 Python,python,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Ruby,ruby,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Ruby,ruby,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Ruby,ruby,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Ruby,ruby,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Ruby,ruby,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Ruby,ruby,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-Ruby,ruby,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Ruby,ruby,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Ruby,ruby,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Rust,rust,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Rust,rust,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Rust,rust,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Rust,rust,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Rust,rust,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Rust,rust,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Rust,rust,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+Rust,rust,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+Rust,rust,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+Rust,rust,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+Rust,rust,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+Rust,rust,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Rust,rust,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Rust,rust,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+Rust,rust,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+Rust,rust,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+Rust,rust,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+Rust,rust,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Rust,rust,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Rust,rust,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 Rust,rust,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Scala,scala,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Scala,scala,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Scala,scala,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Scala,scala,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Scala,scala,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Scala,scala,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Scala,scala,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Scala,scala,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Scala,scala,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 SQL,sql,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-SQL,sql,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-SQL,sql,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-SQL,sql,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-SQL,sql,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-SQL,sql,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+SQL,sql,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+SQL,sql,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 SQL,sql,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Svelte,svelte,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Svelte,svelte,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Svelte,svelte,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Svelte,svelte,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Svelte,svelte,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Svelte,svelte,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Svelte,svelte,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Svelte,svelte,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Svelte,svelte,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 Swift,swift,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-Swift,swift,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Swift,swift,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Swift,swift,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-Swift,swift,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-Swift,swift,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Swift,swift,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+Swift,swift,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 Swift,swift,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 TOML,toml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-TOML,toml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TOML,toml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TOML,toml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TOML,toml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-TOML,toml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+TOML,toml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+TOML,toml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 TOML,toml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 TypeScript,typescript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-TypeScript,typescript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TypeScript,typescript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-TypeScript,typescript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TypeScript,typescript,definition,partial,ADVERTISED_CERTIFIED,"partial: exact name/qualified-name lookup over producer graph nodes; abstains incomplete on missing graph, unresolved symbol, or revision mismatch"
+TypeScript,typescript,references,partial,ADVERTISED_CERTIFIED,"partial: incoming resolver edges by name resolution; misses dynamic dispatch and unresolved references, may include false name-matched edges"
+TypeScript,typescript,callers,partial,ADVERTISED_CERTIFIED,"partial: CALLS edges from name-level resolution (trust tier carried, not filtered); misses dynamic dispatch, may include false edges"
+TypeScript,typescript,symbol_context,partial,ADVERTISED_CERTIFIED,"partial: composite of definition, graph neighbors and detected execution flows; inherits the resolver's name-level limits"
+TypeScript,typescript,processes,partial,ADVERTISED_CERTIFIED,partial: heuristic execution-flow detection from graph entry points; no completeness certificate
+TypeScript,typescript,route_map,partial,ADVERTISED_CERTIFIED,"partial: HANDLES_ROUTE/API_CALL edges; route paths are recovered by re-reading source lines against a fixed framework manifest (Python @app/@router/@api.<verb> decorators, Spring @*Mapping, NestJS verb decorators, Express app/router.<verb>, Go HandleFunc/Handle/router verbs); other frameworks are absent or render route unknown; MIDDLEWARE_ON is not surfaced"
+TypeScript,typescript,api_impact,partial,ADVERTISED_CERTIFIED,"partial: route_map manifest limits apply; consumer attribution is route-level only when the client literal equals the parsed route, otherwise file-level"
+TypeScript,typescript,taint,partial,ADVERTISED_CERTIFIED,"partial: symbol-level reachability only (BFS over name-resolved CALLS edges, trust tier unused) plus field writer/reader channels; not statement- or value-level dataflow and not an over-approximation"
+TypeScript,typescript,rename,partial,ADVERTISED_CERTIFIED,partial: rename preview from definitions and incoming graph edges by edge type; text references are not enumerated
+TypeScript,typescript,shape_check,partial,ADVERTISED_CERTIFIED,partial: interface conformance and override arity provable from persisted edges; arity is text-split; an interface whose members the producer does not record passes vacuously; abstains when no contract exists
+TypeScript,typescript,tool_map,partial,ADVERTISED_CERTIFIED,"partial: DECORATES edges on a fixed tool-registry name list; the producer emits DECORATES only for class decorators resolving to an in-repository callable, so function registrations such as @mcp.tool() and undecorated registration sites are untracked"
+TypeScript,typescript,slice,partial,ADVERTISED_CERTIFIED,"partial: statement-level CFG data/control-dependence slice, only for languages with a CFG substrate (Python source AST; go/java/js/ts persisted cfg_* blocks with approximate use detection); interprocedural hops are name-matched, not type-proven"
 TypeScript,typescript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
-TypeScript,typescript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+TypeScript,typescript,patch_impact,partial,ADVERTISED_CERTIFIED,partial: diff-to-symbol mapping over the call graph plus Python-only forward statement slices; omissions flag unmapped edits
 TypeScript,typescript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
 YAML,yaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
-YAML,yaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-YAML,yaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-YAML,yaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
-YAML,yaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
-YAML,yaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+YAML,yaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,symbol_context,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,processes,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,route_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,api_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,taint,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,rename,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,shape_check,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,tool_map,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,slice,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
+YAML,yaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,producer compatibility authority removes this language/operation pair
 YAML,yaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision

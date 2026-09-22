@@ -231,7 +231,7 @@ def test_finalstand_is_machine_valid(monkeypatch: pytest.MonkeyPatch) -> None:
         "direct": 17,
         "role_audit": 129,
         "languages": 30,
-        "language_operation_pairs": 210,
+        "language_operation_pairs": 480,
         "todo_statuses": 26,
     }
 

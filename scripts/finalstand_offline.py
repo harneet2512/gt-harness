@@ -201,8 +201,8 @@ def validate_language_manifest(
     pairs = {
         (row["registry_identity"], row["operation"]) for row in certification_rows
     }
-    if len(pairs) != 210:
-        errors.append("certification matrix must contain 210 unique pairs")
+    if len(pairs) != 480:
+        errors.append("certification matrix must contain 480 unique pairs")
     if compatibility is not None:
         manifest_hash = hashlib.sha256(
             json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode(
