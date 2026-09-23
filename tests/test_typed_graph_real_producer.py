@@ -332,11 +332,6 @@ def test_shape_check_runs_the_interface_conformance_check(polyglot):
     assert {check["interface"] for check in answer["checks"]} == {"Greeter"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="producer defect: TS interface members are not counted (required_count 0), so a "
-           "class missing wave() passes conformance vacuously",
-)
 def test_shape_check_reports_the_missing_interface_method(polyglot):
     root, graph, _ = polyglot
     _, answer = _run(root, graph, "shape_check", {"symbol": "Friendly"})
@@ -417,12 +412,6 @@ def test_why_this_edge_reads_a_producer_edge(polyglot):
         "CALLS", "list_items", "clean")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="query defect: an API_CALL-only route (inline Express handler) yields anchor line "
-           "0, the observation compiler rejects it, and route_map returns "
-           "producer_not_supported for the whole answer",
-)
 def test_route_map_survives_an_api_call_only_route(gt_index, tmp_path):
     binary, info = gt_index
     files = dict(POLYGLOT_FILES)
