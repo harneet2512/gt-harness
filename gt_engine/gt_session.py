@@ -1120,6 +1120,7 @@ class GTSession:
                         unit.get("artifact_reference") or {}
                     ),
                     "supersession_key": key,
+                    "source_revision": unit["source_revision"],
                     "admitted_iteration": int(unit.get("admitted_iteration") or 0),
                     "admission_order": self._context_unit_sequence,
                 }
@@ -1134,6 +1135,9 @@ class GTSession:
                             "rendered": superseded_unit["rendered"],
                             "supersession_key": key,
                             "superseded_by": unit["unit_id"],
+                            "source_revision": superseded_unit.get(
+                                "source_revision"
+                            ),
                             "artifact_reference": dict(
                                 superseded_unit.get("artifact_reference") or {}
                             ),
@@ -1161,6 +1165,68 @@ class GTSession:
         # deferred-catalog rehearsal failure, run 34743962908).
         if drain_action_queue:
             self._queued_decision_candidates.clear()
+
+    def unit_state(self, unit_id: str) -> dict[str, Any] | None:
+        """Internal freshness record for an admitted context unit (C5).
+
+        Every admitted unit carries the ``source_revision`` it was produced
+        against; this reports whether that revision still equals the
+        workspace revision EngineState tracks. It changes nothing about what
+        is admitted, sent, or demoted — it is state, not policy. ``None``
+        for a unit this session never admitted.
+        """
+
+        record = self._context_unit_rendered.get(unit_id)
+        active = next(
+            (
+                unit
+                for unit in self._active_context_units.values()
+                if unit.get("unit_id") == unit_id
+            ),
+            None,
+        )
+        superseded = next(
+            (
+                unit
+                for unit in self._superseded_context_units
+                if unit.get("unit_id") == unit_id
+            ),
+            None,
+        )
+        if record is None and active is None and superseded is None:
+            return None
+        source_revision = str(
+            (record or {}).get("source_revision")
+            or (active or {}).get("source_revision")
+            or (superseded or {}).get("source_revision")
+            or ""
+        )
+        workspace_revision = str(
+            getattr(
+                getattr(self._engine, "engine_state", None), "source_revision", ""
+            )
+            or getattr(self._engine, "repository_revision", "")
+            or ""
+        )
+        decidable = bool(source_revision and workspace_revision)
+        return {
+            "unit_id": unit_id,
+            "source_revision": source_revision,
+            "workspace_revision": workspace_revision,
+            "superseded": superseded is not None,
+            "admitted_iteration": int((record or {}).get("admitted_iteration") or 0),
+            "is_stale": (source_revision != workspace_revision) if decidable else None,
+        }
+
+    def is_stale(self, unit_id: str) -> bool | None:
+        """Whether an admitted unit's source_revision trails the workspace.
+
+        ``None`` when the unit is unknown or the comparison is undecidable
+        (either revision empty). Internal state only (C5).
+        """
+
+        state = self.unit_state(unit_id)
+        return None if state is None else state["is_stale"]
 
     def queue_decision_candidates(
         self, candidates: list[GTDecisionCandidate] | tuple[GTDecisionCandidate, ...]

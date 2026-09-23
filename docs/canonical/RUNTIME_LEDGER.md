@@ -35,6 +35,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 | 21 | Provider-view compaction | DELIVERY POLICY | `gt_engine/context.py:262 compact_provider_view`; caps tool outputs 65,536 chars (`rt:1357-1390`) | compacted outgoing provider view | drops whole old turn groups | message history, window | yes — request shaping |
 | 22 | BoundedHistoryAgent | BENCHMARK SCAFFOLD | `scripts/miniswe_gt_run.py:203 BoundedHistoryAgent` | `_compact_miniswe_history` lossless refs | history rewrite before query | Mini-SWE 2.4.6 DefaultAgent | yes — the integration shell itself |
 | 23 | Output preview | DELIVERY POLICY | `output_evidence.py` head 49,152 + tail 16,384 chars spool-to-CAS | bounded output previews | observation shaping | command output | yes — evidence bounding |
+| 24 | Unit freshness (C5) | INTELLIGENCE/STATE | `gt_session.py:1169 unit_state`, `:1221 is_stale`; facade `gt_engine/capabilities/freshness.py` (`index_revision`, `graph_state`, `unit_state`) | per-unit `source_revision` vs `EngineState.source_revision` → current/stale/undecidable | none — read-only state | admitted context units, EngineState | yes — freshness surface for integration |
 
 ## Notes
 
