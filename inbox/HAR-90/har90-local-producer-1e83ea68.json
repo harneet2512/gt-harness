@@ -1,0 +1,55 @@
+{
+  "basis": "local_gates_green_native_build_uncertified",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64-1e83ea687bf2df5d9a168b2bc2c77ea3fd990307",
+    "build_info_sha256": "cc0e78db552b497404ae73e67762e57078d801da5c173b28d55262a2568e1d67",
+    "build_method": "native_wsl2_ubuntu_musl_go1.22.2",
+    "builder_image_digest": null,
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "source_revision_meta_v1",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "Windows go test ./... green at merge 0ff6ab4e (incl. 37-subtest convergence matrix)",
+      "WSL go1.22.2 go vet clean + full go test suite green",
+      "PYTHONPATH=src pytest -q tests: 4704 passed / 0 failed at 1e83ea68",
+      "verify_wheel_source PASS: wheel 658cad06 byte-corresponds to src/ (328 files)",
+      "smoke canonical/old rc=0 1639s 769530n/789402e; canonical/new rc=0 1562s 771000n/790030e",
+      "smoke airflow600 (-max-files 600) old rc=0 80s 162632n/182065e; new rc=0 89s 164450n/185037e",
+      "smoke producer/old rc=0 6621s 17108n/48641e (baseline 0becde10)"
+    ],
+    "conclusion": "success",
+    "confidence": "moderate",
+    "jobs_green": [],
+    "limitations": [
+      "no pinned-image certified build: docker daemon unavailable; binary is native WSL2/musl go1.22.2 (uncertified)",
+      "producer/new full smoke failed closed 3x on disk exhaustion (peak WAL 42.8GB + DB 15.5GB > ~62GB max free); bounded producer600 pair substituted",
+      "full uncapped airflow smoke not attempted: projected >100GB footprint on available hardware"
+    ],
+    "paid_dispatch": false,
+    "parent_source_commit": "0becde100410d4a1d61022e83306ec479590f5c8",
+    "producer_sha256": "b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "a70e4eac87a96b4320c6f5f976b6b09045244b6902f0770ba313df45cc297a9f",
+    "wheel_sha256": "658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc",
+    "workflow": null,
+    "workflow_repo": "harneet2512/gt-harness",
+    "workflow_run_id": null
+  },
+  "head_sha": "1e83ea687bf2df5d9a168b2bc2c77ea3fd990307",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "b50390463200d5085ddd5aa3ad9f67e645a90c7afa1cb239c3148b786a233b69",
+  "packet_id": "har90-local-producer-1e83ea68",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
