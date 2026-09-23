@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+      "dirty_diff_sha256": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
-        "repository_content": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
-        "runtime_evidence": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+        "lsp": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
+        "repository_content": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
+        "runtime_evidence": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+      "working_tree_sha256": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -44,30 +44,25 @@
   "direct_answer": {
     "files_observed": [
       {
-        "bytes": 1600,
-        "path": "pyapp/__pycache__/test_server.cpython-312-pytest-8.4.2.pyc",
-        "sha256": "c2c37ec62925baba383de35d4fa2e57d93dc6fb58a286dbb42dcc582d252a687"
-      },
-      {
-        "bytes": 303,
+        "bytes": 289,
         "path": "pyapp/helpers.py",
-        "sha256": "a95a54eef74ecbfb25c93c508f45d9e2e8021c7591928f71281bdb286336f3c3"
+        "sha256": "3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52"
       },
       {
-        "bytes": 1924,
+        "bytes": 1834,
         "path": "pyapp/server.py",
-        "sha256": "f2c73b697a3aa7e0afb7dfbae6d7c8c1b5bd5bb5934d72407e2b29180652d0d7"
+        "sha256": "daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee"
       },
       {
-        "bytes": 605,
+        "bytes": 583,
         "path": "pyapp/test_server.py",
-        "sha256": "0b998c74da874ec191abe7cd2d8164f59f41a06ca1258ca6b1aaacf34817ca6f"
+        "sha256": "50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f"
       }
     ],
     "literal": "Depends(get_store)",
     "matches": [
       {
-        "byte_offset": 1559,
+        "byte_offset": 1481,
         "column": 31,
         "column_unit": "utf8_byte_1_based",
         "line": 79,
@@ -75,7 +70,7 @@
         "path": "pyapp/server.py"
       },
       {
-        "byte_offset": 1782,
+        "byte_offset": 1696,
         "column": 32,
         "column_unit": "utf8_byte_1_based",
         "line": 87,
@@ -86,7 +81,7 @@
     "scope": [
       "pyapp"
     ],
-    "scope_sha256": "e8bb775b27fa7bca95330241ab5560cccbb1fbb94855e0607b1161775bbcf91e"
+    "scope_sha256": "dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280"
   },
   "evidence": {
     "action_id": "canon:exact_literal_search:depends",
@@ -106,11 +101,11 @@
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "complete",
-    "direct_answer_json": "{\"files_observed\":[{\"bytes\":1600,\"path\":\"pyapp/__pycache__/test_server.cpython-312-pytest-8.4.2.pyc\",\"sha256\":\"c2c37ec62925baba383de35d4fa2e57d93dc6fb58a286dbb42dcc582d252a687\"},{\"bytes\":303,\"path\":\"pyapp/helpers.py\",\"sha256\":\"a95a54eef74ecbfb25c93c508f45d9e2e8021c7591928f71281bdb286336f3c3\"},{\"bytes\":1924,\"path\":\"pyapp/server.py\",\"sha256\":\"f2c73b697a3aa7e0afb7dfbae6d7c8c1b5bd5bb5934d72407e2b29180652d0d7\"},{\"bytes\":605,\"path\":\"pyapp/test_server.py\",\"sha256\":\"0b998c74da874ec191abe7cd2d8164f59f41a06ca1258ca6b1aaacf34817ca6f\"}],\"literal\":\"Depends(get_store)\",\"matches\":[{\"byte_offset\":1559,\"column\":31,\"column_unit\":\"utf8_byte_1_based\",\"line\":79,\"line_text\":\"def list_items(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"},{\"byte_offset\":1782,\"column\":32,\"column_unit\":\"utf8_byte_1_based\",\"line\":87,\"line_text\":\"def render_item(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"}],\"scope\":[\"pyapp\"],\"scope_sha256\":\"e8bb775b27fa7bca95330241ab5560cccbb1fbb94855e0607b1161775bbcf91e\"}",
+    "direct_answer_json": "{\"files_observed\":[{\"bytes\":289,\"path\":\"pyapp/helpers.py\",\"sha256\":\"3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52\"},{\"bytes\":1834,\"path\":\"pyapp/server.py\",\"sha256\":\"daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee\"},{\"bytes\":583,\"path\":\"pyapp/test_server.py\",\"sha256\":\"50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f\"}],\"literal\":\"Depends(get_store)\",\"matches\":[{\"byte_offset\":1481,\"column\":31,\"column_unit\":\"utf8_byte_1_based\",\"line\":79,\"line_text\":\"def list_items(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"},{\"byte_offset\":1696,\"column\":32,\"column_unit\":\"utf8_byte_1_based\",\"line\":87,\"line_text\":\"def render_item(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"}],\"scope\":[\"pyapp\"],\"scope_sha256\":\"dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280\"}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [],
     "producer": "deterministic_query.exact_literal_search",
-    "producer_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "producer_revision": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
     "producer_version": "gt.deterministic_queries.v1",
     "raw_fallback_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "request_sha256": "<VOLATILE>",
@@ -118,10 +113,9 @@
     "semantics": "exact",
     "snapshot_sha256": "<VOLATILE>",
     "witnesses": [
-      "file:pyapp/__pycache__/test_server.cpython-312-pytest-8.4.2.pyc:c2c37ec62925baba383de35d4fa2e57d93dc6fb58a286dbb42dcc582d252a687",
-      "file:pyapp/helpers.py:a95a54eef74ecbfb25c93c508f45d9e2e8021c7591928f71281bdb286336f3c3",
-      "file:pyapp/server.py:f2c73b697a3aa7e0afb7dfbae6d7c8c1b5bd5bb5934d72407e2b29180652d0d7",
-      "file:pyapp/test_server.py:0b998c74da874ec191abe7cd2d8164f59f41a06ca1258ca6b1aaacf34817ca6f"
+      "file:pyapp/helpers.py:3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52",
+      "file:pyapp/server.py:daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee",
+      "file:pyapp/test_server.py:50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f"
     ]
   },
   "honesty": {
@@ -131,30 +125,25 @@
     "payload": {
       "files_observed": [
         {
-          "bytes": 1600,
-          "path": "pyapp/__pycache__/test_server.cpython-312-pytest-8.4.2.pyc",
-          "sha256": "c2c37ec62925baba383de35d4fa2e57d93dc6fb58a286dbb42dcc582d252a687"
-        },
-        {
-          "bytes": 303,
+          "bytes": 289,
           "path": "pyapp/helpers.py",
-          "sha256": "a95a54eef74ecbfb25c93c508f45d9e2e8021c7591928f71281bdb286336f3c3"
+          "sha256": "3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52"
         },
         {
-          "bytes": 1924,
+          "bytes": 1834,
           "path": "pyapp/server.py",
-          "sha256": "f2c73b697a3aa7e0afb7dfbae6d7c8c1b5bd5bb5934d72407e2b29180652d0d7"
+          "sha256": "daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee"
         },
         {
-          "bytes": 605,
+          "bytes": 583,
           "path": "pyapp/test_server.py",
-          "sha256": "0b998c74da874ec191abe7cd2d8164f59f41a06ca1258ca6b1aaacf34817ca6f"
+          "sha256": "50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f"
         }
       ],
       "literal": "Depends(get_store)",
       "matches": [
         {
-          "byte_offset": 1559,
+          "byte_offset": 1481,
           "column": 31,
           "column_unit": "utf8_byte_1_based",
           "line": 79,
@@ -162,7 +151,7 @@
           "path": "pyapp/server.py"
         },
         {
-          "byte_offset": 1782,
+          "byte_offset": 1696,
           "column": 32,
           "column_unit": "utf8_byte_1_based",
           "line": 87,
@@ -173,14 +162,14 @@
       "scope": [
         "pyapp"
       ],
-      "scope_sha256": "e8bb775b27fa7bca95330241ab5560cccbb1fbb94855e0607b1161775bbcf91e"
+      "scope_sha256": "dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280"
     },
     "returned_count": 2,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "source_revision": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
     "true_total": 2,
     "unresolved_identities": [],
-    "workspace_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+    "workspace_revision": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
   },
   "schema": "gt.compiled_observation.v1"
 }

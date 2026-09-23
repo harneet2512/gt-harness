@@ -560,3 +560,156 @@ def assert_graphs_isomorphic(
                         remember(xa, xb, f"{table}.{c}")
 
     return id_map
+
+
+# ---------------------------------------------------------------------------
+# Runtime-intelligence fixtures (F.2/F.3)
+#
+# ``index_fixture`` shells the producer straight into ``-output graph.db``:
+# real graph rows, but no certification manifest, so the synchronous amend
+# chain can only refuse it (``parent_manifest_missing``). The runtime and
+# cross-layer suites need an adoption-capable parent, so they bind a graph
+# produced by the production ``indexer.ensure_index`` path — publication
+# lock, revision store, manifest — into a live MiniSweAdapter + GTSession,
+# the same object pair that performs the amend and serves the facades.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RuntimeWorkspace:
+    """One certified fixture workspace bound into the live engine pair.
+
+    ``root`` is a tmp copy of the fixture tree — the only place tests may
+    edit. ``graph`` is the certified published parent. ``adapter`` owns the
+    journal/CAS store under ``state / task_id`` and the EngineState whose
+    ``graph_current`` flag gates every freshness assertion.
+    """
+
+    root: Path
+    state: Path
+    task_id: str
+    layout: Any
+    graph: Path
+    diagnostics: tuple[str, ...]
+    adapter: Any
+    session: Any
+    binary: str
+    build_info: dict
+
+    def journal_events(self) -> list[dict[str, Any]]:
+        """Every journaled row, in order — a read-only scan."""
+        path = self.state / self.task_id / "events.jsonl"
+        if not path.is_file():
+            return []
+        rows: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+        return rows
+
+    def journal_event(self, event: str) -> dict[str, Any] | None:
+        """The most recent row of one journal event type, or None."""
+        last: dict[str, Any] | None = None
+        for row in self.journal_events():
+            if row.get("event") == event:
+                last = row
+        return last
+
+    def cas_blob(self, namespace: str, digest: str) -> bytes | None:
+        """One immutable CAS blob, or None — never synthesized."""
+        target = self.state / self.task_id / namespace / f"{digest}.json"
+        return target.read_bytes() if target.is_file() else None
+
+
+@pytest.fixture
+def runtime_workspace(gt_index, tmp_path, monkeypatch):
+    """Factory producing certified runtime workspaces: ``build(tag)``.
+
+    Each call copies ``fixtures/polyglot`` into a fresh scratch root,
+    indexes it with the REAL producer through ``indexer.ensure_index``
+    (which publishes the revision + certification manifest the amend
+    chain requires), and binds the graph into ``MiniSweAdapter`` +
+    ``GTSession`` with ``bind_initial_source`` — the same binding the
+    production runtime performs. A test may call ``build`` more than
+    once for independent engine instances; each call pays one real
+    producer run.
+
+    On Windows the production indexer refuses to spawn the producer
+    until a verifiable descendant-teardown guard exists; these tests
+    stand in a verified kill for it — the same established pattern as
+    ``tests/test_index_incremental.py``. The refusal remains production
+    behavior outside the suite.
+    """
+    from gt_engine import indexer
+    from gt_engine.engine_state import RuntimeLayout
+    from gt_engine.gt_session import GTSession, GTSessionConfig
+    from gt_engine.miniswe_integration import MiniSweAdapter
+
+    binary, info = gt_index
+    # ensure_index resolves the binary itself; pin it to the very producer
+    # the session fixture probed (also what a vendored-source build needs).
+    monkeypatch.setenv("GT_INDEX_BINARY", binary)
+    if os.name == "nt":
+        def verified_test_kill(process):
+            if process.poll() is None:
+                process.kill()
+            return True
+
+        monkeypatch.setattr(
+            indexer, "_has_verified_index_process_tree_guard", lambda: True
+        )
+        monkeypatch.setattr(
+            indexer, "_kill_index_process_tree", verified_test_kill
+        )
+
+    import itertools
+
+    counter = itertools.count()
+
+    def build(tag: str = "ws") -> RuntimeWorkspace:
+        n = next(counter)
+        base = tmp_path / f"rt-{tag}-{n}"
+        root = base / "repo"
+        shutil.copytree(FIXTURE_DIR, root)
+        state = base / "state"
+        task_id = f"canon-rt-{tag}-{n}"
+        layout = RuntimeLayout.resolve(
+            workspace=root, state_root=state, task_id=task_id
+        )
+        diagnostics: list[str] = []
+        graph = indexer.ensure_index(
+            str(root),
+            layout=layout,
+            source_revision=FIXTURE_REVISION,
+            diagnostics=diagnostics,
+        )
+        if graph is None:
+            pytest.skip(
+                "real producer could not publish a certified graph: "
+                + ("; ".join(diagnostics) or "no diagnostics recorded")
+            )
+        adapter = MiniSweAdapter(
+            task_id=task_id,
+            state_dir=state,
+            predicates=[],
+            repo_root=root,
+            graph_db=graph,
+            layout=layout,
+        )
+        adapter.engine_state.bind_initial_source(FIXTURE_REVISION)
+        session = GTSession(GTSessionConfig(task_id=task_id), engine=adapter)
+        return RuntimeWorkspace(
+            root=root,
+            state=state,
+            task_id=task_id,
+            layout=layout,
+            graph=Path(graph),
+            diagnostics=tuple(diagnostics),
+            adapter=adapter,
+            session=session,
+            binary=binary,
+            build_info=info,
+        )
+
+    return build

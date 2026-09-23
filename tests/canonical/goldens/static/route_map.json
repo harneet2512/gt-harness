@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+      "dirty_diff_sha256": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
-        "repository_content": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
-        "runtime_evidence": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+        "lsp": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
+        "repository_content": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
+        "runtime_evidence": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+      "working_tree_sha256": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -547,10 +547,10 @@
     },
     "returned_count": 1,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "source_revision": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a",
     "true_total": null,
     "unresolved_identities": [],
-    "workspace_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+    "workspace_revision": "d9a73257f0bcf3e01b21a9b89b66c82ac5c7f318f3bf109b524cf996b833d68a"
   },
   "schema": "gt.compiled_observation.v1"
 }
