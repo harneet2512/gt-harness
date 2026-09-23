@@ -1,9 +1,15 @@
 """Structure capability facade — graph neighborhood and grouping queries."""
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
-from gt_engine.capabilities._query import graph_conn, run_typed
+from gt_engine.capabilities._query import (
+    CapabilityResult,
+    graph_conn,
+    run_typed,
+    wrap,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gt_engine.gt_session import GTSession
@@ -17,7 +23,7 @@ def _symbol_args(symbol: str, **optional: Any) -> dict[str, Any]:
 
 def callers(
     session: "GTSession", symbol: str, depth: int = 3, **hints: Any
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Transitive incoming CALLS, banded by hop distance → ``callers`` kind."""
 
     return run_typed(
@@ -25,7 +31,7 @@ def callers(
     )
 
 
-def callees(session: "GTSession", symbol: str, **hints: Any) -> dict[str, Any]:
+def callees(session: "GTSession", symbol: str, **hints: Any) -> CapabilityResult:
     """Outgoing CALLS neighbors of ``symbol``.
 
     No separate callee kind exists; the certified ``symbol_context`` answer
@@ -35,19 +41,31 @@ def callees(session: "GTSession", symbol: str, **hints: Any) -> dict[str, Any]:
     """
 
     result = symbol_context(session, symbol, **hints)
-    answer = result.get("direct_answer")
-    if isinstance(answer, dict):
-        result = dict(result)
-        result["direct_answer"] = {
-            "symbol": answer.get("symbol"),
-            "definition": answer.get("definition"),
-            "callees": answer.get("callees", []),
-            "callee_count": answer.get("callee_count", 0),
-        }
-    return result
+    answer = result.answer
+    if not isinstance(answer, dict):
+        return result
+    narrowed = {
+        "symbol": answer.get("symbol"),
+        "definition": answer.get("definition"),
+        "callees": answer.get("callees", []),
+        "callee_count": answer.get("callee_count", 0),
+    }
+    return CapabilityResult(
+        capability="callees",
+        status=result.status,
+        answer=narrowed,
+        omissions=result.omissions,
+        limitations=result.limitations,
+        semantics=result.semantics,
+        graph_revision=result.graph_revision,
+        source_revision=result.source_revision,
+        fresh=result.fresh,
+        cost=result.cost,
+        provenance="gt_engine.miniswe_typed_actions.execute_typed_action:symbol_context(callees)",
+    )
 
 
-def symbol_context(session: "GTSession", symbol: str, **hints: Any) -> dict[str, Any]:
+def symbol_context(session: "GTSession", symbol: str, **hints: Any) -> CapabilityResult:
     """360° symbol view (definition + callers + callees + flows)."""
 
     return run_typed(session, "symbol_context", _symbol_args(symbol, **hints))
@@ -55,7 +73,7 @@ def symbol_context(session: "GTSession", symbol: str, **hints: Any) -> dict[str,
 
 def processes(
     session: "GTSession", concept: str = "", limit: int = 10
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Detected entry→terminal execution-flow library → ``processes`` kind."""
 
     args: dict[str, Any] = {"limit": limit}
@@ -64,7 +82,7 @@ def processes(
     return run_typed(session, "processes", args)
 
 
-def communities(session: "GTSession", file: str) -> dict[str, Any]:
+def communities(session: "GTSession", file: str) -> CapabilityResult:
     """Producer-published communities containing ``file``.
 
     Reads the ``communities``/``community_members`` tables the producer
@@ -73,9 +91,17 @@ def communities(session: "GTSession", file: str) -> dict[str, Any]:
     computed here.
     """
 
+    started = time.perf_counter()
+    provenance = "graph:communities/community_members"
     conn = graph_conn(session)
     if conn is None:
-        return {"file": file, "communities": [], "omissions": ["graph_unavailable"]}
+        return wrap(
+            session, "communities",
+            status="unavailable",
+            omissions=("graph_unavailable",),
+            provenance=provenance,
+            started_ms=started,
+        )
     wanted = file.replace("\\", "/")
     try:
         tables = {
@@ -85,38 +111,39 @@ def communities(session: "GTSession", file: str) -> dict[str, Any]:
             )
         }
         if not {"communities", "community_members"} <= tables:
-            return {
-                "file": file,
-                "communities": [],
-                "omissions": ["community_layer_absent"],
-            }
-        cols = [
-            row[1]
-            for row in conn.execute("PRAGMA table_info(community_members)")
-        ]
-        member_col = "member" if "member" in cols else cols[1]
+            return wrap(
+                session, "communities",
+                status="unavailable",
+                omissions=("community_layer_absent",),
+                provenance=provenance,
+                started_ms=started,
+            )
         rows = conn.execute(
             "SELECT c.* FROM community_members cm "
             "JOIN communities c ON c.id = cm.community_id "
-            f"WHERE cm.{member_col} = ? OR cm.{member_col} = ? "
+            "WHERE cm.member = ? OR cm.member = ? "
             "ORDER BY c.id",
             (wanted, file),
         ).fetchall()
         names = [row[1] for row in conn.execute("PRAGMA table_info(communities)")]
         communities = [dict(zip(names, row)) for row in rows]
-        omissions = [] if communities else ["no_community_membership"]
-        return {
-            "file": wanted,
-            "communities": communities,
-            "omissions": omissions,
-        }
+        omissions = () if communities else ("no_community_membership",)
+        return wrap(
+            session, "communities",
+            answer={"file": wanted, "communities": communities},
+            status="ok" if communities else "partial",
+            omissions=omissions,
+            semantics="partial",
+            provenance=provenance,
+            started_ms=started,
+        )
     finally:
         conn.close()
 
 
 def framework_relationships(
     session: "GTSession", target: str, *, kind: str | None = None
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Framework wiring for ``target`` (a route/handler file path or symbol).
 
     Path-like targets delegate to the certified ``route_map`` kind (routes,

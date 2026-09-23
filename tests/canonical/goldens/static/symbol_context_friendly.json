@@ -1,0 +1,153 @@
+{
+  "action_request": {
+    "action_id": "canon:symbol_context:friendly_ts",
+    "arguments_json": "{\"language\":\"typescript\",\"symbol\":\"Friendly\"}",
+    "configuration_sha256": "<VOLATILE>",
+    "kind": "symbol_context",
+    "original_shell_form": "",
+    "repository_snapshot": {
+      "configuration": {
+        "build_system": "unspecified",
+        "configuration_id": "canon-polyglot",
+        "inputs_sha256": "<VOLATILE>",
+        "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
+        "schema": "gt.configuration_binding.v1"
+      },
+      "dirty_diff_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+      "git_revision": "<VOLATILE>",
+      "repository_id": "<VOLATILE>",
+      "revisions": {
+        "graph": "canon-polyglot-rev-1",
+        "lsp": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "repository_content": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "runtime_evidence": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+      },
+      "root_sha256": "<VOLATILE>",
+      "schema": "gt.repository_snapshot.v1",
+      "working_tree_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+    },
+    "repository_snapshot_sha256": "<VOLATILE>",
+    "requested_fidelity": "exact",
+    "schema": "gt.action_request.v1"
+  },
+  "decision": {
+    "action_id": "canon:symbol_context:friendly_ts",
+    "action_request_sha256": "<VOLATILE>",
+    "artifact_ids": "<VOLATILE>",
+    "mode": "AUGMENT",
+    "raw_result_required": false,
+    "reason_codes": [
+      "EXACT_COMPLETE_EQUIVALENCE",
+      "CERTIFICATION_NOT_EXACT"
+    ],
+    "schema": "gt.interception_decision.v1"
+  },
+  "direct_answer": {
+    "additional_definitions": 0,
+    "callee_count": 0,
+    "callees": [],
+    "caller_count": 0,
+    "callers": [],
+    "candidates": [
+      {
+        "file_path": "tsapp/server.ts",
+        "kind": "Class",
+        "language": "typescript",
+        "name": "Friendly",
+        "qualified_name": "Friendly",
+        "start_line": 15
+      }
+    ],
+    "definition": {
+      "end_line": 20,
+      "file_path": "tsapp/server.ts",
+      "id": 80,
+      "is_exported": true,
+      "is_test": false,
+      "kind": "Class",
+      "language": "typescript",
+      "name": "Friendly",
+      "qualified_name": "Friendly",
+      "return_type": "",
+      "signature": "",
+      "start_line": 15
+    },
+    "flows": [],
+    "primary_selection": "unique",
+    "symbol": "Friendly"
+  },
+  "evidence": {
+    "action_id": "canon:symbol_context:friendly_ts",
+    "ambiguity": [],
+    "anchors": [
+      {
+        "column": 0,
+        "line": 15,
+        "path": "tsapp/server.ts"
+      }
+    ],
+    "artifact_id": "<VOLATILE>",
+    "configuration_sha256": "<VOLATILE>",
+    "coverage": "complete",
+    "direct_answer_json": "{\"additional_definitions\":0,\"callee_count\":0,\"callees\":[],\"caller_count\":0,\"callers\":[],\"candidates\":[{\"file_path\":\"tsapp/server.ts\",\"kind\":\"Class\",\"language\":\"typescript\",\"name\":\"Friendly\",\"qualified_name\":\"Friendly\",\"start_line\":15}],\"definition\":{\"end_line\":20,\"file_path\":\"tsapp/server.ts\",\"id\":80,\"is_exported\":true,\"is_test\":false,\"kind\":\"Class\",\"language\":\"typescript\",\"name\":\"Friendly\",\"qualified_name\":\"Friendly\",\"return_type\":\"\",\"signature\":\"\",\"start_line\":15},\"flows\":[],\"primary_selection\":\"unique\",\"symbol\":\"Friendly\"}",
+    "envelope_sha256": "<VOLATILE>",
+    "omissions": [
+      "certified_semantics:partial"
+    ],
+    "producer": "deterministic_query.symbol_context",
+    "producer_revision": "canon-polyglot-rev-1",
+    "producer_version": "gt.deterministic_queries.v1",
+    "raw_fallback_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "request_sha256": "<VOLATILE>",
+    "schema": "gt.evidence_artifact.v1",
+    "semantics": "exact",
+    "snapshot_sha256": "<VOLATILE>",
+    "witnesses": []
+  },
+  "honesty": {
+    "abstention_reason": "",
+    "ambiguities": [],
+    "completeness": "incomplete",
+    "payload": {
+      "additional_definitions": 0,
+      "callee_count": 0,
+      "callees": [],
+      "caller_count": 0,
+      "callers": [],
+      "candidates": [
+        {
+          "file_path": "tsapp/server.ts",
+          "kind": "Class",
+          "language": "typescript",
+          "name": "Friendly",
+          "qualified_name": "Friendly",
+          "start_line": 15
+        }
+      ],
+      "definition": {
+        "end_line": 20,
+        "file_path": "tsapp/server.ts",
+        "id": 80,
+        "is_exported": true,
+        "is_test": false,
+        "kind": "Class",
+        "language": "typescript",
+        "name": "Friendly",
+        "qualified_name": "Friendly",
+        "return_type": "",
+        "signature": "",
+        "start_line": 15
+      },
+      "flows": [],
+      "primary_selection": "unique",
+      "symbol": "Friendly"
+    },
+    "returned_count": 1,
+    "schema": "gt.honesty_envelope.v1",
+    "source_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "true_total": null,
+    "unresolved_identities": [],
+    "workspace_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+  },
+  "schema": "gt.compiled_observation.v1"
+}

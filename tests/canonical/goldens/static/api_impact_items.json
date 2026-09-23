@@ -1,0 +1,377 @@
+{
+  "action_request": {
+    "action_id": "canon:api_impact:items",
+    "arguments_json": "{\"route\":\"/api/items\"}",
+    "configuration_sha256": "<VOLATILE>",
+    "kind": "api_impact",
+    "original_shell_form": "",
+    "repository_snapshot": {
+      "configuration": {
+        "build_system": "unspecified",
+        "configuration_id": "canon-polyglot",
+        "inputs_sha256": "<VOLATILE>",
+        "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
+        "schema": "gt.configuration_binding.v1"
+      },
+      "dirty_diff_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+      "git_revision": "<VOLATILE>",
+      "repository_id": "<VOLATILE>",
+      "revisions": {
+        "graph": "canon-polyglot-rev-1",
+        "lsp": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "repository_content": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "runtime_evidence": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+      },
+      "root_sha256": "<VOLATILE>",
+      "schema": "gt.repository_snapshot.v1",
+      "working_tree_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+    },
+    "repository_snapshot_sha256": "<VOLATILE>",
+    "requested_fidelity": "exact",
+    "schema": "gt.action_request.v1"
+  },
+  "decision": {
+    "action_id": "canon:api_impact:items",
+    "action_request_sha256": "<VOLATILE>",
+    "artifact_ids": "<VOLATILE>",
+    "mode": "AUGMENT",
+    "raw_result_required": false,
+    "reason_codes": [
+      "EXACT_COMPLETE_EQUIVALENCE",
+      "CERTIFICATION_NOT_EXACT"
+    ],
+    "schema": "gt.interception_decision.v1"
+  },
+  "direct_answer": {
+    "handler": null,
+    "route": "/api/items",
+    "route_count": 3,
+    "routes": [
+      {
+        "affected_files": [
+          "client/web.js"
+        ],
+        "confidence": 0.7,
+        "consumer_count": 1,
+        "consumers": [
+          {
+            "attribution": "route_level",
+            "confidence": 0.4,
+            "file": "client/web.js",
+            "line": 4,
+            "method": null,
+            "route": "/api/items",
+            "routes_called": 1
+          }
+        ],
+        "consumers_truncated": false,
+        "discovered_via": "handles_route",
+        "flows": [
+          {
+            "confidence": 0.9,
+            "file": "gosvc/main.go",
+            "symbol": "Greet"
+          }
+        ],
+        "flows_truncated": false,
+        "handler": "itemsHandler",
+        "handler_file": "gosvc/main.go",
+        "handler_line": 40,
+        "injections": [],
+        "method": null,
+        "middleware": [],
+        "name": "/api/items",
+        "route_source": "edge_metadata"
+      },
+      {
+        "affected_files": [
+          "client/web.js"
+        ],
+        "confidence": 0.95,
+        "consumer_count": 1,
+        "consumers": [
+          {
+            "attribution": "route_level",
+            "confidence": 0.4,
+            "file": "client/web.js",
+            "line": 4,
+            "method": null,
+            "route": "/api/items",
+            "routes_called": 1
+          }
+        ],
+        "consumers_truncated": false,
+        "discovered_via": "handles_route",
+        "flows": [
+          {
+            "confidence": 1.0,
+            "file": "pyapp/server.py",
+            "symbol": "run_query"
+          },
+          {
+            "confidence": 1.0,
+            "file": "pyapp/server.py",
+            "symbol": "sanitize"
+          }
+        ],
+        "flows_truncated": false,
+        "handler": "list_items",
+        "handler_file": "pyapp/server.py",
+        "handler_line": 79,
+        "injections": [
+          {
+            "ambiguous": false,
+            "bound_on": "handler",
+            "confidence": 0.85,
+            "declared_type": "Store",
+            "mechanism": "fastapi_depends",
+            "provider": "get_store",
+            "provider_file": "pyapp/server.py",
+            "trust_tier": "CANDIDATE"
+          }
+        ],
+        "method": "GET",
+        "middleware": [],
+        "name": "/api/items",
+        "route_source": "edge_metadata"
+      },
+      {
+        "affected_files": [
+          "client/web.js"
+        ],
+        "confidence": 0.7,
+        "consumer_count": 1,
+        "consumers": [
+          {
+            "attribution": "route_level",
+            "confidence": 0.4,
+            "file": "client/web.js",
+            "line": 4,
+            "method": null,
+            "route": "/api/items",
+            "routes_called": 1
+          }
+        ],
+        "consumers_truncated": false,
+        "discovered_via": "handles_route",
+        "flows": [
+          {
+            "confidence": 0.5,
+            "file": "tsapp/server.ts",
+            "symbol": "greet"
+          }
+        ],
+        "flows_truncated": false,
+        "handler": "listItems",
+        "handler_file": "tsapp/server.ts",
+        "handler_line": 29,
+        "injections": [],
+        "method": "GET",
+        "middleware": [
+          {
+            "confidence": 0.9,
+            "file": "tsapp/server.ts",
+            "line": 27,
+            "mechanism": "express_use",
+            "name": "audit",
+            "route_scope": null,
+            "trust_tier": "CERTIFIED"
+          }
+        ],
+        "name": "/api/items",
+        "route_source": "edge_metadata"
+      }
+    ]
+  },
+  "evidence": {
+    "action_id": "canon:api_impact:items",
+    "ambiguity": [],
+    "anchors": [
+      {
+        "column": 0,
+        "line": 40,
+        "path": "gosvc/main.go"
+      },
+      {
+        "column": 0,
+        "line": 79,
+        "path": "pyapp/server.py"
+      },
+      {
+        "column": 0,
+        "line": 29,
+        "path": "tsapp/server.ts"
+      }
+    ],
+    "artifact_id": "<VOLATILE>",
+    "configuration_sha256": "<VOLATILE>",
+    "coverage": "complete",
+    "direct_answer_json": "{\"handler\":null,\"route\":\"/api/items\",\"route_count\":3,\"routes\":[{\"affected_files\":[\"client/web.js\"],\"confidence\":0.7,\"consumer_count\":1,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\",\"routes_called\":1}],\"consumers_truncated\":false,\"discovered_via\":\"handles_route\",\"flows\":[{\"confidence\":0.9,\"file\":\"gosvc/main.go\",\"symbol\":\"Greet\"}],\"flows_truncated\":false,\"handler\":\"itemsHandler\",\"handler_file\":\"gosvc/main.go\",\"handler_line\":40,\"injections\":[],\"method\":null,\"middleware\":[],\"name\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"affected_files\":[\"client/web.js\"],\"confidence\":0.95,\"consumer_count\":1,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\",\"routes_called\":1}],\"consumers_truncated\":false,\"discovered_via\":\"handles_route\",\"flows\":[{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"run_query\"},{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"sanitize\"}],\"flows_truncated\":false,\"handler\":\"list_items\",\"handler_file\":\"pyapp/server.py\",\"handler_line\":79,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"handler\",\"confidence\":0.85,\"declared_type\":\"Store\",\"mechanism\":\"fastapi_depends\",\"provider\":\"get_store\",\"provider_file\":\"pyapp/server.py\",\"trust_tier\":\"CANDIDATE\"}],\"method\":\"GET\",\"middleware\":[],\"name\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"affected_files\":[\"client/web.js\"],\"confidence\":0.7,\"consumer_count\":1,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\",\"routes_called\":1}],\"consumers_truncated\":false,\"discovered_via\":\"handles_route\",\"flows\":[{\"confidence\":0.5,\"file\":\"tsapp/server.ts\",\"symbol\":\"greet\"}],\"flows_truncated\":false,\"handler\":\"listItems\",\"handler_file\":\"tsapp/server.ts\",\"handler_line\":29,\"injections\":[],\"method\":\"GET\",\"middleware\":[{\"confidence\":0.9,\"file\":\"tsapp/server.ts\",\"line\":27,\"mechanism\":\"express_use\",\"name\":\"audit\",\"route_scope\":null,\"trust_tier\":\"CERTIFIED\"}],\"name\":\"/api/items\",\"route_source\":\"edge_metadata\"}]}",
+    "envelope_sha256": "<VOLATILE>",
+    "omissions": [
+      "certified_semantics:partial"
+    ],
+    "producer": "deterministic_query.api_impact",
+    "producer_revision": "canon-polyglot-rev-1",
+    "producer_version": "gt.deterministic_queries.v1",
+    "raw_fallback_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "request_sha256": "<VOLATILE>",
+    "schema": "gt.evidence_artifact.v1",
+    "semantics": "exact",
+    "snapshot_sha256": "<VOLATILE>",
+    "witnesses": []
+  },
+  "honesty": {
+    "abstention_reason": "",
+    "ambiguities": [],
+    "completeness": "incomplete",
+    "payload": {
+      "handler": null,
+      "route": "/api/items",
+      "route_count": 3,
+      "routes": [
+        {
+          "affected_files": [
+            "client/web.js"
+          ],
+          "confidence": 0.7,
+          "consumer_count": 1,
+          "consumers": [
+            {
+              "attribution": "route_level",
+              "confidence": 0.4,
+              "file": "client/web.js",
+              "line": 4,
+              "method": null,
+              "route": "/api/items",
+              "routes_called": 1
+            }
+          ],
+          "consumers_truncated": false,
+          "discovered_via": "handles_route",
+          "flows": [
+            {
+              "confidence": 0.9,
+              "file": "gosvc/main.go",
+              "symbol": "Greet"
+            }
+          ],
+          "flows_truncated": false,
+          "handler": "itemsHandler",
+          "handler_file": "gosvc/main.go",
+          "handler_line": 40,
+          "injections": [],
+          "method": null,
+          "middleware": [],
+          "name": "/api/items",
+          "route_source": "edge_metadata"
+        },
+        {
+          "affected_files": [
+            "client/web.js"
+          ],
+          "confidence": 0.95,
+          "consumer_count": 1,
+          "consumers": [
+            {
+              "attribution": "route_level",
+              "confidence": 0.4,
+              "file": "client/web.js",
+              "line": 4,
+              "method": null,
+              "route": "/api/items",
+              "routes_called": 1
+            }
+          ],
+          "consumers_truncated": false,
+          "discovered_via": "handles_route",
+          "flows": [
+            {
+              "confidence": 1.0,
+              "file": "pyapp/server.py",
+              "symbol": "run_query"
+            },
+            {
+              "confidence": 1.0,
+              "file": "pyapp/server.py",
+              "symbol": "sanitize"
+            }
+          ],
+          "flows_truncated": false,
+          "handler": "list_items",
+          "handler_file": "pyapp/server.py",
+          "handler_line": 79,
+          "injections": [
+            {
+              "ambiguous": false,
+              "bound_on": "handler",
+              "confidence": 0.85,
+              "declared_type": "Store",
+              "mechanism": "fastapi_depends",
+              "provider": "get_store",
+              "provider_file": "pyapp/server.py",
+              "trust_tier": "CANDIDATE"
+            }
+          ],
+          "method": "GET",
+          "middleware": [],
+          "name": "/api/items",
+          "route_source": "edge_metadata"
+        },
+        {
+          "affected_files": [
+            "client/web.js"
+          ],
+          "confidence": 0.7,
+          "consumer_count": 1,
+          "consumers": [
+            {
+              "attribution": "route_level",
+              "confidence": 0.4,
+              "file": "client/web.js",
+              "line": 4,
+              "method": null,
+              "route": "/api/items",
+              "routes_called": 1
+            }
+          ],
+          "consumers_truncated": false,
+          "discovered_via": "handles_route",
+          "flows": [
+            {
+              "confidence": 0.5,
+              "file": "tsapp/server.ts",
+              "symbol": "greet"
+            }
+          ],
+          "flows_truncated": false,
+          "handler": "listItems",
+          "handler_file": "tsapp/server.ts",
+          "handler_line": 29,
+          "injections": [],
+          "method": "GET",
+          "middleware": [
+            {
+              "confidence": 0.9,
+              "file": "tsapp/server.ts",
+              "line": 27,
+              "mechanism": "express_use",
+              "name": "audit",
+              "route_scope": null,
+              "trust_tier": "CERTIFIED"
+            }
+          ],
+          "name": "/api/items",
+          "route_source": "edge_metadata"
+        }
+      ]
+    },
+    "returned_count": 1,
+    "schema": "gt.honesty_envelope.v1",
+    "source_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "true_total": null,
+    "unresolved_identities": [],
+    "workspace_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+  },
+  "schema": "gt.compiled_observation.v1"
+}

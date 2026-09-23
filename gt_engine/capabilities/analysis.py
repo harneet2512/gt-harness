@@ -5,18 +5,23 @@ the typed ``slice``/``taint`` kinds run through the certified dispatcher.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gt_engine.capabilities._query import (
+    CapabilityResult,
     engine_of,
     graph_conn,
     resolve_symbol_node,
     run_typed,
+    wrap,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gt_engine.gt_session import GTSession
+
+_STORED_PROVENANCE = "groundtruth.runtime.cfg_store.analyze_stored"
 
 
 def _stored_analysis(session: "GTSession", function: str) -> tuple[Any | None, dict[str, Any]]:
@@ -27,12 +32,13 @@ def _stored_analysis(session: "GTSession", function: str) -> tuple[Any | None, d
     facade inherits its ambiguity and preferred-order rules.
     """
 
-    node = resolve_symbol_node(session, function)
-    if node is None:
-        return None, {"omissions": ["symbol_not_found"], "symbol": function}
     conn = graph_conn(session)
     if conn is None:
         return None, {"omissions": ["graph_unavailable"], "symbol": function}
+    node = resolve_symbol_node(session, function)
+    if node is None:
+        conn.close()
+        return None, {"omissions": ["symbol_not_found"], "symbol": function}
     root = Path(str(getattr(engine_of(session), "repo_root", "") or ""))
     source_path = root / str(node.get("file_path") or "")
     try:
@@ -73,44 +79,66 @@ def _stored_analysis(session: "GTSession", function: str) -> tuple[Any | None, d
         "file_path": node.get("file_path"),
         "def_line": analysis.def_line,
         "function_name": analysis.function_name,
-        "limitations": list(analysis.limitations),
     }
 
 
-def cfg(session: "GTSession", function: str) -> dict[str, Any]:
+def _abstain(
+    session: "GTSession", capability: str, error: dict[str, Any], started: float
+) -> CapabilityResult:
+    return wrap(
+        session, capability,
+        status="abstain",
+        omissions=tuple(str(o) for o in error.get("omissions", ())),
+        answer={k: v for k, v in error.items() if k != "omissions"},
+        provenance=_STORED_PROVENANCE,
+        started_ms=started,
+    )
+
+
+def cfg(session: "GTSession", function: str) -> CapabilityResult:
     """Persisted control-flow graph of ``function`` (blocks + edges)."""
 
+    started = time.perf_counter()
     analysis, context = _stored_analysis(session, function)
     if analysis is None:
-        return context
-    return {
-        **context,
-        "entry_id": analysis.cfg.entry_id,
-        "exit_id": analysis.cfg.exit_id,
-        "blocks": [
-            {
-                "id": block.id,
-                "kind": block.kind,
-                "start_line": block.start_line,
-                "end_line": block.end_line,
-                "statement_lines": list(block.statement_lines),
-                "successors": list(block.successors),
-                "predecessors": list(block.predecessors),
-            }
-            for block in sorted(
-                analysis.cfg.blocks.values(), key=lambda b: b.id
-            )
-        ],
-        "edges": [list(edge) for edge in sorted(analysis.cfg.edges)],
-    }
+        return _abstain(session, "cfg", context, started)
+    return wrap(
+        session, "cfg",
+        answer={
+            **context,
+            "entry_id": analysis.cfg.entry_id,
+            "exit_id": analysis.cfg.exit_id,
+            "blocks": [
+                {
+                    "id": block.id,
+                    "kind": block.kind,
+                    "start_line": block.start_line,
+                    "end_line": block.end_line,
+                    "statement_lines": list(block.statement_lines),
+                    "successors": list(block.successors),
+                    "predecessors": list(block.predecessors),
+                }
+                for block in sorted(
+                    analysis.cfg.blocks.values(), key=lambda b: b.id
+                )
+            ],
+            "edges": [list(edge) for edge in sorted(analysis.cfg.edges)],
+        },
+        status="ok",
+        limitations=tuple(analysis.limitations),
+        semantics="exact",
+        provenance=_STORED_PROVENANCE,
+        started_ms=started,
+    )
 
 
-def reaching_definitions(session: "GTSession", function: str) -> dict[str, Any]:
+def reaching_definitions(session: "GTSession", function: str) -> CapabilityResult:
     """Per-block reaching definitions of ``function``."""
 
+    started = time.perf_counter()
     analysis, context = _stored_analysis(session, function)
     if analysis is None:
-        return context
+        return _abstain(session, "reaching_definitions", context, started)
 
     def _flat(table: dict[int, dict[str, set]]) -> dict[str, Any]:
         return {
@@ -122,34 +150,51 @@ def reaching_definitions(session: "GTSession", function: str) -> dict[str, Any]:
         }
 
     reaching = analysis.reaching
-    return {
-        **context,
-        "in": _flat(reaching.in_),
-        "out": _flat(reaching.out),
-        "all_defs": {
-            var: sorted(f"{name}:{line}" for name, line in defs)
-            for var, defs in sorted(reaching.all_defs.items())
+    return wrap(
+        session, "reaching_definitions",
+        answer={
+            **context,
+            "in": _flat(reaching.in_),
+            "out": _flat(reaching.out),
+            "all_defs": {
+                var: sorted(f"{name}:{line}" for name, line in defs)
+                for var, defs in sorted(reaching.all_defs.items())
+            },
         },
-    }
+        status="ok",
+        limitations=tuple(analysis.limitations),
+        semantics="exact",
+        provenance=_STORED_PROVENANCE,
+        started_ms=started,
+    )
 
 
-def control_dependence(session: "GTSession", function: str) -> dict[str, Any]:
+def control_dependence(session: "GTSession", function: str) -> CapabilityResult:
     """Control-dependence edges of ``function`` as (block, depends_on, label)."""
 
+    started = time.perf_counter()
     analysis, context = _stored_analysis(session, function)
     if analysis is None:
-        return context
-    return {
-        **context,
-        "control_dependence": [
-            {"block": a, "depends_on": b, "label": label}
-            for a, b, label in sorted(analysis.control_dependence)
-        ],
-        "dominators": {
-            str(block): sorted(doms)
-            for block, doms in sorted(analysis.dominators.dom.items())
+        return _abstain(session, "control_dependence", context, started)
+    return wrap(
+        session, "control_dependence",
+        answer={
+            **context,
+            "control_dependence": [
+                {"block": a, "depends_on": b, "label": label}
+                for a, b, label in sorted(analysis.control_dependence)
+            ],
+            "dominators": {
+                str(block): sorted(doms)
+                for block, doms in sorted(analysis.dominators.dom.items())
+            },
         },
-    }
+        status="ok",
+        limitations=tuple(analysis.limitations),
+        semantics="exact",
+        provenance=_STORED_PROVENANCE,
+        started_ms=started,
+    )
 
 
 def slice(
@@ -159,7 +204,7 @@ def slice(
     direction: str = "backward",
     interprocedural: bool = False,
     **optional: Any,
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Program slice → certified ``slice`` typed kind."""
 
     args: dict[str, Any] = {
@@ -174,7 +219,7 @@ def slice(
 
 def callable_values(
     session: "GTSession", symbol: str, **hints: Any
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Producer-retained call candidates for callsites naming ``symbol``.
 
     Reads the ``resolution_callsites``/``resolution_candidates`` tables —
@@ -182,9 +227,17 @@ def callable_values(
     An empty candidate set is reported, never fabricated.
     """
 
+    started = time.perf_counter()
+    provenance = "graph:resolution_callsites/resolution_candidates"
     conn = graph_conn(session)
     if conn is None:
-        return {"symbol": symbol, "callsites": [], "omissions": ["graph_unavailable"]}
+        return wrap(
+            session, "callable_values",
+            status="unavailable",
+            omissions=("graph_unavailable",),
+            provenance=provenance,
+            started_ms=started,
+        )
     try:
         tables = {
             row[0]
@@ -194,11 +247,13 @@ def callable_values(
         }
         needed = {"resolution_callsites", "resolution_candidates"}
         if not needed <= tables:
-            return {
-                "symbol": symbol,
-                "callsites": [],
-                "omissions": ["resolution_substrate_absent"],
-            }
+            return wrap(
+                session, "callable_values",
+                status="unavailable",
+                omissions=("resolution_substrate_absent",),
+                provenance=provenance,
+                started_ms=started,
+            )
         rows = conn.execute(
             "SELECT cs.callsite_id, cs.source_stable_id, cs.source_native_id,"
             " c.target_stable_id, c.target_native_id, c.mechanism, c.ordinal"
@@ -226,12 +281,16 @@ def callable_values(
                     "mechanism": mech,
                 }
             )
-        omissions = [] if by_site else ["no_retained_candidates"]
-        return {
-            "symbol": symbol,
-            "callsites": list(by_site.values()),
-            "omissions": omissions,
-        }
+        omissions = () if by_site else ("no_retained_candidates",)
+        return wrap(
+            session, "callable_values",
+            answer={"symbol": symbol, "callsites": list(by_site.values())},
+            status="ok" if by_site else "partial",
+            omissions=omissions,
+            semantics="partial",
+            provenance=provenance,
+            started_ms=started,
+        )
     finally:
         conn.close()
 
@@ -241,7 +300,7 @@ def taint(
     sources: str | list[str],
     sinks: str | list[str] | None = None,
     **optional: Any,
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Symbol-level call reachability source→sink → certified ``taint`` kind.
 
     The kind takes one source and an optional sink; several sources map to
@@ -261,4 +320,27 @@ def taint(
         )
     if len(results) == 1:
         return results[0]["result"]
-    return {"sources": results}
+    merged_omissions: list[str] = []
+    for item in results:
+        merged_omissions.extend(item["result"].omissions)
+    worst = "ok"
+    for item in results:
+        order = {"ok": 0, "partial": 1, "abstain": 2, "unavailable": 3, "error": 4}
+        if order.get(item["result"].status, 4) > order.get(worst, 4):
+            worst = item["result"].status
+    base = results[0]["result"]
+    return CapabilityResult(
+        capability="taint",
+        status=worst,
+        answer=[{"source": r["source"], "answer": r["result"].answer} for r in results],
+        omissions=tuple(dict.fromkeys(merged_omissions)),
+        semantics=base.semantics,
+        graph_revision=base.graph_revision,
+        source_revision=base.source_revision,
+        fresh=base.fresh,
+        cost={
+            "elapsed_ms": sum(r["result"].cost.get("elapsed_ms", 0) for r in results),
+            "output_bytes": sum(r["result"].cost.get("output_bytes", 0) for r in results),
+        },
+        provenance=base.provenance,
+    )

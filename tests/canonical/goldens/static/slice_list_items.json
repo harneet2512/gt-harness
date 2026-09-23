@@ -1,0 +1,180 @@
+{
+  "action_request": {
+    "action_id": "canon:slice:py_items",
+    "arguments_json": "{\"line\":82,\"symbol\":\"list_items\"}",
+    "configuration_sha256": "<VOLATILE>",
+    "kind": "slice",
+    "original_shell_form": "",
+    "repository_snapshot": {
+      "configuration": {
+        "build_system": "unspecified",
+        "configuration_id": "canon-polyglot",
+        "inputs_sha256": "<VOLATILE>",
+        "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
+        "schema": "gt.configuration_binding.v1"
+      },
+      "dirty_diff_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+      "git_revision": "<VOLATILE>",
+      "repository_id": "<VOLATILE>",
+      "revisions": {
+        "graph": "canon-polyglot-rev-1",
+        "lsp": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "repository_content": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+        "runtime_evidence": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+      },
+      "root_sha256": "<VOLATILE>",
+      "schema": "gt.repository_snapshot.v1",
+      "working_tree_sha256": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+    },
+    "repository_snapshot_sha256": "<VOLATILE>",
+    "requested_fidelity": "exact",
+    "schema": "gt.action_request.v1"
+  },
+  "decision": {
+    "action_id": "canon:slice:py_items",
+    "action_request_sha256": "<VOLATILE>",
+    "artifact_ids": "<VOLATILE>",
+    "mode": "AUGMENT",
+    "raw_result_required": true,
+    "reason_codes": [
+      "SEMANTICS_NOT_EXACT",
+      "COVERAGE_NOT_COMPLETE",
+      "EVIDENCE_HAS_OMISSIONS"
+    ],
+    "schema": "gt.interception_decision.v1"
+  },
+  "direct_answer": {
+    "direction": "backward",
+    "interprocedural": false,
+    "line": 82,
+    "slice_count": 1,
+    "slices": [
+      {
+        "call_sites": [
+          {
+            "line": 80,
+            "name": "request.args.get"
+          },
+          {
+            "line": 81,
+            "name": "sanitize"
+          },
+          {
+            "line": 82,
+            "name": "run_query"
+          }
+        ],
+        "criterion_line": 82,
+        "direction": "backward",
+        "file_path": "pyapp/server.py",
+        "function": "list_items",
+        "limitations": [
+          "call_sites_not_inlined"
+        ],
+        "slice_lines": [
+          80,
+          81,
+          82
+        ],
+        "variables": [
+          "cleaned",
+          "out",
+          "raw",
+          "request",
+          "request.args",
+          "request.args.get",
+          "run_query",
+          "sanitize"
+        ]
+      }
+    ],
+    "symbol": "list_items"
+  },
+  "evidence": {
+    "action_id": "canon:slice:py_items",
+    "ambiguity": [],
+    "anchors": [
+      {
+        "column": 0,
+        "line": 82,
+        "path": "pyapp/server.py"
+      }
+    ],
+    "artifact_id": "<VOLATILE>",
+    "configuration_sha256": "<VOLATILE>",
+    "coverage": "partial",
+    "direct_answer_json": "{\"direction\":\"backward\",\"interprocedural\":false,\"line\":82,\"slice_count\":1,\"slices\":[{\"call_sites\":[{\"line\":80,\"name\":\"request.args.get\"},{\"line\":81,\"name\":\"sanitize\"},{\"line\":82,\"name\":\"run_query\"}],\"criterion_line\":82,\"direction\":\"backward\",\"file_path\":\"pyapp/server.py\",\"function\":\"list_items\",\"limitations\":[\"call_sites_not_inlined\"],\"slice_lines\":[80,81,82],\"variables\":[\"cleaned\",\"out\",\"raw\",\"request\",\"request.args\",\"request.args.get\",\"run_query\",\"sanitize\"]}],\"symbol\":\"list_items\"}",
+    "envelope_sha256": "<VOLATILE>",
+    "omissions": [
+      "slice_limitations_present"
+    ],
+    "producer": "deterministic_query.slice",
+    "producer_revision": "canon-polyglot-rev-1",
+    "producer_version": "gt.deterministic_queries.v1",
+    "raw_fallback_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "request_sha256": "<VOLATILE>",
+    "schema": "gt.evidence_artifact.v1",
+    "semantics": "incomplete",
+    "snapshot_sha256": "<VOLATILE>",
+    "witnesses": []
+  },
+  "honesty": {
+    "abstention_reason": "",
+    "ambiguities": [],
+    "completeness": "incomplete",
+    "payload": {
+      "direction": "backward",
+      "interprocedural": false,
+      "line": 82,
+      "slice_count": 1,
+      "slices": [
+        {
+          "call_sites": [
+            {
+              "line": 80,
+              "name": "request.args.get"
+            },
+            {
+              "line": 81,
+              "name": "sanitize"
+            },
+            {
+              "line": 82,
+              "name": "run_query"
+            }
+          ],
+          "criterion_line": 82,
+          "direction": "backward",
+          "file_path": "pyapp/server.py",
+          "function": "list_items",
+          "limitations": [
+            "call_sites_not_inlined"
+          ],
+          "slice_lines": [
+            80,
+            81,
+            82
+          ],
+          "variables": [
+            "cleaned",
+            "out",
+            "raw",
+            "request",
+            "request.args",
+            "request.args.get",
+            "run_query",
+            "sanitize"
+          ]
+        }
+      ],
+      "symbol": "list_items"
+    },
+    "returned_count": 1,
+    "schema": "gt.honesty_envelope.v1",
+    "source_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164",
+    "true_total": null,
+    "unresolved_identities": [],
+    "workspace_revision": "25bc77da7900bfa10dcd5b252aa3e41972479b0676806340c1d62aab5143e164"
+  },
+  "schema": "gt.compiled_observation.v1"
+}

@@ -1,6 +1,7 @@
 """D: capability facades delegate to existing implementations honestly —
 typed kinds through the certified dispatcher, data lookups over producer
-tables, and recorded-state reads over the journal/CAS.
+tables, and recorded-state reads over the journal/CAS. Every function
+returns the uniform ``CapabilityResult`` envelope.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from gt_engine.capabilities import (
     runtime,
     structure,
 )
+from gt_engine.capabilities._query import CapabilityResult
 
 
 def _session(tmp_path, *, repo_root="", graph_db=None):
@@ -41,21 +43,23 @@ def test_lexical_search_runs_the_certified_literal_kind(tmp_path):
     session, _adapter = _session(tmp_path, repo_root=tmp_path)
 
     result = localization.lexical_search(session, "render_widget")
-    answer = result.get("direct_answer")
-    assert isinstance(answer, dict), result
-    assert any("app.py" in row.get("path", "") for row in answer["matches"])
+    assert isinstance(result, CapabilityResult)
+    assert result.capability == "exact_literal_search"
+    assert result.status in {"ok", "partial"}
+    assert any("app.py" in row.get("path", "") for row in result.answer["matches"])
+    assert result.cost["output_bytes"] > 0
+    assert "execute_typed_action" in result.provenance
 
 
-def test_typed_facade_reports_incomplete_when_repo_root_missing(tmp_path):
+def test_typed_facade_reports_unavailable_when_repo_root_missing(tmp_path):
     adapter = MiniSweAdapter(task_id="capfac", state_dir=tmp_path, predicates=[])
     adapter.repo_root = ""
     session = GTSession(GTSessionConfig(task_id="capfac"), engine=adapter)
 
     result = localization.definition(session, "anything")
-    assert result["direct_answer"] is None
-    assert "capability_repo_root_missing" in (
-        result["decision"]["reason_codes"]
-    )
+    assert result.status == "unavailable"
+    assert result.answer is None
+    assert "capability_repo_root_missing" in result.omissions
 
 
 def _fixture_graph(path: Path) -> Path:
@@ -108,12 +112,13 @@ def test_communities_reads_producer_tables(tmp_path):
     session, _a = _session(tmp_path, graph_db=str(db))
 
     result = structure.communities(session, "src/pay.py")
-    assert result["omissions"] == []
-    assert result["communities"][0]["label"] == "billing flow"
+    assert result.status == "ok"
+    assert result.omissions == ()
+    assert result.answer["communities"][0]["label"] == "billing flow"
 
     empty = structure.communities(session, "src/none.py")
-    assert empty["communities"] == []
-    assert "no_community_membership" in empty["omissions"]
+    assert empty.status == "partial"
+    assert "no_community_membership" in empty.omissions
 
 
 def test_callable_values_reads_retained_candidates(tmp_path):
@@ -121,35 +126,38 @@ def test_callable_values_reads_retained_candidates(tmp_path):
     session, _a = _session(tmp_path, graph_db=str(db))
 
     result = analysis.callable_values(session, "handler")
-    assert result["omissions"] == []
-    (site,) = result["callsites"]
+    assert result.status == "ok"
+    (site,) = result.answer["callsites"]
     assert [c["target_native_id"] for c in site["candidates"]] == [
         "impl_a",
         "impl_b",
     ]
 
     empty = analysis.callable_values(session, "nobody")
-    assert "no_retained_candidates" in empty["omissions"]
+    assert empty.status == "partial"
+    assert "no_retained_candidates" in empty.omissions
 
 
 def test_graph_backed_facades_abstain_without_a_graph(tmp_path):
     session, _a = _session(tmp_path)
 
-    assert structure.communities(session, "x.py")["omissions"] == [
-        "graph_unavailable"
-    ]
-    assert analysis.callable_values(session, "f")["omissions"] == [
-        "graph_unavailable"
-    ]
-    assert change.affected_tests(session, ["x.py"])["omissions"] == [
-        "graph_unavailable"
-    ]
-    assert analysis.cfg(session, "f")["omissions"] == ["symbol_not_found"]
+    assert structure.communities(session, "x.py").omissions == (
+        "graph_unavailable",
+    )
+    assert analysis.callable_values(session, "f").omissions == (
+        "graph_unavailable",
+    )
+    assert change.affected_tests(session, ["x.py"]).status == "unavailable"
+    cfg = analysis.cfg(session, "f")
+    assert cfg.status == "abstain"
+    assert "graph_unavailable" in cfg.omissions
 
 
 def test_edit_transaction_reads_journal_and_cas(tmp_path):
     session, adapter = _session(tmp_path)
-    assert change.edit_transaction(session) is None
+    missing = change.edit_transaction(session)
+    assert missing.status == "unavailable"
+    assert "no_edit_transaction" in missing.omissions
 
     txn = EditTransaction(
         action_id=3,
@@ -173,17 +181,17 @@ def test_edit_transaction_reads_journal_and_cas(tmp_path):
     adapter.record_edit_transaction(txn)
 
     result = change.edit_transaction(session)
-    assert result["post_revision"] == "rev-b"
-    assert result["changed_paths"] == ["src/x.py"]
-    assert result["complete"] is True
-    assert result["blob_missing"] is False
-    assert result["transaction"]["kind"] == "edit_transaction"
+    assert result.status == "ok"
+    assert result.answer["post_revision"] == "rev-b"
+    assert result.answer["changed_paths"] == ["src/x.py"]
+    assert result.answer["complete"] is True
+    assert result.answer["transaction"]["kind"] == "edit_transaction"
 
 
 def test_last_test_result_and_verification_state(tmp_path):
     session, adapter = _session(tmp_path)
-    assert runtime.last_test_result(session) is None
-    assert runtime.verification_state(session)["state"] == "none"
+    assert runtime.last_test_result(session).status == "unavailable"
+    assert runtime.verification_state(session).answer["state"] == "none"
 
     artifact = ExecutionEvidence(
         action_id=2,
@@ -199,40 +207,64 @@ def test_last_test_result_and_verification_state(tmp_path):
     adapter.record_execution_evidence(artifact, command="pytest")
 
     result = runtime.last_test_result(session)
-    assert result["outcome"] == "fail"
-    assert result["observed_test_outcome"] == "fail"
-    assert result["blob_missing"] is False
+    assert result.status == "ok"
+    assert result.answer["outcome"] == "fail"
+    assert result.answer["observed_test_outcome"] == "fail"
 
     state = runtime.verification_state(session)
-    assert state["state"] == "recorded"
-    assert state["observed_test_outcome"] == "fail"
+    assert state.answer["state"] == "recorded"
+    assert state.answer["observed_test_outcome"] == "fail"
 
 
 def test_failure_fingerprint_and_repeated_failure_state(tmp_path):
     session, adapter = _session(tmp_path)
 
-    assert runtime.failure_fingerprint(session)["omissions"] == [
-        "no_execution_recorded"
-    ]
+    missing = runtime.failure_fingerprint(session)
+    assert missing.status == "unavailable"
+    assert "no_execution_recorded" in missing.omissions
+
     explicit = runtime.failure_fingerprint(
         session, "FAILED tests/test_a.py::test_b - assert 1 == 2"
     )
-    assert explicit["fingerprint"]
-    assert explicit["basis"] == "explicit_observation"
+    assert explicit.status == "ok"
+    assert explicit.answer["fingerprint"]
+    assert explicit.answer["basis"] == "explicit_observation"
 
     adapter._edit_epoch = 1
     adapter.note_failure_fingerprint("fp-1", epoch=1)
     adapter.note_failure_fingerprint("fp-1", epoch=2)
     state = runtime.repeated_failure_state(session)
-    assert state["fingerprints"]["fp-1"]["recurrences"] == 2
-    assert state["pending_recovery"] == {"fingerprint": "fp-1", "epoch": 2}
+    assert state.status == "ok"
+    assert state.answer["fingerprints"]["fp-1"]["recurrences"] == 2
+    assert state.answer["pending_recovery"] == {
+        "fingerprint": "fp-1",
+        "epoch": 2,
+    }
 
 
-def test_freshness_facade_reports_revisions(tmp_path):
+def test_freshness_facade_reports_revisions_and_postures(tmp_path):
     session, adapter = _session(tmp_path)
     adapter.engine_state.bind_initial_source("rev-a")
-    assert freshness.index_revision(session) == "rev-a"
+
+    rev = freshness.index_revision(session)
+    assert rev.status == "ok"
+    assert rev.answer["source_revision"] == "rev-a"
+
     graph = freshness.graph_state(session)
-    assert graph["source_revision"] == "rev-a"
-    assert graph["graph_current"] is False
-    assert freshness.unit_state(session, "nope") is None
+    assert graph.answer["source_revision"] == "rev-a"
+    assert graph.answer["graph_current"] is False
+    assert graph.status == "unavailable"  # no graph bound at all
+
+    amend = freshness.amend_state(session)
+    assert amend.status == "ok"
+    assert amend.answer["last_graph_publication"] is None
+    assert "no_graph_publication" in amend.omissions
+
+    fallback = freshness.fallback_state(session)
+    assert fallback.status == "ok"
+    assert fallback.answer["recovery_suspended"] is False
+    assert fallback.answer["recovery_failure_streak"] == 0
+
+    unknown = freshness.unit_state(session, "nope")
+    assert unknown.status == "unavailable"
+    assert "unit_unknown" in unknown.omissions

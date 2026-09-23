@@ -2,22 +2,25 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 from gt_engine.capabilities._query import (
+    CapabilityResult,
     engine_of,
     graph_conn,
     graph_db_path,
     last_journal_event,
     read_cas_blob,
     run_typed,
+    wrap,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gt_engine.gt_session import GTSession
 
 
-def edit_transaction(session: "GTSession", latest: bool = True) -> dict[str, Any] | None:
+def edit_transaction(session: "GTSession", latest: bool = True) -> CapabilityResult:
     """The recorded edit transaction — the journal's last ``edit_transaction``
     event's content-addressed payload.
 
@@ -25,36 +28,56 @@ def edit_transaction(session: "GTSession", latest: bool = True) -> dict[str, Any
     transaction is exposed because that is the state the engine acts on.
     """
 
+    started = time.perf_counter()
+    provenance = "gt_engine.miniswe_integration.record_edit_transaction"
     row = last_journal_event(session, "edit_transaction")
     if row is None:
-        return None
+        return wrap(
+            session, "edit_transaction",
+            status="unavailable",
+            omissions=("no_edit_transaction",),
+            provenance=provenance,
+            started_ms=started,
+        )
     digest = str(row.get("artifact_sha256") or "")
     raw = read_cas_blob(session, "edit_transactions", digest)
-    payload: dict[str, Any]
+    payload: dict[str, Any] | None
     if raw is not None:
         try:
             payload = json.loads(raw)
         except ValueError:
-            payload = {}
+            payload = None
     else:
-        payload = {}
-    return {
-        "transaction_sha256": row.get("transaction_sha256"),
-        "artifact_sha256": digest,
-        "pre_revision": row.get("pre_revision"),
-        "post_revision": row.get("post_revision"),
-        "changed_paths": row.get("changed_paths") or [],
-        "complete": row.get("complete"),
-        "omissions": row.get("omissions") or [],
-        "action_index": row.get("action_index"),
-        "transaction": payload or None,
-        "blob_missing": raw is None,
-    }
+        payload = None
+    omissions: list[str] = []
+    if raw is None:
+        omissions.append("transaction_blob_missing")
+    elif payload is None:
+        omissions.append("transaction_blob_undecodable")
+    return wrap(
+        session, "edit_transaction",
+        answer={
+            "transaction_sha256": row.get("transaction_sha256"),
+            "artifact_sha256": digest,
+            "pre_revision": row.get("pre_revision"),
+            "post_revision": row.get("post_revision"),
+            "changed_paths": row.get("changed_paths") or [],
+            "complete": row.get("complete"),
+            "omissions": row.get("omissions") or [],
+            "action_index": row.get("action_index"),
+            "transaction": payload,
+        },
+        status="ok" if not omissions else "partial",
+        omissions=tuple(omissions),
+        semantics="exact",
+        provenance=provenance,
+        started_ms=started,
+    )
 
 
 def patch_impact(
     session: "GTSession", edited_files: dict[str, dict[str, Any]]
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Impact of a proposed patch → certified ``patch_impact`` kind.
 
     ``edited_files`` maps each repository path to ``{"before", "after"}``
@@ -70,7 +93,7 @@ def route_impact(
     session: "GTSession",
     route: str | None = None,
     handler: str | None = None,
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Consumers/blast radius of a route or handler → ``api_impact`` kind."""
 
     args: dict[str, Any] = {}
@@ -83,7 +106,7 @@ def route_impact(
 
 def shape_change(
     session: "GTSession", symbol: str, **hints: Any
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Signature/shape drift of ``symbol`` → certified ``shape_check`` kind."""
 
     args: dict[str, Any] = {"symbol": symbol}
@@ -93,7 +116,7 @@ def shape_change(
 
 def affected_tests(
     session: "GTSession", files: list[str] | tuple[str, ...]
-) -> dict[str, Any]:
+) -> CapabilityResult:
     """Repo test files graph-covering the edited ``files`` — selection only.
 
     Same composition the covering lane runs pre-execution:
@@ -102,39 +125,80 @@ def affected_tests(
     executed here.
     """
 
+    started = time.perf_counter()
+    provenance = (
+        "gt_engine.miniswe_covering._symbols_for_files + "
+        "groundtruth.runtime.covering_runner.select_covering_tests"
+    )
     conn = graph_conn(session)
     if conn is not None:
         conn.close()
     graph_path = graph_db_path(session)
-    if not graph_path:
-        return {"files": list(files), "tests": [], "omissions": ["graph_unavailable"]}
+    if not graph_path or conn is None:
+        return wrap(
+            session, "affected_tests",
+            status="unavailable",
+            omissions=("graph_unavailable",),
+            provenance=provenance,
+            started_ms=started,
+        )
     engine = engine_of(session)
     repo_root = str(getattr(engine, "repo_root", "") or "")
     try:
         from gt_engine.miniswe_covering import _symbols_for_files
         from groundtruth.runtime.covering_runner import select_covering_tests
     except ModuleNotFoundError:
-        return {
-            "files": list(files),
-            "tests": [],
-            "omissions": ["covering_wheel_absent"],
-        }
-    symbols = _symbols_for_files(graph_path, tuple(files), repo_root)
+        return wrap(
+            session, "affected_tests",
+            status="unavailable",
+            omissions=("covering_wheel_absent",),
+            provenance=provenance,
+            started_ms=started,
+        )
+    try:
+        symbols = _symbols_for_files(graph_path, tuple(files), repo_root)
+    except Exception as exc:  # noqa: BLE001
+        return wrap(
+            session, "affected_tests",
+            status="abstain",
+            omissions=(f"symbol_resolution_failed:{type(exc).__name__}",),
+            provenance=provenance,
+            started_ms=started,
+        )
     if not symbols:
-        return {
+        return wrap(
+            session, "affected_tests",
+            status="partial",
+            answer={"files": list(files), "symbols": [], "tests": []},
+            omissions=("no_symbols_resolved",),
+            provenance=provenance,
+            started_ms=started,
+        )
+    try:
+        selected = select_covering_tests(
+            graph_path, symbols, limit=8, repo_root=repo_root
+        )
+    except Exception as exc:  # noqa: BLE001
+        return wrap(
+            session, "affected_tests",
+            status="abstain",
+            omissions=(f"covering_selection_failed:{type(exc).__name__}",),
+            provenance=provenance,
+            started_ms=started,
+        )
+    return wrap(
+        session, "affected_tests",
+        answer={
             "files": list(files),
-            "tests": [],
-            "omissions": ["no_symbols_resolved"],
-        }
-    selected = select_covering_tests(
-        graph_path, symbols, limit=8, repo_root=repo_root
+            "symbols": sorted(symbols),
+            "tests": [
+                {"file": row["file"], "confidence": row.get("confidence")}
+                for row in (selected or [])
+            ],
+        },
+        status="ok" if selected else "partial",
+        omissions=() if selected else ("no_covering_tests",),
+        semantics="partial",
+        provenance=provenance,
+        started_ms=started,
     )
-    return {
-        "files": list(files),
-        "symbols": sorted(symbols),
-        "tests": [
-            {"file": row["file"], "confidence": row.get("confidence")}
-            for row in (selected or [])
-        ],
-        "omissions": [] if selected else ["no_covering_tests"],
-    }
