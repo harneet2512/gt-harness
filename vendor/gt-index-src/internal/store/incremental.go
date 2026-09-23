@@ -36,6 +36,13 @@ type IncomingEdgeRef struct {
 	EdgeType         string  // "CALLS", etc.
 	SourceFile       string  // source file path of the calling edge
 	TargetName       string  // name of the target symbol that lived in the file being reparsed
+	// TargetLabel is the target node's label (Function, Class, File, …). A4:
+	// file-anchor nodes share the file's basename, so a bare name+file_path
+	// rebind sees BOTH `Class Core` and `File Core` in core/Core.java and
+	// demotes a verified restore to an ambiguous name_match guess. Matching
+	// on label restores the exact node class the original edge pointed at.
+	// Empty label (manually-constructed refs) disables the label filter.
+	TargetLabel      string
 	ResolutionMethod string  // original resolution method (same_file, import, name_match)
 	Confidence       float64 // original confidence
 	// EvidenceType carries the ORIGINAL edge's evidence marker (ast_call,
@@ -49,6 +56,22 @@ type IncomingEdgeRef struct {
 	// carried for parity with the full resolver index (it reads qualified_name)
 	// so the incremental path resolves against a non-lobotomized node view.
 	TargetQualifiedName string
+	// ActualArgs is the callsite's parser-exact argument list: a fact about
+	// the SURVIVING caller's source, so it is carried on every restore.
+	ActualArgs sql.NullString
+	// Metadata and VerificationStatus are carried when the original method
+	// is preserved (the restore re-proves the same fact); a name_match
+	// fallback is a new guess and gets neither.
+	Metadata           sql.NullString
+	VerificationStatus string
+	// CandidateCount is the ambiguity the ORIGINAL resolution recorded. A
+	// preserved-method restore re-proves the same fact, so it carries the
+	// original count (NULL stays NULL); a name_match fallback is a new guess
+	// and gets len(ids) — the candidates the rebind lookup actually saw.
+	// Carrying len(ids) on a preserved restore would rewrite a recorded
+	// ambiguity of 3 as 1 and diverge from a clean rebuild (java IMPORTS,
+	// convergence harness).
+	CandidateCount sql.NullInt64
 }
 
 // SnapshotIncomingEdgesTx captures cross-file edges whose target is a node
@@ -93,7 +116,9 @@ func SnapshotIncomingEdgesTx(tx *sql.Tx, filePath string, cap int) ([]IncomingEd
 	rows, err := tx.Query(
 		`SELECT e.source_id, e.source_line, e.type, COALESCE(e.source_file, ''), n.name,
 		        COALESCE(e.resolution_method, ''), COALESCE(e.confidence, 0.0),
-		        COALESCE(e.evidence_type, ''), COALESCE(n.qualified_name, '')
+		        COALESCE(e.evidence_type, ''), COALESCE(n.qualified_name, ''),
+		        e.actual_args, e.metadata, COALESCE(e.verification_status, 'unverified'),
+		        e.candidate_count, COALESCE(n.label, '')
 		   FROM edges e
 		   JOIN nodes n ON e.target_id = n.id
 		  WHERE n.file_path = ?
@@ -102,6 +127,10 @@ func SnapshotIncomingEdgesTx(tx *sql.Tx, filePath string, cap int) ([]IncomingEd
 		    AND e.type NOT IN ('HAS_CALLSITE','CANDIDATE','CANDIDATE_TARGET','SELECTED_TARGET',
 		                       'HAS_DERIVATION_FACT','HAS_COMPLETENESS_FACT','HAS_UNRESOLVED_FACT')
 		    AND (e.resolution_method IS NULL OR e.resolution_method NOT LIKE 'promote_%')
+		    AND NOT (COALESCE(e.evidence_type, '') = 'syntax'
+		             AND e.type IN ('DECLARED_IMPLEMENTS','OVERRIDES','METHOD_OVERRIDES','DECORATES',
+		                            'PARAM_TYPE','INJECTS','ACCESSES','RETURNS_TYPE'))
+		  ORDER BY e.id
 		  LIMIT ?`,
 		filePath, filePath, filePath, cap,
 	)
@@ -114,7 +143,8 @@ func SnapshotIncomingEdgesTx(tx *sql.Tx, filePath string, cap int) ([]IncomingEd
 	for rows.Next() {
 		var r IncomingEdgeRef
 		if err := rows.Scan(&r.SourceID, &r.SourceLine, &r.EdgeType, &r.SourceFile, &r.TargetName,
-			&r.ResolutionMethod, &r.Confidence, &r.EvidenceType, &r.TargetQualifiedName); err != nil {
+			&r.ResolutionMethod, &r.Confidence, &r.EvidenceType, &r.TargetQualifiedName,
+			&r.ActualArgs, &r.Metadata, &r.VerificationStatus, &r.CandidateCount, &r.TargetLabel); err != nil {
 			return nil, fmt.Errorf("scan incoming edge: %w", err)
 		}
 		out = append(out, r)
@@ -204,15 +234,20 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 	// qualified_name so the restore can re-prove TARGET IDENTITY against the original
 	// edge's TargetQualifiedName (P0: a bare-name re-match must not launder a verified
 	// tier onto a different node that happens to share the simple name).
-	lookup, err := tx.Prepare(`SELECT id, COALESCE(qualified_name, '') FROM nodes WHERE name = ? AND file_path = ? ORDER BY id`)
+	// A4: match on the snapshot's target label so a file-anchor node whose name
+	// equals a same-file symbol (File 'Core' vs Class 'Core' in Core.java) does
+	// not inflate the candidate set into a false-ambiguous name_match demotion.
+	// Empty TargetLabel (manually-constructed refs) keeps the name-only legacy
+	// lookup — nodes.label is never empty on real parser output.
+	lookup, err := tx.Prepare(`SELECT id, COALESCE(qualified_name, '') FROM nodes WHERE name = ? AND file_path = ? AND (? = '' OR label = ?) ORDER BY id`)
 	if err != nil {
 		return 0, 0, fmt.Errorf("prepare incoming lookup: %w", err)
 	}
 	defer lookup.Close()
 	ins, err := tx.Prepare(
 		`INSERT INTO edges (source_id, target_id, type, source_line, source_file,
-		 resolution_method, confidence, metadata, trust_tier, candidate_count, evidence_type, verification_status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'unverified')`,
+		 resolution_method, confidence, metadata, trust_tier, candidate_count, evidence_type, verification_status, actual_args)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
 		return 0, 0, fmt.Errorf("prepare incoming insert: %w", err)
@@ -221,7 +256,7 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 
 	restored, unresolved := 0, 0
 	for _, r := range snap {
-		rows, err := lookup.Query(r.TargetName, filePath)
+		rows, err := lookup.Query(r.TargetName, filePath, r.TargetLabel, r.TargetLabel)
 		if err != nil {
 			return restored, unresolved, fmt.Errorf("lookup %s in %s: %w", r.TargetName, filePath, err)
 		}
@@ -284,6 +319,9 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 		var method string
 		var tier string
 		var evType string
+		metadata := sql.NullString{}
+		verification := "unverified"
+		candidateCount := r.CandidateCount
 		if !qualifiedUnresolved && len(ids) == 1 && deterministicRestoreMethods[r.ResolutionMethod] {
 			conf = r.Confidence
 			// Item #4: floor ONLY the literal pre-v14 0.0/NULL sentinel to the
@@ -309,6 +347,7 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 				conf = 0.6
 			}
 			tier = tierForConfidence(conf)
+			metadata, verification = r.Metadata, r.VerificationStatus
 			// Preserve the original evidence marker; fall back to the method-
 			// appropriate default for legacy rows that stored none.
 			evType = r.EvidenceType
@@ -322,6 +361,7 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 		} else {
 			method = "name_match"
 			evType = "name_match"
+			candidateCount = sql.NullInt64{Int64: int64(len(ids)), Valid: true}
 			switch {
 			case qualifiedUnresolved:
 				// Parity with the resolver demote (resolver.go: conf 0.2,
@@ -348,8 +388,9 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 			tier = tierForConfidence(conf)
 		}
 		// Target is the exact-qualified-name match when one survived, else the
-		// deterministic first candidate (id ASC). Edge confidence reflects ambiguity
-		// across all candidates (candidate_count = len(ids)).
+		// deterministic first candidate (id ASC). candidate_count is the
+		// ORIGINAL recorded ambiguity on a preserved restore and the rebind
+		// lookup's real count on a name_match fallback.
 		var srcFile interface{}
 		if r.SourceFile == "" {
 			srcFile = nil
@@ -357,7 +398,7 @@ func ResolveIncomingEdgesTx(tx *sql.Tx, snap []IncomingEdgeRef, filePath string,
 			srcFile = r.SourceFile
 		}
 		if _, err := ins.Exec(r.SourceID, targetID, r.EdgeType, r.SourceLine, srcFile,
-			method, conf, tier, len(ids), evType); err != nil {
+			method, conf, metadata, tier, candidateCount, evType, verification, r.ActualArgs); err != nil {
 			return restored, unresolved, fmt.Errorf("insert restored edge: %w", err)
 		}
 		restored++
@@ -1048,7 +1089,8 @@ func (d *DB) GetAllNodes() ([]Node, []int64, error) {
 	// qualified-unresolved re-launder on the `-file` path.
 	rows, err := d.db.Query(
 		`SELECT id, label, name, COALESCE(qualified_name, ''), file_path,
-		        COALESCE(signature, ''), COALESCE(return_type, ''), language, is_test, COALESCE(parent_id, 0)
+		        COALESCE(signature, ''), COALESCE(return_type, ''), language, is_test, COALESCE(parent_id, 0),
+		        COALESCE(start_line, 0), COALESCE(end_line, 0)
 		   FROM nodes`,
 	)
 	if err != nil {
@@ -1061,7 +1103,8 @@ func (d *DB) GetAllNodes() ([]Node, []int64, error) {
 	for rows.Next() {
 		var n Node
 		if err := rows.Scan(&n.ID, &n.Label, &n.Name, &n.QualifiedName, &n.FilePath,
-			&n.Signature, &n.ReturnType, &n.Language, &n.IsTest, &n.ParentID); err != nil {
+			&n.Signature, &n.ReturnType, &n.Language, &n.IsTest, &n.ParentID,
+			&n.StartLine, &n.EndLine); err != nil {
 			return nil, nil, fmt.Errorf("scan node: %w", err)
 		}
 		nodes = append(nodes, n)
