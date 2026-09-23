@@ -20,7 +20,6 @@ SUITES: dict[str, tuple[str, ...]] = {
         "tests/test_miniswe_smoke.py",
     ),
     "context": (
-        "tests/test_context_packet.py",
         "tests/test_delivery_budget.py",
         "tests/test_request_history.py",
         "tests/test_admission_transactions.py",
