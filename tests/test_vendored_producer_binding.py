@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -119,15 +120,19 @@ def test_the_fingerprint_recipe_matches_the_producers_own():
     """
     if not SOURCE.is_dir():
         pytest.skip("no vendored producer source to fingerprint")
-    pipeline = (
-        "git ls-tree -r HEAD -- vendor/gt-index-src "
-        "| sed 's|\\tvendor/gt-index-src/|\\t|' | LC_ALL=C sort "
-        "| grep -E '\\.(go|c|cc|cpp|h|hpp|s)$|go\\.(mod|sum)[[:space:]]*$' "
-        "| sha256sum"
+    probe = subprocess.run(
+        ["git", "ls-tree", "-r", "HEAD", "--", "vendor/gt-index-src"],
+        cwd=REPO, capture_output=True, text=True,
     )
-    completed = subprocess.run(["sh", "-c", pipeline], cwd=REPO,
-                               capture_output=True, text=True)
-    if completed.returncode != 0:
-        pytest.skip(f"git ls-tree unavailable: {completed.stderr.strip()[:80]}")
-    # sha256sum prints "<hash>  -" for stdin; compare the hash field only.
-    assert completed.stdout.split()[0] == _source_fingerprint(SOURCE)
+    if probe.returncode != 0:
+        pytest.skip(f"git ls-tree unavailable: {probe.stderr.strip()[:80]}")
+    # Reproduce the producer recipe's sed/grep/sort/sha256sum stages in place
+    # so a failed `git ls-tree` cannot masquerade as agreement through an
+    # empty pipeline (sha256sum exits 0 on empty stdin).
+    lines = sorted(
+        line.replace("\tvendor/gt-index-src/", "\t")
+        for line in probe.stdout.splitlines()
+        if re.search(r"\.(go|c|cc|cpp|h|hpp|s)$|go\.(mod|sum)\s*$", line)
+    )
+    recipe = hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+    assert recipe == _source_fingerprint(SOURCE)
