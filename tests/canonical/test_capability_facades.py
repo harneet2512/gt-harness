@@ -268,3 +268,61 @@ def test_freshness_facade_reports_revisions_and_postures(tmp_path):
     unknown = freshness.unit_state(session, "nope")
     assert unknown.status == "unavailable"
     assert "unit_unknown" in unknown.omissions
+
+
+def test_analysis_dataflow_facades_on_persisted_go_cfg(polyglot_session):
+    """§6 rows: real per-block dataflow over the producer-persisted Go CFG.
+
+    ``Compute`` in ``gosvc/main.go`` has a persisted CFG in this producer
+    build, so all three stored-analysis facades return ``ok`` with real
+    block-level content — the positive leg the abstain-only coverage
+    lacked.
+    """
+    session, _adapter = polyglot_session
+
+    cfg = analysis.cfg(session, "Compute")
+    assert cfg.status == "ok", cfg.omissions
+    assert len(cfg.answer["blocks"]) >= 3
+    assert cfg.answer["edges"], "CFG carried no edges"
+
+    rd = analysis.reaching_definitions(session, "Compute")
+    assert rd.status == "ok", rd.omissions
+    assert rd.answer["all_defs"], "no reaching definitions computed"
+    assert isinstance(rd.answer["in"], dict) and isinstance(rd.answer["out"], dict)
+
+    cd = analysis.control_dependence(session, "Compute")
+    assert cd.status == "ok", cd.omissions
+    assert cd.answer["dominators"], "no dominator tree computed"
+    assert isinstance(cd.answer["control_dependence"], list)
+
+
+def test_analysis_facades_abstain_honestly_on_python_function(polyglot_session):
+    """The Python fixture functions carry no persisted CFG in this producer
+    build — the facades abstain ``no_persisted_cfg`` rather than fabricate."""
+    session, _adapter = polyglot_session
+
+    for facade in (analysis.cfg, analysis.reaching_definitions, analysis.control_dependence):
+        result = facade(session, "list_items")
+        assert result.status == "abstain", (facade.__name__, result.status)
+        assert "no_persisted_cfg" in result.omissions, (facade.__name__, result.omissions)
+
+
+def test_localization_hybrid_rank_direct(polyglot_session):
+    """§6 'hybrid retrieval': direct facade call returns fused ranked rows."""
+    session, _adapter = polyglot_session
+
+    result = localization.hybrid_rank(session, "listItems", k=5)
+    assert result.status in {"ok", "partial"}, (result.status, result.omissions)
+    fused = result.answer.get("fused") or ()
+    assert fused, f"hybrid_rank returned no fused rows: {result.answer}"
+    provenance = result.answer.get("provenance") or {}
+    hit = next(
+        (meta for row in fused for meta in [provenance.get(row.get("stable_id"), {})]
+         if meta.get("name") == "listItems"),
+        None,
+    )
+    assert hit is not None, f"listItems absent from fused provenance: {fused}"
+    assert hit["file_path"].replace("\\", "/").endswith("tsapp/server.ts")
+    # Per-source receipts: lexical matched; dense honestly reports its asset state.
+    sources = {s["source"]: s for s in result.answer.get("sources", ())}
+    assert sources["lexical"]["result_count"] >= 1

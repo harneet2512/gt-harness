@@ -216,6 +216,7 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_hybrid_retrieval.py::test_hybrid_rank_survives_null_bm25_lexical",
             "tests/test_miniswe_integration.py::test_lexical_localization_is_stable_advisory_and_includes_dirty_files",
             "tests/test_miniswe_integration.py::test_stale_or_unreadable_graph_localization_falls_back_to_lexical",
+            "tests/canonical/test_capability_facades.py::test_localization_hybrid_rank_direct",
         ),
         limitations=(
             "the model receives the compacted top-4 render (<=1400 B) the "
@@ -355,7 +356,11 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         "none",
         "groundtruth.runtime.cfg_store:analyze_stored",
         facade=f"{_A}:cfg",
-        tests=("tests/canonical/test_capability_facades.py::test_graph_backed_facades_abstain_without_a_graph",),
+        tests=(
+            "tests/canonical/test_capability_facades.py::test_graph_backed_facades_abstain_without_a_graph",
+            "tests/canonical/test_capability_facades.py::test_analysis_dataflow_facades_on_persisted_go_cfg",
+            "tests/canonical/test_capability_facades.py::test_analysis_facades_abstain_honestly_on_python_function",
+        ),
         limitations=(
             "wheel stored-CFG analysis over the persisted graph; abstains "
             "when the symbol is unresolved, the graph is absent, or the wheel "
@@ -369,10 +374,14 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         "none",
         "groundtruth.runtime.cfg_store:analyze_stored",
         facade=f"{_A}:reaching_definitions",
-        tests=(),
+        tests=(
+            "tests/canonical/test_capability_facades.py::test_analysis_dataflow_facades_on_persisted_go_cfg",
+            "tests/canonical/test_capability_facades.py::test_analysis_facades_abstain_honestly_on_python_function",
+        ),
         limitations=(
-            "same stored-CFG pipeline as analysis.cfg; host-side only, no "
-            "dedicated facade test yet",
+            "same stored-CFG pipeline as analysis.cfg; host-side only — "
+            "positive coverage is the persisted-Go-CFG leg, Python abstains "
+            "no_persisted_cfg",
         ),
     ),
     _e(
@@ -382,10 +391,14 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         "none",
         "groundtruth.runtime.cfg_store:analyze_stored",
         facade=f"{_A}:control_dependence",
-        tests=(),
+        tests=(
+            "tests/canonical/test_capability_facades.py::test_analysis_dataflow_facades_on_persisted_go_cfg",
+            "tests/canonical/test_capability_facades.py::test_analysis_facades_abstain_honestly_on_python_function",
+        ),
         limitations=(
-            "same stored-CFG pipeline as analysis.cfg; host-side only, no "
-            "dedicated facade test yet",
+            "same stored-CFG pipeline as analysis.cfg; host-side only — "
+            "positive coverage is the persisted-Go-CFG leg, Python abstains "
+            "no_persisted_cfg",
         ),
     ),
     _e(
@@ -897,7 +910,10 @@ COMPONENT_ENTRIES: tuple[CapabilityEntry, ...] = (
         "MODEL_FACING",
         "gateway_auto:sealed",
         "gt_engine/runtime_observation.py:compile_transaction_artifacts",
-        tests=(f"{_RTC}::test_reactive_syntax_verdict",),
+        tests=(
+            f"{_RTC}::test_reactive_syntax_verdict_producer_path",
+            f"{_RTC}::test_reactive_syntax_verdict_fallback_path",
+        ),
         limitations=(
             "syntax verdicts are exact producer-anchored parses; graph caller "
             "rows are graph_recorded, never claimed complete",

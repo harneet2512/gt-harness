@@ -287,11 +287,10 @@ def test_drift_relocalization_flags(tmp_path):
 # ------------------------------------------------------------------ reactive syntax
 
 
-def test_reactive_syntax_verdict(tmp_path, polyglot_repo):
-    """§6 'reactive syntax': compile_transaction_artifacts emits real verdicts."""
+def _broken_python_txn() -> EditTransaction:
     good = (FIXTURE_DIR / "pyapp" / "server.py").read_bytes()
     broken = good + b"\ndef broken(:\n"
-    txn = EditTransaction(
+    return EditTransaction(
         action_id=1,
         command_sha256=hashlib.sha256(b"edit").hexdigest(),
         pre_revision="rev-a",
@@ -310,14 +309,50 @@ def test_reactive_syntax_verdict(tmp_path, polyglot_repo):
         omissions=(),
         transaction_sha256="a" * 64,
     )
-    artifacts = compile_transaction_artifacts(txn, graph_db=str(polyglot_repo.graph))
+
+
+def test_reactive_syntax_verdict_producer_path(tmp_path, polyglot_repo, monkeypatch):
+    """§6 'reactive syntax': the producer-anchored verdict shape.
+
+    With a real producer binary pinned, ``compile_transaction_artifacts``
+    takes the ``inspect_sources`` path and the verdict is the producer's
+    own incomplete-tree finding — not the ast.parse fallback shape. This
+    is the shape the ``reactive_syntax`` registry row claims.
+    """
+    monkeypatch.setenv("GT_INDEX_BINARY", polyglot_repo.binary)
+    artifacts = compile_transaction_artifacts(
+        _broken_python_txn(), graph_db=str(polyglot_repo.graph)
+    )
     assert artifacts["schema"] == "gt.transaction_artifacts.v1"
     assert artifacts["caller_coverage"] == "graph_recorded"
-    syntax_rows = artifacts["syntax"]
-    assert any(
-        row.get("valid") is False and "SyntaxError" in str(row.get("error") or "")
-        for row in syntax_rows
-    ), f"broken Python produced no syntax verdict: {syntax_rows}"
+    (row,) = [r for r in artifacts["syntax"] if r["path"] == "pyapp/server.py"]
+    assert row["valid"] is False
+    assert row["status"] == "incomplete"
+    assert row["diagnostics"], "producer verdict carried no diagnostics"
+    assert row["producer"].startswith("gt-index/"), (
+        f"verdict was not producer-anchored: {row['producer']!r}"
+    )
+
+
+def test_reactive_syntax_verdict_fallback_path(tmp_path, polyglot_repo, monkeypatch):
+    """§6 'reactive syntax': the binary-less ast.parse fallback shape.
+
+    With no producer resolvable the harness falls back to ``ast.parse``
+    and the verdict carries the fallback's own error fields. This leg is
+    honest degradation coverage, not the registry row's claimed shape.
+    """
+    monkeypatch.delenv("GT_INDEX_BINARY", raising=False)
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    artifacts = compile_transaction_artifacts(
+        _broken_python_txn(), graph_db=str(polyglot_repo.graph)
+    )
+    (row,) = [r for r in artifacts["syntax"] if r["path"] == "pyapp/server.py"]
+    assert row["valid"] is False
+    assert row["status"] == "exact"
+    assert row["error"] == "SyntaxError"
+    assert row["producer"] == "python.ast.parse"
 
 
 # ------------------------------------------------------------------ recovery suspension
