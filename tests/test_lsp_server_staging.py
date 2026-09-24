@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from eval.miniswe_agent import _REMOTE_LSP_BIN, MiniSweAgent, MiniSweGtAgent
+pytest.importorskip("harbor")
+
+from eval.miniswe_agent import _REMOTE_LSP_BIN, MiniSweAgent, MiniSweGtAgent  # noqa: E402
 
 
 def test_staging_is_mandatory(monkeypatch):

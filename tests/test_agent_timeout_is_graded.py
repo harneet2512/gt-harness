@@ -12,7 +12,10 @@ shut.
 from __future__ import annotations
 
 import pytest
-from harbor.agents.installed.base import NonZeroAgentExitCodeError
+
+pytest.importorskip("harbor")
+
+from harbor.agents.installed.base import NonZeroAgentExitCodeError  # noqa: E402
 
 from eval.miniswe_agent import (
     SUPERVISOR_TIMEOUT_EXIT_CODE,

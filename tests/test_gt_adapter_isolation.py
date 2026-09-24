@@ -1,4 +1,8 @@
-from eval.tb_agent import _GT_STAGED_SOURCE_CLEANUP, GTNanoAgent
+import pytest
+
+pytest.importorskip("harbor")
+
+from eval.tb_agent import _GT_STAGED_SOURCE_CLEANUP, GTNanoAgent  # noqa: E402
 
 
 def test_gt_adapter_version_does_not_require_staged_checkout():

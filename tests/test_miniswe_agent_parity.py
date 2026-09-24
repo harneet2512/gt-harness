@@ -6,7 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from harbor.agents.installed.base import NonZeroAgentExitCodeError
+
+pytest.importorskip("harbor")
+
+from harbor.agents.installed.base import NonZeroAgentExitCodeError  # noqa: E402
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,

@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from eval.miniswe_agent import MiniSweAgent, ProviderBillingError
+pytest.importorskip("harbor")
+
+from eval.miniswe_agent import MiniSweAgent, ProviderBillingError  # noqa: E402
 
 
 @pytest.mark.parametrize(

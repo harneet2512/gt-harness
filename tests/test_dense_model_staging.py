@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from eval.miniswe_agent import _REMOTE_DENSE_MODEL_DIR, MiniSweAgent
+pytest.importorskip("harbor")
+
+from eval.miniswe_agent import _REMOTE_DENSE_MODEL_DIR, MiniSweAgent  # noqa: E402
 
 
 def test_absent_model_is_a_setup_error(monkeypatch):
