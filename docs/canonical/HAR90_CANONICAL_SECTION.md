@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T09:24:21Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T10:03:21Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `9126ad8142b15bc80da70cf5157207b2915cab9e` |
+| harness | `canonical/gt-har90` @ `2a0affff224cafb0de3a0aa564c12b725f9370b1` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -74,7 +74,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 40 | `kind.processes` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.processes` | typed_on_request | graph_revision | env 3290B / ans 71B | yes | 2 refs |
 | 41 | `kind.route_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 7638B / ans 1542B | yes | 2 refs |
 | 42 | `kind.api_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.route_impact, structure.framework_relationships` | typed_on_request | graph_revision | env 3272B / ans 56B | yes | 1 ref |
-| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 1 ref |
+| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 4 refs |
 | 44 | `kind.rename` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `—` | typed_on_request | graph_revision | env 5448B / ans 806B | yes | 1 ref |
 | 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.shape_change` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 3 refs |
 | 46 | `kind.tool_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 3176B / ans 30B | yes | 2 refs |
@@ -229,7 +229,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `kind.processes`: partial semantics
 - `kind.route_map`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced; an API_CALL-only route yields anchor line 0 and the answer becomes producer_not_supported (documented wheel defect)
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
-- `kind.taint`: partial semantics: symbol-level CALLS reachability - not dataflow and not a sound over-approximation
+- `kind.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, and unbound *args/**kwargs are named omissions, and seeds are unresolvable uses in the source function); not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
 - `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice
 - `kind.tool_map`: partial semantics: external decorators bind through occurrence nodes (name-only, uncertified); registration sites without decorators (server.add_tool(f) calls) are untracked by design
