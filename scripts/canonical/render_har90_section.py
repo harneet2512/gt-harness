@@ -217,6 +217,25 @@ def render() -> str:
       "same commit (uncertified path — no pinned docker builder "
       "available; `builder-identity.json` records the real toolchain).")
     a("")
+    a("Reviewer prerequisites for reproducing V-A6/V-C1/V-F from this "
+      "section on a fresh worktree:")
+    a("")
+    a("- `GROUNDTRUTH_ROOT=/d/gt-canonical-producer` (or the equivalent "
+      "producer worktree path) must be exported before "
+      "`python scripts/generate_gt_finalstand.py --check`; its default "
+      "`<harness-parent>/Groundtruth` resolves to a stale tree on this "
+      "host and the check fails closed against it.")
+    a("- The producer selection regex is "
+      "`Convergence|Batch|W1|Source|Route|Api|Framework` — the `Batch` "
+      "alternative is required, otherwise `TestBatchAmendConvergesToCleanRebuild` "
+      "(the flagship batch-amend convergence test) is silently never "
+      "selected. The pre-erratum regex in earlier snapshots lacked it.")
+    a("- The canonical suite resolves a runnable producer through "
+      "`GT_INDEX_BINARY`, `C:\\gt-smoke-a6\\gt-index-new.exe` on Windows, "
+      "PATH, the vendored linux-amd64 binary on WSL, or a stamped "
+      "`go build -tags sqlite_fts5` of `vendor/gt-index-src`; with none "
+      "of these the graph-bound tests skip with the named reason.")
+    a("")
     a("## B — Architecture")
     a("")
     a("One canonical implementation, two consumers. `EngineState` owns "
@@ -242,8 +261,10 @@ def render() -> str:
     a("## C — Capability matrix")
     a("")
     a(f"{len(entries)} registry entries "
-      f"({sum(1 for e in entries if not e.name.startswith('kind.'))} facades, "
-      f"{len(CERTIFIED_TYPED_KINDS)} certified typed kinds). Cost column "
+      f"({sum(1 for e in entries if not e.name.startswith('kind.') and e.facade)} facades, "
+      f"{len(CERTIFIED_TYPED_KINDS)} certified typed kinds, "
+      f"{sum(1 for e in entries if not e.name.startswith('kind.') and not e.facade)} "
+      f"runtime components). Cost column "
       "is the measured p50/p95 from COSTS.json (fixture substrate); "
       "typed-kind rows carry the wire-envelope byte cost instead.")
     a("")
@@ -286,7 +307,8 @@ def render() -> str:
     a("| `docs/canonical/` | `RUNTIME_LEDGER.md` (C3), `COSTS.json`/`.md` "
       "(G), `MAIN_PORT_LEDGER.md`, `TYPED_SURFACE.md`, this section |")
     a("| `tests/canonical/` | F suite: polyglot fixture, goldens, "
-      "static/determinism/runtime/cross-layer/registry/facade tests |")
+      "static/determinism/runtime/cross-layer/registry/facade/"
+      "runtime-components/treatment-flags tests |")
     a("| `gt_engine/capabilities/` | D API + E registry |")
     a("| `D:\\gt-harness` | shared worktree (other branches) |")
     a("| `D:\\gt_freeze\\2026-09-22-canonical` | frozen plan + audit |")

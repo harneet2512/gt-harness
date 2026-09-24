@@ -779,7 +779,191 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
     ),
 )
 
-CAPABILITY_REGISTRY: tuple[CapabilityEntry, ...] = (*FACADE_ENTRIES, *KIND_ENTRIES)
+_RTC = "tests/canonical/test_runtime_components.py"
+
+# Runtime components — the §6 'additional' rows that are mechanisms rather
+# than facades or certified kinds. ``state`` is judged on the same rule as
+# every other entry: the highest rung the mechanism's substance truthfully
+# reaches. Gates, governors, and history bookkeeping never render their own
+# output into model-visible text, so they sit at AVAILABLE even though the
+# runtime reaches them; advisory payloads that DO ride an admitted lane are
+# MODEL_FACING and the call-graph truth test verifies the path.
+COMPONENT_ENTRIES: tuple[CapabilityEntry, ...] = (
+    _e(
+        "task_contract",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "none",
+        "gt_engine/task_contract.py:extract_task_contract",
+        tests=(f"{_RTC}::test_task_contract_extraction",),
+        limitations=(
+            "runner-side machinery: the obligations:task context unit is "
+            "admitted through miniswe_gt_run, not the canonical runtime — "
+            "extraction is verbatim-line anchored, not a semantic proof of "
+            "coverage",
+        ),
+    ),
+    _e(
+        "persistent_plan",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "none",
+        "gt_engine/persistent_plan/deterministic.py:build_deterministic_plan",
+        tests=(f"{_RTC}::test_persistent_plan_ledger_and_deterministic_plan",),
+        limitations=(
+            "runner-side machinery: the plan_cursor:task context unit is "
+            "admitted through miniswe_gt_run, not the canonical runtime; "
+            "rows carry checks only when a test command was discovered",
+        ),
+    ),
+    _e(
+        "plan_gate",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "gate",
+        "gt_engine/persistent_plan/gate.py:decide",
+        tests=(f"{_RTC}::test_plan_gate_decision_is_pure_policy",),
+        limitations=(
+            "pure decision function; its verdict steers submission and is "
+            "never itself model-visible text",
+        ),
+    ),
+    _e(
+        "churn_governor",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "steer",
+        "gt_engine/churn_governor.py:ChurnGovernor.observe",
+        tests=(f"{_RTC}::test_churn_governor_steer_then_abort",),
+        limitations=(
+            "returns steer/abort signals the caller applies; the signal "
+            "itself is not a delivery",
+        ),
+    ),
+    _e(
+        "submit_finalization",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "none",
+        "gt_engine/gt_session.py:GTSession._finalization_candidate",
+        tests=(f"{_RTC}::test_finalization_candidate_renders_advisory",),
+        limitations=(
+            "runner-side machinery: the advisory is emitted through the "
+            "plan-submit path in miniswe_gt_run, not the canonical runtime; "
+            "observes collector-shaped commit bytes only — never commits or "
+            "assesses correctness on the agent's behalf",
+        ),
+    ),
+    _e(
+        "select_catalog",
+        "DELIVERY POLICY",
+        "MODEL_FACING",
+        "gateway_auto:sealed",
+        "gt_engine/gt_session.py:GTSession.prepare_select_catalog",
+        tests=(f"{_RTC}::test_select_catalog_certify_accept_consume",),
+        limitations=(
+            "one certified task-start offer per run; abstains honestly on a "
+            "stale or graph-incomplete bootstrap",
+        ),
+    ),
+    _e(
+        "history_supersession",
+        "DELIVERY POLICY",
+        "AVAILABLE",
+        "none",
+        "gt_engine/gt_session.py:GTSession.demote_overbudget_context_units",
+        tests=(f"{_RTC}::test_history_supersession_and_demotion",),
+        limitations=(
+            "internal history bookkeeping: superseded/demoted units queue "
+            "onto the drain and collapse to CAS pointers — demotion is not "
+            "deletion and renders no standalone output",
+        ),
+    ),
+    _e(
+        "drift_relocalization",
+        "INTELLIGENCE/STATE",
+        "AVAILABLE",
+        "none",
+        "gt_engine/miniswe_integration.py:MiniSweAdapter.localization_drift_pending",
+        tests=(f"{_RTC}::test_drift_relocalization_flags",),
+        limitations=(
+            "pending flags only; the re-localization they trigger ships "
+            "through the localization delivery path, not this mechanism",
+        ),
+    ),
+    _e(
+        "reactive_syntax",
+        "INTELLIGENCE/STATE",
+        "MODEL_FACING",
+        "gateway_auto:sealed",
+        "gt_engine/runtime_observation.py:compile_transaction_artifacts",
+        tests=(f"{_RTC}::test_reactive_syntax_verdict",),
+        limitations=(
+            "syntax verdicts are exact producer-anchored parses; graph caller "
+            "rows are graph_recorded, never claimed complete",
+        ),
+    ),
+    _e(
+        "recovery_suspension",
+        "AGENT CONTROL",
+        "AVAILABLE",
+        "none",
+        "gt_engine/miniswe_integration.py:MiniSweAdapter._count_recovery_outcome",
+        tests=(f"{_RTC}::test_recovery_suspension_at_episode_cap",),
+        limitations=(
+            "suspends the rebuild loop after the episode cap; consumers "
+            "degrade to the no-graph path for the rest of the episode",
+        ),
+    ),
+    _e(
+        "cochange_priors",
+        "INTELLIGENCE/STATE",
+        "AVAILABLE",
+        "none",
+        "gt_engine/cochange_evidence.py:run_cochange_prior",
+        tests=(f"{_RTC}::test_cochange_priors_on_real_graph",),
+        limitations=(
+            "co-change improves rank but can never certify a delivery by "
+            "itself; quiet on repositories without git history",
+        ),
+    ),
+    _e(
+        "context_admission",
+        "DELIVERY POLICY",
+        "AVAILABLE",
+        "none",
+        "gt_engine/gt_session.py:GTSession.admit_decision_packet",
+        tests=(
+            "tests/canonical/test_unit_staleness.py::test_admitted_unit_is_stale_after_a_workspace_edit",
+        ),
+        limitations=(
+            "the admission owner every delivered lane passes through; its "
+            "decisions are admission records, not delivered text",
+        ),
+    ),
+    _e(
+        "incremental_amend",
+        "INTELLIGENCE/STATE",
+        "AVAILABLE",
+        "none",
+        "gt_engine/miniswe_integration.py:MiniSweAdapter._sync_amend_graph",
+        tests=(
+            "tests/canonical/test_runtime_intelligence.py::test_sync_amend_adopts_or_journals_refusal",
+        ),
+        limitations=(
+            "batch-path amend only: the certified producer declares "
+            "batch_parser_node_reuse_v1, not incremental_amend_in_place; "
+            "parents past SYNC_AMEND_MAX_GRAPH_BYTES defer to the "
+            "coordinator's clock, and uncertifiable parents refuse by name",
+        ),
+    ),
+)
+
+CAPABILITY_REGISTRY: tuple[CapabilityEntry, ...] = (
+    *FACADE_ENTRIES,
+    *KIND_ENTRIES,
+    *COMPONENT_ENTRIES,
+)
 
 REGISTRY: dict[str, CapabilityEntry] = {e.name: e for e in CAPABILITY_REGISTRY}
 

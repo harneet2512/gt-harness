@@ -69,8 +69,11 @@ KIND_ARGUMENT_DOCS = {
     "route_map": "optional path (handler file prefix)",
     "api_impact": "route and/or handler",
     "taint": (
-        "source with optional sink, path, language, and depth (1-10, default 6); "
-        "symbol-level call reachability, not statement dataflow"
+        "source with optional sink, path, language, depth (1-10, default 6), "
+        "and include_name_matched (boolean, default false; when true, "
+        "name-matched call edges below the 0.5 receiver/import-proof "
+        "confidence floor are also followed); symbol-level call reachability, "
+        "not statement dataflow"
     ),
     "rename": "symbol with optional new_name, path, and language",
     "shape_check": "symbol with optional path and language",
