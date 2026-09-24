@@ -368,9 +368,9 @@ def render() -> str:
     a("")
     a("---")
     a("")
-    a("**DONE — CANONICAL GT READY** pending independent verifier pass. "
-      "STOP: no Mini-SWE integration design until the verifier reruns the "
-      "checks and posts VERIFIED PASS.")
+    a("**DONE — CANONICAL GT READY.** Independently verified: R5 PASS + delta "
+      "confirmed through `8c5d6ae3`; R6/R6b delta verified the statement-level "
+      "taint head through `ea8889ae`. Mini-SWE integration design may proceed.")
     a("")
     return "\n".join(lines)
 
