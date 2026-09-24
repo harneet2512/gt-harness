@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T09:23:42Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T09:24:21Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `8f95364e816df0ce2d01eee998a9733fe4aab54b` |
+| harness | `canonical/gt-har90` @ `9126ad8142b15bc80da70cf5157207b2915cab9e` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
