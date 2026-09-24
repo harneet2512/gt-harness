@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T03:50:47Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T04:40:42Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `8e03c16c0f234aaea1fb06475cc81375b0720770` |
+| harness | `canonical/gt-har90` @ `c5f1d12158194946e4baf8f0b42fb43bdbb167d0` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35` |
@@ -37,7 +37,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 4 | `freshness.fallback_state` | `gt_engine/miniswe_integration.py:MiniSweAdapter._recovery_build_inline` | AVAILABLE | exact | `gt_engine/capabilities/freshness.py:fallback_state` | none | edit/graph_revision | p50 0ms / p95 0ms | no | 2 refs |
 | 5 | `freshness.unit_state` | `gt_engine/gt_session.py:GTSession.unit_state` | AVAILABLE | exact | `gt_engine/capabilities/freshness.py:unit_state` | none | edit | p50 0ms / p95 0ms | no | 3 refs |
 | 6 | `localization.lexical_search` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | exact | `gt_engine/capabilities/localization.py:lexical_search` | typed_on_request | graph_revision | p50 60ms / p95 66ms | yes | 2 refs |
-| 7 | `localization.hybrid_rank` | `gt_engine/retrieval.py:hybrid_rank` | MODEL_FACING | heuristic | `gt_engine/capabilities/localization.py:hybrid_rank` | gateway_auto:localization | edit/graph_revision | p50 13ms / p95 17ms | yes | 3 refs |
+| 7 | `localization.hybrid_rank` | `gt_engine/retrieval.py:hybrid_rank` | MODEL_FACING | heuristic | `gt_engine/capabilities/localization.py:hybrid_rank` | gateway_auto:localization | edit/graph_revision | p50 13ms / p95 17ms | yes | 4 refs |
 | 8 | `localization.definition` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/localization.py:definition` | typed_on_request | graph_revision | p50 48ms / p95 63ms | yes | 2 refs |
 | 9 | `localization.references` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/localization.py:references` | typed_on_request | graph_revision | p50 46ms / p95 52ms | yes | 1 ref |
 | 10 | `structure.callers` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/structure.py:callers` | typed_on_request | graph_revision | p50 46ms / p95 51ms | yes | 1 ref |
@@ -46,9 +46,9 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 13 | `structure.processes` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/structure.py:processes` | typed_on_request | graph_revision | p50 55ms / p95 62ms | yes | 2 refs |
 | 14 | `structure.communities` | `gt_engine/capabilities/structure.py:communities` | AVAILABLE | partial | `gt_engine/capabilities/structure.py:communities` | none | graph_revision | p50 1ms / p95 1ms | no | 2 refs |
 | 15 | `structure.framework_relationships` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/structure.py:framework_relationships` | typed_on_request | graph_revision | p50 52ms / p95 56ms | yes | 3 refs |
-| 16 | `analysis.cfg` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:cfg` | none | graph_revision | p50 65ms / p95 80ms | no | 1 ref |
-| 17 | `analysis.reaching_definitions` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:reaching_definitions` | none | graph_revision | p50 64ms / p95 158ms | no | 0 refs |
-| 18 | `analysis.control_dependence` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:control_dependence` | none | graph_revision | p50 63ms / p95 67ms | no | 0 refs |
+| 16 | `analysis.cfg` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:cfg` | none | graph_revision | p50 65ms / p95 80ms | no | 3 refs |
+| 17 | `analysis.reaching_definitions` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:reaching_definitions` | none | graph_revision | p50 64ms / p95 158ms | no | 2 refs |
+| 18 | `analysis.control_dependence` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:control_dependence` | none | graph_revision | p50 63ms / p95 67ms | no | 2 refs |
 | 19 | `analysis.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:slice` | typed_on_request | graph_revision | p50 53ms / p95 55ms | yes | 2 refs |
 | 20 | `analysis.callable_values` | `gt_engine/capabilities/analysis.py:callable_values` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:callable_values` | none | graph_revision | p50 1ms / p95 1ms | no | 2 refs |
 | 21 | `analysis.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:taint` | typed_on_request | graph_revision | p50 53ms / p95 57ms | yes | 1 ref |
@@ -86,7 +86,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 53 | `select_catalog` | `gt_engine/gt_session.py:GTSession.prepare_select_catalog` | MODEL_FACING | — | `—` | gateway_auto:sealed | — | — | yes | 1 ref |
 | 54 | `history_supersession` | `gt_engine/gt_session.py:GTSession.demote_overbudget_context_units` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
 | 55 | `drift_relocalization` | `gt_engine/miniswe_integration.py:MiniSweAdapter.localization_drift_pending` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
-| 56 | `reactive_syntax` | `gt_engine/runtime_observation.py:compile_transaction_artifacts` | MODEL_FACING | — | `—` | gateway_auto:sealed | — | — | yes | 1 ref |
+| 56 | `reactive_syntax` | `gt_engine/runtime_observation.py:compile_transaction_artifacts` | MODEL_FACING | — | `—` | gateway_auto:sealed | — | — | yes | 2 refs |
 | 57 | `recovery_suspension` | `gt_engine/miniswe_integration.py:MiniSweAdapter._count_recovery_outcome` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
 | 58 | `cochange_priors` | `gt_engine/cochange_evidence.py:run_cochange_prior` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
 | 59 | `context_admission` | `gt_engine/gt_session.py:GTSession.admit_decision_packet` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
@@ -197,8 +197,8 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `structure.framework_relationships`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `structure.framework_relationships`: target shape picks the kind (path-like -> route_map, symbol -> symbol_context); kind override is constrained to route_map, api_impact, tool_map
 - `analysis.cfg`: wheel stored-CFG analysis over the persisted graph; abstains when the symbol is unresolved, the graph is absent, or the wheel is missing; no model-facing delivery
-- `analysis.reaching_definitions`: same stored-CFG pipeline as analysis.cfg; host-side only, no dedicated facade test yet
-- `analysis.control_dependence`: same stored-CFG pipeline as analysis.cfg; host-side only, no dedicated facade test yet
+- `analysis.reaching_definitions`: same stored-CFG pipeline as analysis.cfg; host-side only — positive coverage is the persisted-Go-CFG leg, Python abstains no_persisted_cfg
+- `analysis.control_dependence`: same stored-CFG pipeline as analysis.cfg; host-side only — positive coverage is the persisted-Go-CFG leg, Python abstains no_persisted_cfg
 - `analysis.slice`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `analysis.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `analysis.callable_values`: reads producer-retained resolution_callsites/resolution_candidates tables; an empty candidate set is reported as an omission, never fabricated
