@@ -368,9 +368,14 @@ def render() -> str:
     a("")
     a("---")
     a("")
-    a("**DONE — CANONICAL GT READY.** Independently verified: R5 PASS + delta "
-      "confirmed through `8c5d6ae3`; R6/R6b delta verified the statement-level "
-      "taint head through `ea8889ae`. Mini-SWE integration design may proceed.")
+    a("**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed "
+      "through `8c5d6ae3`; R6/R6b delta verified the statement-level taint head "
+      "through `ea8889ae`. Mini-SWE integration design landed at `53bf545b` "
+      "(`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`). Heads after `ea8889ae` "
+      "carry review-fix deltas (taint negative leg, attribute-flow omissions, "
+      "resolved-symbol sanitizers, shape_check collision pin) that are "
+      "test-verified locally — producer leg 22+1x, canonical 103/103 — but "
+      "have not yet received an independent delta verification pass.")
     a("")
     return "\n".join(lines)
 

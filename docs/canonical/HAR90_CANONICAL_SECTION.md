@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T20:02:57Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T20:04:59Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `10fdc1fe72b428926f40da311c629eff1ab4a6d2` |
+| harness | `canonical/gt-har90` @ `e91c347e51e90c2807492dcdc10ff5c886edcc29` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -315,4 +315,4 @@ gt_engine/capabilities/freshness.py:
 
 ---
 
-**DONE — CANONICAL GT READY.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b delta verified the statement-level taint head through `ea8889ae`. Mini-SWE integration design may proceed.
+**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b delta verified the statement-level taint head through `ea8889ae`. Mini-SWE integration design landed at `53bf545b` (`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`). Heads after `ea8889ae` carry review-fix deltas (taint negative leg, attribute-flow omissions, resolved-symbol sanitizers, shape_check collision pin) that are test-verified locally — producer leg 22+1x, canonical 103/103 — but have not yet received an independent delta verification pass.
