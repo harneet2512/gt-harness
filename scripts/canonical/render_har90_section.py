@@ -118,7 +118,7 @@ def _capability_matrix(entries, costs) -> str:
             else "graph_revision"
         ) if is_kind else (cost_row.get("invalidated_by") or "—")
         internal = (
-            ", ".join(f"`{f}`" for f in entry.facades) or "—"
+            ", ".join(entry.facades) or "—"
         ) if is_kind else (entry.facade or "—")
         tests = f"{len(entry.tests)} ref" + ("s" if len(entry.tests) != 1 else "")
         model_facing = "yes" if entry.state == "MODEL_FACING" else "no"
@@ -214,7 +214,7 @@ def render() -> str:
       "`source_revision`; `unit_state`/`is_stale` expose staleness "
       "internally). `ExternalStateStore` persists append-only journal "
       "events + CAS blobs. Typed actions run one path — "
-      "`build_action_request → execute_typed_action → vendored "
+      "`build_action_request` → `execute_typed_action` → vendored "
       "`groundtruth.runtime.deterministic_queries` — shared by the "
       "model-facing `groundtruth` tool and every host-side facade. "
       "Model-facing admission remains centralized in "

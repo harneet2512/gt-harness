@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T02:36:36Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T02:40:49Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `f9d87ff6c27e86becce5418a543f22c3b5f08c66` |
+| harness | `canonical/gt-har90` @ `1c10e6f9112840ecfe5b5051071a7112f673cff0` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35` |
@@ -17,7 +17,7 @@ Wheel↔source correspondence: `scripts/verify_wheel_source.py` PASS — 328 fil
 
 ## B — Architecture
 
-One canonical implementation, two consumers. `EngineState` owns current/graph source revisions, the edit overlay, omissions, and graph completeness/currentness; `GTSession` owns context-unit admission/supersession ledgers (each unit carries its `source_revision`; `unit_state`/`is_stale` expose staleness internally). `ExternalStateStore` persists append-only journal events + CAS blobs. Typed actions run one path — `build_action_request → execute_typed_action → vendored `groundtruth.runtime.deterministic_queries` — shared by the model-facing `groundtruth` tool and every host-side facade. Model-facing admission remains centralized in `GTSession.admit_decision_packet` / `MiniSweAdapter.admit_model_visible_delivery`; no facade emits model-visible text or invokes admission. Edits flow `capture_workspace/diff_workspace → EditTransaction → engine_state.apply_transaction + synchronous batch amend → certified re-publication (copy-of-parent; the published parent stays immutable); uncertifiable parents refuse by name and fall to a clean rebuild.
+One canonical implementation, two consumers. `EngineState` owns current/graph source revisions, the edit overlay, omissions, and graph completeness/currentness; `GTSession` owns context-unit admission/supersession ledgers (each unit carries its `source_revision`; `unit_state`/`is_stale` expose staleness internally). `ExternalStateStore` persists append-only journal events + CAS blobs. Typed actions run one path — `build_action_request` → `execute_typed_action` → vendored `groundtruth.runtime.deterministic_queries` — shared by the model-facing `groundtruth` tool and every host-side facade. Model-facing admission remains centralized in `GTSession.admit_decision_packet` / `MiniSweAdapter.admit_model_visible_delivery`; no facade emits model-visible text or invokes admission. Edits flow `capture_workspace/diff_workspace → EditTransaction → engine_state.apply_transaction + synchronous batch amend → certified re-publication (copy-of-parent; the published parent stays immutable); uncertifiable parents refuse by name and fall to a clean rebuild.
 
 ## C — Capability matrix
 
@@ -56,22 +56,22 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 29 | `runtime.failure_fingerprint` | `gt_engine/bridge.py:failure_fingerprint` | AVAILABLE | partial | `gt_engine/capabilities/runtime.py:failure_fingerprint` | none | execution | p50 0ms / p95 1ms | no | 1 ref |
 | 30 | `runtime.repeated_failure_state` | `gt_engine/miniswe_integration.py:MiniSweAdapter.note_failure_fingerprint` | MODEL_FACING | exact | `gt_engine/capabilities/runtime.py:repeated_failure_state` | steer | execution | p50 0ms / p95 0ms | yes | 3 refs |
 | 31 | `runtime.verification_state` | `gt_engine/miniswe_integration.py:MiniSweAdapter._classify_execution_vs_baseline` | MODEL_FACING | partial | `gt_engine/capabilities/runtime.py:verification_state` | gateway_auto:execution_evidence | execution | p50 0ms / p95 0ms | yes | 2 refs |
-| 32 | `kind.exact_literal_search` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | exact | ``localization.lexical_search`` | typed_on_request | graph_revision | env 6149B / ans 899B | yes | 2 refs |
+| 32 | `kind.exact_literal_search` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | exact | `localization.lexical_search` | typed_on_request | graph_revision | env 6149B / ans 899B | yes | 2 refs |
 | 33 | `kind.syntax` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | exact | `—` | typed_on_request | graph_revision | env 3873B / ans 234B | yes | 2 refs |
-| 34 | `kind.patch_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``change.patch_impact`` | typed_on_request | graph_revision | env 4850B / ans 485B | yes | 1 ref |
+| 34 | `kind.patch_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.patch_impact` | typed_on_request | graph_revision | env 4850B / ans 485B | yes | 1 ref |
 | 35 | `kind.verification_status` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | execution_specific | `—` | typed_on_request | execution | env 3288B / ans 41B | yes | 1 ref |
-| 36 | `kind.definition` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``localization.definition`` | typed_on_request | graph_revision | env 3983B / ans 294B | yes | 1 ref |
-| 37 | `kind.references` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``localization.references`` | typed_on_request | graph_revision | env 7038B / ans 1296B | yes | 1 ref |
-| 38 | `kind.callers` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``structure.callers`` | typed_on_request | graph_revision | env 5096B / ans 666B | yes | 2 refs |
-| 39 | `kind.symbol_context` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``structure.symbol_context`, `structure.callees`, `structure.framework_relationships`` | typed_on_request | graph_revision | env 4875B / ans 598B | yes | 1 ref |
-| 40 | `kind.processes` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``structure.processes`` | typed_on_request | graph_revision | env 3290B / ans 71B | yes | 2 refs |
-| 41 | `kind.route_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``structure.framework_relationships`` | typed_on_request | graph_revision | env 7638B / ans 1542B | yes | 2 refs |
-| 42 | `kind.api_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``change.route_impact`, `structure.framework_relationships`` | typed_on_request | graph_revision | env 3272B / ans 56B | yes | 1 ref |
-| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``analysis.taint`` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 1 ref |
+| 36 | `kind.definition` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `localization.definition` | typed_on_request | graph_revision | env 3983B / ans 294B | yes | 1 ref |
+| 37 | `kind.references` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `localization.references` | typed_on_request | graph_revision | env 7038B / ans 1296B | yes | 1 ref |
+| 38 | `kind.callers` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.callers` | typed_on_request | graph_revision | env 5096B / ans 666B | yes | 2 refs |
+| 39 | `kind.symbol_context` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.symbol_context, structure.callees, structure.framework_relationships` | typed_on_request | graph_revision | env 4875B / ans 598B | yes | 1 ref |
+| 40 | `kind.processes` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.processes` | typed_on_request | graph_revision | env 3290B / ans 71B | yes | 2 refs |
+| 41 | `kind.route_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 7638B / ans 1542B | yes | 2 refs |
+| 42 | `kind.api_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.route_impact, structure.framework_relationships` | typed_on_request | graph_revision | env 3272B / ans 56B | yes | 1 ref |
+| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 1 ref |
 | 44 | `kind.rename` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `—` | typed_on_request | graph_revision | env 5448B / ans 806B | yes | 1 ref |
-| 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``change.shape_change`` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 2 refs |
-| 46 | `kind.tool_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``structure.framework_relationships`` | typed_on_request | graph_revision | env 3176B / ans 30B | yes | 2 refs |
-| 47 | `kind.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | ``analysis.slice`` | typed_on_request | graph_revision | env 4678B / ans 535B | yes | 3 refs |
+| 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.shape_change` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 2 refs |
+| 46 | `kind.tool_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 3176B / ans 30B | yes | 2 refs |
+| 47 | `kind.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.slice` | typed_on_request | graph_revision | env 4678B / ans 535B | yes | 3 refs |
 
 ## D — Runtime matrix
 
