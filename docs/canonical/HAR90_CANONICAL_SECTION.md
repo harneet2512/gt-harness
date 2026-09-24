@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T04:40:42Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T05:39:12Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `c5f1d12158194946e4baf8f0b42fb43bdbb167d0` |
+| harness | `canonical/gt-har90` @ `af35e5523266cdebf7cc56283323b1bf0e884669` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35` |
@@ -17,6 +17,7 @@ Wheel↔source correspondence: `scripts/verify_wheel_source.py` PASS — 328 fil
 
 Reviewer prerequisites for reproducing V-A6/V-C1/V-F from this section on a fresh worktree:
 
+- Exact verify install (provider-free, what the green claims were made under): `python3 -m venv vfy && vfy/bin/pip install -e ".[miniswe]" pytest vendor/groundtruth_mcp-1.0.0-py3-none-any.whl`. No `fastapi`/`flask`/`harbor` needed — the fixture's own pytest run resolves import-time surfaces through `tests/canonical/fixtures/polyglot/conftest.py` shims, and the yaml↔CLI_FLAGS coverage test reads the flag literals by AST. The `eval` extra (`harbor==0.20.0`) is only needed to *import* `eval.miniswe_agent` itself.
 - `GROUNDTRUTH_ROOT=/d/gt-canonical-producer` (or the equivalent producer worktree path) must be exported before `python scripts/generate_gt_finalstand.py --check`; its default `<harness-parent>/Groundtruth` resolves to a stale tree on this host and the check fails closed against it.
 - The producer selection regex is `Convergence|Batch|W1|Source|Route|Api|Framework` — the `Batch` alternative is required, otherwise `TestBatchAmendConvergesToCleanRebuild` (the flagship batch-amend convergence test) is silently never selected. The pre-erratum regex in earlier snapshots lacked it.
 - The canonical suite resolves a runnable producer through `GT_INDEX_BINARY`, `C:\gt-smoke-a6\gt-index-new.exe` on Windows, PATH, the vendored linux-amd64 binary on WSL, or a stamped `go build -tags sqlite_fts5` of `vendor/gt-index-src`; with none of these the graph-bound tests skip with the named reason.
@@ -210,7 +211,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `change.route_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.route_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `change.shape_change`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `change.shape_change`: partial semantics: TS interface members are not counted, so a class missing a method can pass vacuously (documented defect)
+- `change.shape_change`: partial semantics: the TS conformance check enumerates interface members but under-detects empty-bodied class methods — Friendly implements wave() yet it reports missing, so a conforming class can fail spuriously (documented defect)
 - `change.affected_tests`: selection only: _symbols_for_files + wheel select_covering_tests compose the same front half the live covering lane runs pre-execution; the lane continues into run_covering_tests and only a failing verdict becomes a covering_red dose - the raw selection is never delivered
 - `runtime.last_test_result`: the model receives the rendered [GT_EXECUTION_EVIDENCE] line queued as an execution_evidence candidate; the journal row, CAS artifact and raw output the facade returns stay host-side
 - `runtime.covering_tests`: delegates to change.affected_tests; same selection-only limit - no execution, no delivery of the selection itself
@@ -230,7 +231,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `kind.taint`: partial semantics: symbol-level CALLS reachability - not dataflow and not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
-- `kind.shape_check`: partial semantics: TS interface members are not counted (required_count 0), so a class missing a method can pass vacuously (documented defect)
+- `kind.shape_check`: partial semantics: the TS conformance check enumerates interface members but under-detects empty-bodied class methods — Friendly implements wave() yet it reports missing, so a conforming class can fail spuriously (documented defect)
 - `kind.tool_map`: partial semantics: DECORATES is emitted only for class decorators resolving to in-repository callables, so @mcp.tool() functions are never detected (documented defect)
 - `kind.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `task_contract`: runner-side machinery: the obligations:task context unit is admitted through miniswe_gt_run, not the canonical runtime — extraction is verbatim-line anchored, not a semantic proof of coverage
