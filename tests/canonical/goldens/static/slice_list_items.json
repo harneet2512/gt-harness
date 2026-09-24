@@ -1,7 +1,7 @@
 {
   "action_request": {
     "action_id": "canon:slice:py_items",
-    "arguments_json": "{\"line\":82,\"symbol\":\"list_items\"}",
+    "arguments_json": "{\"line\":83,\"symbol\":\"list_items\"}",
     "configuration_sha256": "<VOLATILE>",
     "kind": "slice",
     "original_shell_form": "",
@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+      "dirty_diff_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "repository_content": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "runtime_evidence": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+        "lsp": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "repository_content": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "runtime_evidence": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+      "working_tree_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -46,7 +46,7 @@
   "direct_answer": {
     "direction": "backward",
     "interprocedural": false,
-    "line": 82,
+    "line": 83,
     "slice_count": 1,
     "slices": [
       {
@@ -56,15 +56,15 @@
             "name": "request.args.get"
           },
           {
-            "line": 81,
+            "line": 82,
             "name": "sanitize"
           },
           {
-            "line": 82,
+            "line": 83,
             "name": "run_query"
           }
         ],
-        "criterion_line": 82,
+        "criterion_line": 83,
         "direction": "backward",
         "file_path": "pyapp/server.py",
         "function": "list_items",
@@ -73,8 +73,8 @@
         ],
         "slice_lines": [
           80,
-          81,
-          82
+          82,
+          83
         ],
         "variables": [
           "cleaned",
@@ -96,14 +96,14 @@
     "anchors": [
       {
         "column": 0,
-        "line": 82,
+        "line": 83,
         "path": "pyapp/server.py"
       }
     ],
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "partial",
-    "direct_answer_json": "{\"direction\":\"backward\",\"interprocedural\":false,\"line\":82,\"slice_count\":1,\"slices\":[{\"call_sites\":[{\"line\":80,\"name\":\"request.args.get\"},{\"line\":81,\"name\":\"sanitize\"},{\"line\":82,\"name\":\"run_query\"}],\"criterion_line\":82,\"direction\":\"backward\",\"file_path\":\"pyapp/server.py\",\"function\":\"list_items\",\"limitations\":[\"call_sites_not_inlined\"],\"slice_lines\":[80,81,82],\"variables\":[\"cleaned\",\"out\",\"raw\",\"request\",\"request.args\",\"request.args.get\",\"run_query\",\"sanitize\"]}],\"symbol\":\"list_items\"}",
+    "direct_answer_json": "{\"direction\":\"backward\",\"interprocedural\":false,\"line\":83,\"slice_count\":1,\"slices\":[{\"call_sites\":[{\"line\":80,\"name\":\"request.args.get\"},{\"line\":82,\"name\":\"sanitize\"},{\"line\":83,\"name\":\"run_query\"}],\"criterion_line\":83,\"direction\":\"backward\",\"file_path\":\"pyapp/server.py\",\"function\":\"list_items\",\"limitations\":[\"call_sites_not_inlined\"],\"slice_lines\":[80,82,83],\"variables\":[\"cleaned\",\"out\",\"raw\",\"request\",\"request.args\",\"request.args.get\",\"run_query\",\"sanitize\"]}],\"symbol\":\"list_items\"}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [
       "slice_limitations_present"
@@ -125,7 +125,7 @@
     "payload": {
       "direction": "backward",
       "interprocedural": false,
-      "line": 82,
+      "line": 83,
       "slice_count": 1,
       "slices": [
         {
@@ -135,15 +135,15 @@
               "name": "request.args.get"
             },
             {
-              "line": 81,
+              "line": 82,
               "name": "sanitize"
             },
             {
-              "line": 82,
+              "line": 83,
               "name": "run_query"
             }
           ],
-          "criterion_line": 82,
+          "criterion_line": 83,
           "direction": "backward",
           "file_path": "pyapp/server.py",
           "function": "list_items",
@@ -152,8 +152,8 @@
           ],
           "slice_lines": [
             80,
-            81,
-            82
+            82,
+            83
           ],
           "variables": [
             "cleaned",
@@ -171,10 +171,10 @@
     },
     "returned_count": 1,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+    "source_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
     "true_total": null,
     "unresolved_identities": [],
-    "workspace_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+    "workspace_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
   },
   "schema": "gt.compiled_observation.v1"
 }

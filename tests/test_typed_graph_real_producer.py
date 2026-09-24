@@ -75,12 +75,13 @@ def execute(cmd):
 @app.get("/items")
 def list_items():
     raw = request.args.get("q")
+    probe = execute(raw)
     safe = clean(raw)
     total = 0
     if safe:
         total = len(safe)
     out = execute(safe)
-    return {"total": total, "out": str(out)}
+    return {"total": total, "out": str(out), "probe": probe}
 
 
 @app.route("/save")
@@ -339,8 +340,54 @@ def test_taint_is_symbol_reachability_with_its_limits_named(polyglot):
     root, graph, _ = polyglot
     payload, answer = _run(root, graph, "taint", {"source": "list_items", "sink": "execute"})
     assert ["list_items", "execute"] in [path["path"] for path in answer["paths"]]
-    assert {"symbol_level_reachability_only", "statement_level_dataflow_unavailable"} <= set(
-        payload["evidence"]["omissions"])
+    assert "symbol_level_reachability_only" in set(payload["evidence"]["omissions"])
+
+
+def test_taint_statement_dataflow_reaches_the_sink_param(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(root, graph, "taint", {"source": "list_items", "sink": "execute"})
+    omissions = set(payload["evidence"]["omissions"])
+    assert "statement_level_dataflow_unavailable" not in omissions
+    paths = answer["dataflow_paths"]
+    assert paths, "def-use dataflow must reach the sink parameter"
+    sink_lines = {path["sink_line"] for path in paths}
+    # ``probe = execute(raw)`` and ``out = execute(safe)`` inside list_items.
+    assert sink_lines == {31, 36}
+    for path in paths:
+        assert path["sink"] == "execute"
+        assert path["tainted_params"] == ["cmd"]
+        kinds = [hop["kind"] for hop in path["hops"]]
+        assert kinds[0] == "external_seed"
+        assert "param_bind" in kinds
+    assert any(
+        reach["callee"] == "run"
+        for reach in answer["unresolved_reaches"]
+    ), "subprocess.run stays an honestly unresolved tainted callsite"
+    assert "callsite_args_unresolved" in omissions
+
+
+def test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(
+        root, graph, "taint",
+        {"source": "list_items", "sink": "execute", "sanitizers": ["clean"]},
+    )
+    cuts = answer["sanitizer_cuts"]
+    assert [cut["sanitizer"] for cut in cuts] == ["clean"]
+    assert cuts[0]["tainted_params"] == ["value"]
+    # The sanitized ``safe`` leg is cut; the unsanitized ``probe`` leg survives.
+    assert {path["sink_line"] for path in answer["dataflow_paths"]} == {31}
+
+
+def test_taint_statement_dataflow_names_non_python_scope(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(root, graph, "taint", {"source": "helper", "sink": "execute"})
+    omissions = set(payload["evidence"]["omissions"])
+    assert "statement_level_dataflow_unavailable" in omissions
+    assert any(
+        omission.startswith("dataflow_python_only:")
+        for omission in answer["dataflow_omissions"]
+    )
 
 
 def test_rename_previews_the_graph_edit_sites(polyglot):
@@ -348,7 +395,7 @@ def test_rename_previews_the_graph_edit_sites(polyglot):
     payload, answer = _run(root, graph, "rename", {"symbol": "clean", "new_name": "sanitize"})
     assert answer["files_to_touch"] == ["app/server.py"]
     calls = answer["edit_sites_by_type"]["CALLS"]
-    assert [(row["referencing_symbol"], row["line"]) for row in calls] == [("list_items", 31)]
+    assert [(row["referencing_symbol"], row["line"]) for row in calls] == [("list_items", 32)]
     assert "text_references_not_enumerated" in payload["evidence"]["omissions"]
 
 
@@ -412,10 +459,10 @@ def test_tool_map_detects_a_function_registered_as_an_mcp_tool(polyglot):
 
 def test_slice_backward_over_the_python_source_substrate(polyglot):
     root, graph, _ = polyglot
-    payload, answer = _run(root, graph, "slice", {"symbol": "list_items", "line": 35})
+    payload, answer = _run(root, graph, "slice", {"symbol": "list_items", "line": 36})
     (record,) = answer["slices"]
     assert record["file_path"] == "app/server.py"
-    assert record["slice_lines"] == [30, 31, 35]
+    assert record["slice_lines"] == [30, 32, 36]
     assert answer["interprocedural"] is False
     assert "slice_limitations_present" in payload["evidence"]["omissions"]
 

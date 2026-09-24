@@ -257,11 +257,11 @@ def test_callers_chain_reflects_moved_call(runtime_workspace):
 
 
 def test_slice_chain_reflects_moved_call(runtime_workspace):
-    """The backward slice from ``list_items`` line 82 must lose the
+    """The backward slice from ``list_items`` line 83 must lose the
     ``sanitize`` call site once the call moves — or honestly abstain."""
     ws = runtime_workspace("chain-slice")
 
-    pre = analysis.slice(ws.session, "list_items", 82)
+    pre = analysis.slice(ws.session, "list_items", 83)
     pre_sites = _slice_call_names(pre)
     assert "sanitize" in pre_sites, (
         f"baseline slice lost the sanitize call site: {pre.answer}"
@@ -270,7 +270,7 @@ def test_slice_chain_reflects_moved_call(runtime_workspace):
     txn = _transact_edit(ws)
     adopted = _amend_adopted_or_none(ws)
 
-    post = analysis.slice(ws.session, "list_items", 82)
+    post = analysis.slice(ws.session, "list_items", 83)
     if adopted is None:
         refused = ws.journal_event("graph_sync_amend_refused")
         assert post.fresh is False
@@ -1106,7 +1106,7 @@ def test_amended_graph_converges_with_clean_rebuild(runtime_workspace):
     for kind, arguments in (
         ("callers", {"symbol": "sanitize", "depth": 3}),
         ("references", {"symbol": "sanitize"}),
-        ("slice", {"symbol": "list_items", "line": 82}),
+        ("slice", {"symbol": "list_items", "line": 83}),
         ("api_impact", {"route": "/api/render"}),
         ("route_map", {"path": SERVER}),
     ):

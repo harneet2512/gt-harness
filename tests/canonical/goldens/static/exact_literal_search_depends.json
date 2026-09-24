@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+      "dirty_diff_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "repository_content": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "runtime_evidence": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+        "lsp": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "repository_content": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "runtime_evidence": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+      "working_tree_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -49,9 +49,9 @@
         "sha256": "3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52"
       },
       {
-        "bytes": 1834,
+        "bytes": 1877,
         "path": "pyapp/server.py",
-        "sha256": "daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee"
+        "sha256": "97a0bd222c8b8b1b53e5f40bf57998da627fd10f2db64452aa1745afe41c30d9"
       },
       {
         "bytes": 583,
@@ -70,10 +70,10 @@
         "path": "pyapp/server.py"
       },
       {
-        "byte_offset": 1696,
+        "byte_offset": 1739,
         "column": 32,
         "column_unit": "utf8_byte_1_based",
-        "line": 87,
+        "line": 88,
         "line_text": "def render_item(store: Store = Depends(get_store)):",
         "path": "pyapp/server.py"
       }
@@ -81,7 +81,7 @@
     "scope": [
       "pyapp"
     ],
-    "scope_sha256": "dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280"
+    "scope_sha256": "93b09f10b7635ea381d17b26dab71ad390eb610ada9a29fea26c6ff486376a73"
   },
   "evidence": {
     "action_id": "canon:exact_literal_search:depends",
@@ -94,18 +94,18 @@
       },
       {
         "column": 0,
-        "line": 87,
+        "line": 88,
         "path": "pyapp/server.py"
       }
     ],
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "complete",
-    "direct_answer_json": "{\"files_observed\":[{\"bytes\":289,\"path\":\"pyapp/helpers.py\",\"sha256\":\"3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52\"},{\"bytes\":1834,\"path\":\"pyapp/server.py\",\"sha256\":\"daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee\"},{\"bytes\":583,\"path\":\"pyapp/test_server.py\",\"sha256\":\"50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f\"}],\"literal\":\"Depends(get_store)\",\"matches\":[{\"byte_offset\":1481,\"column\":31,\"column_unit\":\"utf8_byte_1_based\",\"line\":79,\"line_text\":\"def list_items(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"},{\"byte_offset\":1696,\"column\":32,\"column_unit\":\"utf8_byte_1_based\",\"line\":87,\"line_text\":\"def render_item(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"}],\"scope\":[\"pyapp\"],\"scope_sha256\":\"dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280\"}",
+    "direct_answer_json": "{\"files_observed\":[{\"bytes\":289,\"path\":\"pyapp/helpers.py\",\"sha256\":\"3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52\"},{\"bytes\":1877,\"path\":\"pyapp/server.py\",\"sha256\":\"97a0bd222c8b8b1b53e5f40bf57998da627fd10f2db64452aa1745afe41c30d9\"},{\"bytes\":583,\"path\":\"pyapp/test_server.py\",\"sha256\":\"50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f\"}],\"literal\":\"Depends(get_store)\",\"matches\":[{\"byte_offset\":1481,\"column\":31,\"column_unit\":\"utf8_byte_1_based\",\"line\":79,\"line_text\":\"def list_items(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"},{\"byte_offset\":1739,\"column\":32,\"column_unit\":\"utf8_byte_1_based\",\"line\":88,\"line_text\":\"def render_item(store: Store = Depends(get_store)):\",\"path\":\"pyapp/server.py\"}],\"scope\":[\"pyapp\"],\"scope_sha256\":\"93b09f10b7635ea381d17b26dab71ad390eb610ada9a29fea26c6ff486376a73\"}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [],
     "producer": "deterministic_query.exact_literal_search",
-    "producer_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+    "producer_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
     "producer_version": "gt.deterministic_queries.v1",
     "raw_fallback_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "request_sha256": "<VOLATILE>",
@@ -114,7 +114,7 @@
     "snapshot_sha256": "<VOLATILE>",
     "witnesses": [
       "file:pyapp/helpers.py:3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52",
-      "file:pyapp/server.py:daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee",
+      "file:pyapp/server.py:97a0bd222c8b8b1b53e5f40bf57998da627fd10f2db64452aa1745afe41c30d9",
       "file:pyapp/test_server.py:50236201ff08ce3897715b1bfa22937aa8bc1278af1bdf7c720acab7e350171f"
     ]
   },
@@ -130,9 +130,9 @@
           "sha256": "3c10f3512c0845906128f9258118e250d2857ad785b004ace15ef9eabad57c52"
         },
         {
-          "bytes": 1834,
+          "bytes": 1877,
           "path": "pyapp/server.py",
-          "sha256": "daf7e30793fb9dd126ec6dfc9e84a5ab69b9d39fa523e7cbc3d8152ddaab73ee"
+          "sha256": "97a0bd222c8b8b1b53e5f40bf57998da627fd10f2db64452aa1745afe41c30d9"
         },
         {
           "bytes": 583,
@@ -151,10 +151,10 @@
           "path": "pyapp/server.py"
         },
         {
-          "byte_offset": 1696,
+          "byte_offset": 1739,
           "column": 32,
           "column_unit": "utf8_byte_1_based",
-          "line": 87,
+          "line": 88,
           "line_text": "def render_item(store: Store = Depends(get_store)):",
           "path": "pyapp/server.py"
         }
@@ -162,14 +162,14 @@
       "scope": [
         "pyapp"
       ],
-      "scope_sha256": "dab919afa9af963f10441b334bf21dab2e8411e665be4e4120efbbcde698b280"
+      "scope_sha256": "93b09f10b7635ea381d17b26dab71ad390eb610ada9a29fea26c6ff486376a73"
     },
     "returned_count": 2,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+    "source_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
     "true_total": 2,
     "unresolved_identities": [],
-    "workspace_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+    "workspace_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
   },
   "schema": "gt.compiled_observation.v1"
 }

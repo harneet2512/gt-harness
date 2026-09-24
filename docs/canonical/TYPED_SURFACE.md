@@ -29,7 +29,7 @@ demoted from REPLACE to AUGMENT, with reason `CERTIFICATION_NOT_EXACT` and omiss
 | verification_status | execution_specific | all 30 | bound to command and revision |
 | definition, references, callers, symbol_context, processes, patch_impact | partial | go, java, js, py, rust, ts | name-level resolution |
 | route_map, api_impact | partial | go, java, js, py, ts | fixed framework manifest; MIDDLEWARE_ON not surfaced |
-| taint | partial | go, java, js, py, rust, ts | symbol-level CALLS reachability; not dataflow, not an over-approximation |
+| taint | partial | go, java, js, py, rust, ts | symbol-level CALLS reachability plus harness-side statement dataflow for Python sources (def-use over resolved callsites; unresolved callees/non-Python/unbound varargs are named omissions); not an over-approximation |
 | rename, shape_check, tool_map | partial | go, java, js, py, rust, ts | see CSV basis |
 | slice | partial | go, java, js, py, ts (CFG substrate only) | interprocedural hops are name-matched |
 

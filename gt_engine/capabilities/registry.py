@@ -444,11 +444,20 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         TYPED_DISPATCH,
         facade=f"{_A}:taint",
         typed_kinds=("taint",),
-        tests=("tests/test_typed_graph_real_producer.py::test_taint_is_symbol_reachability_with_its_limits_named",),
+        tests=(
+            "tests/test_typed_graph_real_producer.py::test_taint_is_symbol_reachability_with_its_limits_named",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_reaches_the_sink_param",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_names_non_python_scope",
+        ),
         limitations=(
             _TYPED_FACADE_LIMIT,
-            "partial semantics: symbol-level CALLS reachability, not "
-            "statement dataflow; several sources map to one query per source",
+            "partial semantics: symbol-level CALLS reachability plus "
+            "statement-level dataflow for Python sources only (def-use "
+            "propagation over resolved callsites; unresolved callees, "
+            "non-Python functions, and unbound *args/**kwargs are named "
+            "omissions, and seeds are unresolvable uses in the source "
+            "function); several sources map to one query per source",
         ),
     ),
     # --------------------------------------------------------------------- change

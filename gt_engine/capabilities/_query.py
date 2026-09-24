@@ -141,6 +141,7 @@ def run_typed(
         CERTIFIED_TYPED_KIND_SEMANTICS,
     )
     from gt_engine.miniswe_typed_actions import (
+        _harness_args_from,
         build_action_request,
         execute_typed_action,
     )
@@ -170,7 +171,10 @@ def run_typed(
         configuration=configuration,
     )
     result = execute_typed_action(
-        request, repo_root=repo_root, graph_db=graph_db_path(session) or None
+        request,
+        repo_root=repo_root,
+        graph_db=graph_db_path(session) or None,
+        harness_args=_harness_args_from(arguments),
     )
     try:
         observation = json.loads(result["output"])

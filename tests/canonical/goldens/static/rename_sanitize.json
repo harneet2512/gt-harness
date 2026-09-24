@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+      "dirty_diff_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "repository_content": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "runtime_evidence": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+        "lsp": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "repository_content": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "runtime_evidence": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+      "working_tree_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -64,7 +64,7 @@
         {
           "confidence": 1.0,
           "file_path": "pyapp/server.py",
-          "line": 81,
+          "line": 82,
           "referencing_symbol": "list_items",
           "trust_tier": "CERTIFIED"
         },
@@ -106,7 +106,7 @@
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "complete",
-    "direct_answer_json": "{\"definitions\":[{\"file_path\":\"pyapp/server.py\",\"kind\":\"Function\",\"line\":54,\"name\":\"sanitize\"}],\"edit_site_count\":4,\"edit_sites_by_type\":{\"CALLS\":[{\"confidence\":1.0,\"file_path\":\"pyapp/server.py\",\"line\":69,\"referencing_symbol\":\"format_greeting\",\"trust_tier\":\"CERTIFIED\"},{\"confidence\":1.0,\"file_path\":\"pyapp/server.py\",\"line\":81,\"referencing_symbol\":\"list_items\",\"trust_tier\":\"CERTIFIED\"},{\"confidence\":1.0,\"file_path\":\"pyapp/test_server.py\",\"line\":11,\"referencing_symbol\":\"test_sanitize\",\"trust_tier\":\"CERTIFIED\"}],\"IMPORTS\":[{\"confidence\":1.0,\"file_path\":\"pyapp/test_server.py\",\"line\":6,\"referencing_symbol\":\"test_server\",\"trust_tier\":\"CERTIFIED\"}]},\"files_to_touch\":[\"pyapp/server.py\",\"pyapp/test_server.py\"],\"new_name\":\"clean_input\",\"symbol\":\"sanitize\"}",
+    "direct_answer_json": "{\"definitions\":[{\"file_path\":\"pyapp/server.py\",\"kind\":\"Function\",\"line\":54,\"name\":\"sanitize\"}],\"edit_site_count\":4,\"edit_sites_by_type\":{\"CALLS\":[{\"confidence\":1.0,\"file_path\":\"pyapp/server.py\",\"line\":69,\"referencing_symbol\":\"format_greeting\",\"trust_tier\":\"CERTIFIED\"},{\"confidence\":1.0,\"file_path\":\"pyapp/server.py\",\"line\":82,\"referencing_symbol\":\"list_items\",\"trust_tier\":\"CERTIFIED\"},{\"confidence\":1.0,\"file_path\":\"pyapp/test_server.py\",\"line\":11,\"referencing_symbol\":\"test_sanitize\",\"trust_tier\":\"CERTIFIED\"}],\"IMPORTS\":[{\"confidence\":1.0,\"file_path\":\"pyapp/test_server.py\",\"line\":6,\"referencing_symbol\":\"test_server\",\"trust_tier\":\"CERTIFIED\"}]},\"files_to_touch\":[\"pyapp/server.py\",\"pyapp/test_server.py\"],\"new_name\":\"clean_input\",\"symbol\":\"sanitize\"}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [
       "text_references_not_enumerated"
@@ -147,7 +147,7 @@
           {
             "confidence": 1.0,
             "file_path": "pyapp/server.py",
-            "line": 81,
+            "line": 82,
             "referencing_symbol": "list_items",
             "trust_tier": "CERTIFIED"
           },
@@ -178,10 +178,10 @@
     },
     "returned_count": 1,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+    "source_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
     "true_total": null,
     "unresolved_identities": [],
-    "workspace_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+    "workspace_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
   },
   "schema": "gt.compiled_observation.v1"
 }

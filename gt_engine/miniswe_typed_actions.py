@@ -70,10 +70,12 @@ KIND_ARGUMENT_DOCS = {
     "api_impact": "route and/or handler",
     "taint": (
         "source with optional sink, path, language, depth (1-10, default 6), "
-        "and include_name_matched (boolean, default false; when true, "
+        "include_name_matched (boolean, default false; when true, "
         "name-matched call edges below the 0.5 receiver/import-proof "
-        "confidence floor are also followed); symbol-level call reachability, "
-        "not statement dataflow"
+        "confidence floor are also followed), and sanitizers (array of "
+        "function names whose return value cleanses tainted input); "
+        "symbol-level call reachability plus statement-level dataflow for "
+        "Python sources via def-use propagation over resolved callsites"
     ),
     "rename": "symbol with optional new_name, path, and language",
     "shape_check": "symbol with optional path and language",
@@ -87,6 +89,17 @@ KIND_ARGUMENT_DOCS = {
 # Kinds whose certification is not exact are answered as evidence to weigh,
 # never as a replacement for the model's own inspection.
 _NON_EXACT_SEMANTICS = frozenset({"partial", "sound_overapprox"})
+
+# Arguments consumed harness-side only. The certified wheel validates its own
+# argument set and would reject these, so they are stripped before the request
+# is built and carried to execute_typed_action through ``harness_args``.
+_HARNESS_ONLY_ARGUMENTS = frozenset({"sanitizers"})
+
+
+def _harness_args_from(arguments: Any) -> dict[str, Any]:
+    if not isinstance(arguments, Mapping):
+        return {}
+    return {k: v for k, v in arguments.items() if k in _HARNESS_ONLY_ARGUMENTS}
 
 
 def _arguments_description() -> str:
@@ -491,6 +504,9 @@ def build_action_request(
         "original_shell_form": "",
     }
     wire["kind"] = _KIND_ALIASES.get(wire["kind"], wire["kind"])
+    if wire["kind"] == "taint":
+        for harness_key in _HARNESS_ONLY_ARGUMENTS:
+            args.pop(harness_key, None)
     if not wire["action_id"]:
         wire["action_id"] = hashlib.sha256(_canonical_bytes(wire)).hexdigest()[:24]
 
@@ -705,6 +721,7 @@ def execute_typed_action(
     *,
     repo_root: str | Path,
     graph_db: str | Path | None = None,
+    harness_args: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a typed query and return a Mini-SWE environment-result mapping."""
     wire = _request_mapping(request)
@@ -924,6 +941,66 @@ def execute_typed_action(
             "mode": decision,
             "reason_codes": [reason],
         }
+    if (
+        kind == "taint"
+        and graph_db
+        and isinstance(evidence, Mapping)
+        and isinstance(direct_answer, Mapping)
+    ):
+        # Harness-side statement layer: the producer answer is symbol-level
+        # CALLS reachability. Def-use dataflow over resolved callsites augments
+        # it for Python sources, named honestly in dataflow_omissions.
+        from gt_engine import taint_dataflow
+
+        raw_arguments = wire.get("arguments")
+        if not isinstance(raw_arguments, Mapping):
+            try:
+                raw_arguments = json.loads(wire.get("arguments_json") or "{}")
+            except (TypeError, ValueError):
+                raw_arguments = {}
+        dataflow_args = dict(raw_arguments)
+        dataflow_args.update(harness_args or {})
+        try:
+            import sqlite3
+
+            dataflow_conn = sqlite3.connect(
+                f"file:{Path(graph_db).resolve()}?mode=ro", uri=True
+            )
+            try:
+                dataflow = taint_dataflow.augment_taint(
+                    conn=dataflow_conn, repo_root=root, arguments=dataflow_args
+                )
+            finally:
+                dataflow_conn.close()
+        except Exception as exc:  # noqa: BLE001 - degrade to named omission
+            dataflow = {
+                "dataflow_paths": [],
+                "sanitizer_cuts": [],
+                "unresolved_reaches": [],
+                "dataflow_scope": {},
+                "dataflow_omissions": [
+                    f"dataflow_engine_error:{type(exc).__name__}"
+                ],
+            }
+        merged_answer = dict(direct_answer)
+        merged_answer.update(dataflow)
+        direct_answer = merged_answer
+        if isinstance(evidence.get("direct_answer_json"), str):
+            evidence["direct_answer_json"] = _canonical_bytes(
+                merged_answer
+            ).decode("utf-8")
+        elif isinstance(evidence.get("answer"), Mapping):
+            evidence["answer"] = merged_answer
+        omissions = list(evidence.get("omissions") or ())
+        if dataflow["dataflow_scope"].get("functions_analyzed"):
+            omissions = [
+                o
+                for o in omissions
+                if o != "statement_level_dataflow_unavailable"
+            ]
+        omissions.extend(dataflow["dataflow_omissions"])
+        evidence["omissions"] = omissions
+
     # Every public typed result carries the same conservative honesty envelope.
     # Legacy/incomplete producers never become ``complete`` merely because a
     # payload happens to be present.
@@ -1047,6 +1124,11 @@ def execute_typed_action_fail_open(
             request,
             repo_root=repo_root,
             graph_db=(configuration or {}).get("graph_db"),
+            harness_args=_harness_args_from(
+                (action.get("gt_action") or {}).get("arguments")
+                if isinstance(action.get("gt_action"), Mapping)
+                else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - native harness must continue
         payload = {

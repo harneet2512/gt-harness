@@ -78,9 +78,10 @@ def log_request():
 @app.get("/api/items")
 def list_items(store: Store = Depends(get_store)):
     raw = request.args.get("q")
+    probe = run_query(raw)
     cleaned = sanitize(raw)
     out = run_query(cleaned)
-    return {"out": str(out), "echo": cleaned}
+    return {"out": str(out), "echo": cleaned, "probe": probe}
 
 
 @app.route("/api/render")

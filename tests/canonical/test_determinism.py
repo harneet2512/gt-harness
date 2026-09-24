@@ -87,7 +87,7 @@ _TYPED_CASES = (
     ("api_impact", {"route": "/api/items"}),
     ("taint", {"source": "list_items", "sink": "execute", "depth": 4}),
     ("processes", {}),
-    ("slice", {"symbol": "list_items", "line": 82}),
+    ("slice", {"symbol": "list_items", "line": 83}),
     ("shape_check", {"symbol": "Friendly", "language": "typescript"}),
     ("tool_map", {}),
     ("exact_literal_search", {"literal": "Depends(get_store)", "paths": ["pyapp"]}),

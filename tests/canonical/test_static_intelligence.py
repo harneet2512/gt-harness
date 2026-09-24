@@ -216,13 +216,13 @@ def test_slice_python_list_items(polyglot_session, polyglot_conf, polyglot_repo)
     session, _adapter = polyglot_session
     _, payload = _execute(
         session, polyglot_conf,
-        "slice", {"symbol": "list_items", "line": 82}, "py_items",
+        "slice", {"symbol": "list_items", "line": 83}, "py_items",
     )
     golden_assert("static/slice_list_items", payload, polyglot_repo)
     (record,) = payload["direct_answer"]["slices"]
     assert record["file_path"] == "pyapp/server.py"
-    # raw -> cleaned -> out chain: all three assignments feed line 82.
-    assert {80, 81, 82} <= set(record["slice_lines"])
+    # raw -> cleaned -> out chain: all three assignments feed line 83.
+    assert {80, 82, 83} <= set(record["slice_lines"])
 
 
 def test_slice_go_compute(polyglot_session, polyglot_conf, polyglot_repo):
@@ -285,7 +285,7 @@ def test_exact_literal_search(polyglot_session, polyglot_conf, polyglot_repo):
     golden_assert("static/exact_literal_search_depends", payload, polyglot_repo)
     matches = payload["direct_answer"]["matches"]
     assert {row["path"] for row in matches} == {"pyapp/server.py"}
-    assert {row["line"] for row in matches} == {79, 87}
+    assert {row["line"] for row in matches} == {79, 88}
 
 
 def test_syntax_server_py(polyglot_session, polyglot_conf, polyglot_repo):
@@ -369,7 +369,7 @@ _BOUND_CASES = [
     ("api_impact", {"route": "/api/items"}),
     ("taint", {"source": "list_items", "sink": "execute"}),
     ("processes", {}),
-    ("slice", {"symbol": "list_items", "line": 82}),
+    ("slice", {"symbol": "list_items", "line": 83}),
     ("shape_check", {"symbol": "Friendly"}),
     ("tool_map", {}),
     ("exact_literal_search", {"literal": "return", "paths": ["."]}),

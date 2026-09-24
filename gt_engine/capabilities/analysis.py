@@ -315,6 +315,8 @@ def taint(
 
     The kind takes one source and an optional sink; several sources map to
     one query per source (same contract as the model-facing action).
+    ``sanitizers=[...]`` in ``optional`` declares functions whose return
+    cleanses tainted input for the Python statement-dataflow layer.
     """
 
     source_list = [sources] if isinstance(sources, str) else list(sources)

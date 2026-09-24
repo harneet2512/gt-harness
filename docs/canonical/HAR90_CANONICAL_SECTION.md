@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T08:41:38Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T09:23:42Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `1aa09b140e89beb2f53e055697d2821c3e35d67f` |
+| harness | `canonical/gt-har90` @ `8f95364e816df0ce2d01eee998a9733fe4aab54b` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -52,7 +52,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 18 | `analysis.control_dependence` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:control_dependence` | none | graph_revision | p50 63ms / p95 67ms | no | 2 refs |
 | 19 | `analysis.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:slice` | typed_on_request | graph_revision | p50 53ms / p95 55ms | yes | 2 refs |
 | 20 | `analysis.callable_values` | `gt_engine/capabilities/analysis.py:callable_values` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:callable_values` | none | graph_revision | p50 1ms / p95 1ms | no | 2 refs |
-| 21 | `analysis.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:taint` | typed_on_request | graph_revision | p50 53ms / p95 57ms | yes | 1 ref |
+| 21 | `analysis.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:taint` | typed_on_request | graph_revision | p50 53ms / p95 57ms | yes | 4 refs |
 | 22 | `change.edit_transaction` | `gt_engine/miniswe_integration.py:MiniSweAdapter.record_edit_transaction` | AVAILABLE | partial | `gt_engine/capabilities/change.py:edit_transaction` | none | edit | p50 0ms / p95 0ms | no | 1 ref |
 | 23 | `change.patch_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:patch_impact` | typed_on_request | graph_revision/edit | p50 58ms / p95 60ms | yes | 1 ref |
 | 24 | `change.route_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:route_impact` | typed_on_request | graph_revision | p50 50ms / p95 54ms | yes | 1 ref |
@@ -204,7 +204,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `analysis.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `analysis.callable_values`: reads producer-retained resolution_callsites/resolution_candidates tables; an empty candidate set is reported as an omission, never fabricated
 - `analysis.taint`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `analysis.taint`: partial semantics: symbol-level CALLS reachability, not statement dataflow; several sources map to one query per source
+- `analysis.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, and unbound *args/**kwargs are named omissions, and seeds are unresolvable uses in the source function); several sources map to one query per source
 - `change.edit_transaction`: journal row + CAS payload of the recorded edit transaction; derived syntax_result evidence is delivered through the post-edit lane but the transaction record itself is never rendered
 - `change.patch_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.patch_impact`: partial semantics: conservatively incomplete

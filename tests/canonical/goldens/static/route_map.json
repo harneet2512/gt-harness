@@ -13,18 +13,18 @@
         "language_manifest_sha256": "53afc44596f72668e11b5511f47424c5911f2b24682730bfb90b58a3d2297631",
         "schema": "gt.configuration_binding.v1"
       },
-      "dirty_diff_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+      "dirty_diff_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
       "git_revision": "<VOLATILE>",
       "repository_id": "<VOLATILE>",
       "revisions": {
         "graph": "canon-polyglot-rev-1",
-        "lsp": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "repository_content": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
-        "runtime_evidence": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+        "lsp": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "repository_content": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
+        "runtime_evidence": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
       },
       "root_sha256": "<VOLATILE>",
       "schema": "gt.repository_snapshot.v1",
-      "working_tree_sha256": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+      "working_tree_sha256": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
     },
     "repository_snapshot_sha256": "<VOLATILE>",
     "requested_fidelity": "exact",
@@ -243,7 +243,7 @@
         ],
         "handler": "render_item",
         "handler_file": "pyapp/server.py",
-        "handler_line": 87,
+        "handler_line": 88,
         "injections": [
           {
             "ambiguous": false,
@@ -296,14 +296,14 @@
       },
       {
         "column": 0,
-        "line": 87,
+        "line": 88,
         "path": "pyapp/server.py"
       }
     ],
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "complete",
-    "direct_answer_json": "{\"route_count\":6,\"routes\":[{\"confidence\":0.7,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.9,\"file\":\"gosvc/main.go\",\"symbol\":\"Greet\"}],\"handler\":\"itemsHandler\",\"handler_file\":\"gosvc/main.go\",\"handler_line\":40,\"injections\":[],\"method\":null,\"middleware\":[],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"run_query\"},{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"sanitize\"}],\"handler\":\"list_items\",\"handler_file\":\"pyapp/server.py\",\"handler_line\":79,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"handler\",\"confidence\":0.85,\"declared_type\":\"Store\",\"mechanism\":\"fastapi_depends\",\"provider\":\"get_store\",\"provider_file\":\"pyapp/server.py\",\"trust_tier\":\"CANDIDATE\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.7,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.5,\"file\":\"tsapp/server.ts\",\"symbol\":\"greet\"}],\"handler\":\"listItems\",\"handler_file\":\"tsapp/server.ts\",\"handler_line\":29,\"injections\":[],\"method\":\"GET\",\"middleware\":[{\"confidence\":0.9,\"file\":\"tsapp/server.ts\",\"line\":27,\"mechanism\":\"express_use\",\"name\":\"audit\",\"route_scope\":null,\"trust_tier\":\"CERTIFIED\"}],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.6,\"file\":\"javaapp/OrderService.java\",\"symbol\":\"findAll\"}],\"handler\":\"list\",\"handler_file\":\"javaapp/OrderController.java\",\"handler_line\":9,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"class\",\"confidence\":0.9,\"declared_type\":\"OrderService\",\"mechanism\":\"spring_autowired\",\"provider\":\"OrderService\",\"provider_file\":\"javaapp/OrderService.java\",\"trust_tier\":\"CERTIFIED\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/orders\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.4,\"file\":\"javaapp/OrderService.java\",\"symbol\":\"total\"}],\"handler\":\"total\",\"handler_file\":\"javaapp/OrderController.java\",\"handler_line\":14,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"class\",\"confidence\":0.9,\"declared_type\":\"OrderService\",\"mechanism\":\"spring_autowired\",\"provider\":\"OrderService\",\"provider_file\":\"javaapp/OrderService.java\",\"trust_tier\":\"CERTIFIED\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/orders/total\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"JsonRenderer\"},{\"confidence\":0.9,\"file\":\"pyapp/server.py\",\"symbol\":\"fetch\"},{\"confidence\":0.9,\"file\":\"pyapp/server.py\",\"symbol\":\"render\"}],\"handler\":\"render_item\",\"handler_file\":\"pyapp/server.py\",\"handler_line\":87,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"handler\",\"confidence\":0.85,\"declared_type\":\"Store\",\"mechanism\":\"fastapi_depends\",\"provider\":\"get_store\",\"provider_file\":\"pyapp/server.py\",\"trust_tier\":\"CANDIDATE\"}],\"method\":null,\"middleware\":[],\"route\":\"/api/render\",\"route_source\":\"edge_metadata\"}],\"truncated\":false,\"unattached_middleware\":[]}",
+    "direct_answer_json": "{\"route_count\":6,\"routes\":[{\"confidence\":0.7,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.9,\"file\":\"gosvc/main.go\",\"symbol\":\"Greet\"}],\"handler\":\"itemsHandler\",\"handler_file\":\"gosvc/main.go\",\"handler_line\":40,\"injections\":[],\"method\":null,\"middleware\":[],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"run_query\"},{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"sanitize\"}],\"handler\":\"list_items\",\"handler_file\":\"pyapp/server.py\",\"handler_line\":79,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"handler\",\"confidence\":0.85,\"declared_type\":\"Store\",\"mechanism\":\"fastapi_depends\",\"provider\":\"get_store\",\"provider_file\":\"pyapp/server.py\",\"trust_tier\":\"CANDIDATE\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.7,\"consumers\":[{\"attribution\":\"route_level\",\"confidence\":0.4,\"file\":\"client/web.js\",\"line\":4,\"method\":null,\"route\":\"/api/items\"}],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.5,\"file\":\"tsapp/server.ts\",\"symbol\":\"greet\"}],\"handler\":\"listItems\",\"handler_file\":\"tsapp/server.ts\",\"handler_line\":29,\"injections\":[],\"method\":\"GET\",\"middleware\":[{\"confidence\":0.9,\"file\":\"tsapp/server.ts\",\"line\":27,\"mechanism\":\"express_use\",\"name\":\"audit\",\"route_scope\":null,\"trust_tier\":\"CERTIFIED\"}],\"route\":\"/api/items\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.6,\"file\":\"javaapp/OrderService.java\",\"symbol\":\"findAll\"}],\"handler\":\"list\",\"handler_file\":\"javaapp/OrderController.java\",\"handler_line\":9,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"class\",\"confidence\":0.9,\"declared_type\":\"OrderService\",\"mechanism\":\"spring_autowired\",\"provider\":\"OrderService\",\"provider_file\":\"javaapp/OrderService.java\",\"trust_tier\":\"CERTIFIED\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/orders\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":0.4,\"file\":\"javaapp/OrderService.java\",\"symbol\":\"total\"}],\"handler\":\"total\",\"handler_file\":\"javaapp/OrderController.java\",\"handler_line\":14,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"class\",\"confidence\":0.9,\"declared_type\":\"OrderService\",\"mechanism\":\"spring_autowired\",\"provider\":\"OrderService\",\"provider_file\":\"javaapp/OrderService.java\",\"trust_tier\":\"CERTIFIED\"}],\"method\":\"GET\",\"middleware\":[],\"route\":\"/api/orders/total\",\"route_source\":\"edge_metadata\"},{\"confidence\":0.95,\"consumers\":[],\"discovered_via\":\"handles_route\",\"downstream_calls\":[{\"confidence\":1.0,\"file\":\"pyapp/server.py\",\"symbol\":\"JsonRenderer\"},{\"confidence\":0.9,\"file\":\"pyapp/server.py\",\"symbol\":\"fetch\"},{\"confidence\":0.9,\"file\":\"pyapp/server.py\",\"symbol\":\"render\"}],\"handler\":\"render_item\",\"handler_file\":\"pyapp/server.py\",\"handler_line\":88,\"injections\":[{\"ambiguous\":false,\"bound_on\":\"handler\",\"confidence\":0.85,\"declared_type\":\"Store\",\"mechanism\":\"fastapi_depends\",\"provider\":\"get_store\",\"provider_file\":\"pyapp/server.py\",\"trust_tier\":\"CANDIDATE\"}],\"method\":null,\"middleware\":[],\"route\":\"/api/render\",\"route_source\":\"edge_metadata\"}],\"truncated\":false,\"unattached_middleware\":[]}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [
       "certified_semantics:partial"
@@ -523,7 +523,7 @@
           ],
           "handler": "render_item",
           "handler_file": "pyapp/server.py",
-          "handler_line": 87,
+          "handler_line": 88,
           "injections": [
             {
               "ambiguous": false,
@@ -547,10 +547,10 @@
     },
     "returned_count": 1,
     "schema": "gt.honesty_envelope.v1",
-    "source_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774",
+    "source_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b",
     "true_total": null,
     "unresolved_identities": [],
-    "workspace_revision": "e362cefaf0912a3a02fe25415a375a198238e51a06c50e60272566f329bd0774"
+    "workspace_revision": "8b6331483a99269a6bab80aade2c7dbb5e79655abdbf5643d42c46495812092b"
   },
   "schema": "gt.compiled_observation.v1"
 }
