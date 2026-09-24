@@ -98,9 +98,10 @@ def _capability_matrix(entries, costs) -> str:
     sep = "|---|---|---|---|---|---|---|---|---|---|---|"
     rows = [header, sep]
     for i, entry in enumerate(entries, 1):
-        is_kind = not entry.name.count(".")
+        is_kind = entry.name.startswith("kind.")
+        bare = entry.name[5:] if is_kind else entry.name
         semantics = (
-            CERTIFIED_TYPED_KIND_SEMANTICS.get(entry.name, "—")
+            CERTIFIED_TYPED_KIND_SEMANTICS.get(bare, "—")
             if is_kind
             else (caps.get(entry.name) or {}).get("semantics", "—")
         )
@@ -109,11 +110,16 @@ def _capability_matrix(entries, costs) -> str:
             f"p50 {_fmt_ms(cost_row.get('p50_ms'))} / "
             f"p95 {_fmt_ms(cost_row.get('p95_ms'))}"
             if cost_row else
-            (f"env {wire[entry.name]['envelope_bytes']}B"
-             if entry.name in wire else "—")
+            (f"env {wire[bare]['envelope_bytes']}B / ans {wire[bare]['answer_bytes']}B"
+             if is_kind and bare in wire else "—")
         )
-        freshness = (cost_row.get("invalidated_by") or "—")
-        internal = entry.facade or "—"
+        freshness = (
+            "execution" if bare == "verification_status"
+            else "graph_revision"
+        ) if is_kind else (cost_row.get("invalidated_by") or "—")
+        internal = (
+            ", ".join(f"`{f}`" for f in entry.facades) or "—"
+        ) if is_kind else (entry.facade or "—")
         tests = f"{len(entry.tests)} ref" + ("s" if len(entry.tests) != 1 else "")
         model_facing = "yes" if entry.state == "MODEL_FACING" else "no"
         rows.append(
@@ -224,7 +230,7 @@ def render() -> str:
     a("## C — Capability matrix")
     a("")
     a(f"{len(entries)} registry entries "
-      f"({sum(1 for e in entries if '.' in e.name)} facades, "
+      f"({sum(1 for e in entries if not e.name.startswith('kind.'))} facades, "
       f"{len(CERTIFIED_TYPED_KINDS)} certified typed kinds). Cost column "
       "is the measured p50/p95 from COSTS.json (fixture substrate); "
       "typed-kind rows carry the wire-envelope byte cost instead.")
@@ -265,6 +271,11 @@ def render() -> str:
       "`canonical/gt-har90` @ `1e83ea68` |")
     a("| `vendor/` | vendored binary + wheel + producer source export "
       "(provenance-verified @873b6a1e) |")
+    a("| `docs/canonical/` | `RUNTIME_LEDGER.md` (C3), `COSTS.json`/`.md` "
+      "(G), `MAIN_PORT_LEDGER.md`, `TYPED_SURFACE.md`, this section |")
+    a("| `tests/canonical/` | F suite: polyglot fixture, goldens, "
+      "static/determinism/runtime/cross-layer/registry/facade tests |")
+    a("| `gt_engine/capabilities/` | D API + E registry |")
     a("| `D:\\gt-harness` | shared worktree (other branches) |")
     a("| `D:\\gt_freeze\\2026-09-22-canonical` | frozen plan + audit |")
     a("| `C:\\gt-smoke-a6` | smoke artifacts + producer binaries |")
