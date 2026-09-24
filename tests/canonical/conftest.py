@@ -211,6 +211,8 @@ def index_fixture(
         for p in src_root.rglob("*")
         if "__pycache__" in p.parts
         or p.suffix == ".pyc"
+        or p.suffix in (".db", ".sqlite", ".sqlite3")
+        or p.name.endswith((".db-journal", ".db-wal", ".db-shm"))
         or ".pytest_cache" in p.parts
     ]
     assert not stray, (
