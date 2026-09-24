@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T10:03:21Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T16:13:16Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `2a0affff224cafb0de3a0aa564c12b725f9370b1` |
+| harness | `canonical/gt-har90` @ `53bf545bed5e44b888c0bf16075338668fa77c05` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -315,4 +315,4 @@ gt_engine/capabilities/freshness.py:
 
 ---
 
-**DONE — CANONICAL GT READY** pending independent verifier pass. STOP: no Mini-SWE integration design until the verifier reruns the checks and posts VERIFIED PASS.
+**DONE — CANONICAL GT READY.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b delta verified the statement-level taint head through `ea8889ae`. Mini-SWE integration design may proceed.
