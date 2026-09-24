@@ -5,9 +5,9 @@ import (
 	"net/http"
 )
 
-// Greeter is the fixture interface; FriendlyGreeter satisfies it
+// GoGreeter is the fixture interface; FriendlyGreeter satisfies it
 // structurally (Go CHA method-set implementation, no declaration).
-type Greeter interface {
+type GoGreeter interface {
 	Greet(name string) string
 }
 

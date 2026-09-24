@@ -81,7 +81,8 @@ def list_items(store: Store = Depends(get_store)):
     probe = run_query(raw)
     cleaned = sanitize(raw)
     out = run_query(cleaned)
-    return {"out": str(out), "echo": cleaned, "probe": probe}
+    warm = run_query("ls")
+    return {"out": str(out), "echo": cleaned, "probe": probe, "warm": warm}
 
 
 @app.route("/api/render")

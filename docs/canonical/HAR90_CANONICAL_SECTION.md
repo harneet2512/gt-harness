@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T16:13:16Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T20:02:31Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `53bf545bed5e44b888c0bf16075338668fa77c05` |
+| harness | `canonical/gt-har90` @ `bb93c080535b89e26b90baa73546d23e73a630c2` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -52,7 +52,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 18 | `analysis.control_dependence` | `groundtruth.runtime.cfg_store:analyze_stored` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:control_dependence` | none | graph_revision | p50 63ms / p95 67ms | no | 2 refs |
 | 19 | `analysis.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:slice` | typed_on_request | graph_revision | p50 53ms / p95 55ms | yes | 2 refs |
 | 20 | `analysis.callable_values` | `gt_engine/capabilities/analysis.py:callable_values` | AVAILABLE | partial | `gt_engine/capabilities/analysis.py:callable_values` | none | graph_revision | p50 1ms / p95 1ms | no | 2 refs |
-| 21 | `analysis.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:taint` | typed_on_request | graph_revision | p50 53ms / p95 57ms | yes | 4 refs |
+| 21 | `analysis.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/analysis.py:taint` | typed_on_request | graph_revision | p50 53ms / p95 57ms | yes | 7 refs |
 | 22 | `change.edit_transaction` | `gt_engine/miniswe_integration.py:MiniSweAdapter.record_edit_transaction` | AVAILABLE | partial | `gt_engine/capabilities/change.py:edit_transaction` | none | edit | p50 0ms / p95 0ms | no | 1 ref |
 | 23 | `change.patch_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:patch_impact` | typed_on_request | graph_revision/edit | p50 58ms / p95 60ms | yes | 1 ref |
 | 24 | `change.route_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:route_impact` | typed_on_request | graph_revision | p50 50ms / p95 54ms | yes | 1 ref |
@@ -74,7 +74,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 40 | `kind.processes` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.processes` | typed_on_request | graph_revision | env 3290B / ans 71B | yes | 2 refs |
 | 41 | `kind.route_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 7638B / ans 1542B | yes | 2 refs |
 | 42 | `kind.api_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.route_impact, structure.framework_relationships` | typed_on_request | graph_revision | env 3272B / ans 56B | yes | 1 ref |
-| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 4 refs |
+| 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 7 refs |
 | 44 | `kind.rename` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `—` | typed_on_request | graph_revision | env 5448B / ans 806B | yes | 1 ref |
 | 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.shape_change` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 3 refs |
 | 46 | `kind.tool_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 3176B / ans 30B | yes | 2 refs |
@@ -204,14 +204,14 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `analysis.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `analysis.callable_values`: reads producer-retained resolution_callsites/resolution_candidates tables; an empty candidate set is reported as an omission, never fabricated
 - `analysis.taint`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `analysis.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, and unbound *args/**kwargs are named omissions, and seeds are unresolvable uses in the source function); several sources map to one query per source
+- `analysis.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, unbound *args/**kwargs, and object-attribute state crossing functions are named omissions, and seeds are unresolvable uses in the source function); sanitizer entries resolve to graph nodes — file.py:name scopes to one definition while a bare name denotes every callable with that name (named sanitizer_name_ambiguous); several sources map to one query per source
 - `change.edit_transaction`: journal row + CAS payload of the recorded edit transaction; derived syntax_result evidence is delivered through the post-edit lane but the transaction record itself is never rendered
 - `change.patch_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.patch_impact`: partial semantics: conservatively incomplete
 - `change.route_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.route_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `change.shape_change`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice
+- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, so a same-named interface in another language adds bogus verdicts (strict-xfail-pinned in test_shape_check_does_not_follow_cross_language_interface_edges)
 - `change.affected_tests`: selection only: _symbols_for_files + wheel select_covering_tests compose the same front half the live covering lane runs pre-execution; the lane continues into run_covering_tests and only a failing verdict becomes a covering_red dose - the raw selection is never delivered
 - `runtime.last_test_result`: the model receives the rendered [GT_EXECUTION_EVIDENCE] line queued as an execution_evidence candidate; the journal row, CAS artifact and raw output the facade returns stay host-side
 - `runtime.covering_tests`: delegates to change.affected_tests; same selection-only limit - no execution, no delivery of the selection itself
@@ -229,9 +229,9 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `kind.processes`: partial semantics
 - `kind.route_map`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced; an API_CALL-only route yields anchor line 0 and the answer becomes producer_not_supported (documented wheel defect)
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
-- `kind.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, and unbound *args/**kwargs are named omissions, and seeds are unresolvable uses in the source function); not a sound over-approximation
+- `kind.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, unbound *args/**kwargs, and object-attribute state crossing functions are named omissions, and seeds are unresolvable uses in the source function); sanitizer entries resolve to graph nodes — file.py:name scopes to one definition while a bare name denotes every callable with that name (named sanitizer_name_ambiguous); not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
-- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice
+- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, so a same-named interface in another language adds bogus verdicts (strict-xfail-pinned in test_shape_check_does_not_follow_cross_language_interface_edges)
 - `kind.tool_map`: partial semantics: external decorators bind through occurrence nodes (name-only, uncertified); registration sites without decorators (server.add_tool(f) calls) are untracked by design
 - `kind.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `task_contract`: runner-side machinery: the obligations:task context unit is admitted through miniswe_gt_run, not the canonical runtime — extraction is verbatim-line anchored, not a semantic proof of coverage

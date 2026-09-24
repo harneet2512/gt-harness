@@ -74,7 +74,8 @@ These were measured on the polyglot fixture in `tests/test_typed_graph_real_prod
 ## Known defects left in place (pinned as strict xfails or documented)
 
 - **route_map (wheel):** an API_CALL-only route yields anchor line 0, and the whole answer becomes `producer_not_supported`.
-- **shape_check (producer/wheel):** conformance counts callable members only — interface `property_signature` members are unchecked, and each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row (one logical check can appear twice).
+- **shape_check (producer/wheel):** conformance counts callable members only — interface `property_signature` members are unchecked, each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row (one logical check can appear twice), and interface targets are resolved by bare name across languages: a TypeScript class `implements Friendly` can pick up an unrelated same-named Go interface (pinned by `test_shape_check_does_not_follow_cross_language_interface_edges`, strict xfail).
+- **taint (harness dataflow):** attribute/field stores (`obj.x = v`) are weak-mutation defs — cross-function object-attribute flow is not tracked (`attribute_flow_untracked`); unresolved callsites fall back to bare-name matching for sources/sinks/sanitizers, and an ambiguous sanitizer name is named (`sanitizer_name_ambiguous:<name>`); bound varargs are untracked.
 - **tool_map (wheel):** undecorated registration sites (`server.add_tool(f)` calls) are not provable from the graph — reported as `registration_sites_untracked`, never guessed.
 - **callers/references (wheel):** these silently keep 20 rows per band while still labelling the answer exact.
 - **exact_literal_search (wheel):** scope `.` scans `.git/`.

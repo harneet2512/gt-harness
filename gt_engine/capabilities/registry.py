@@ -448,6 +448,9 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_typed_graph_real_producer.py::test_taint_is_symbol_reachability_with_its_limits_named",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_reaches_the_sink_param",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_sanitizer_scopes_to_resolved_symbol",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_skips_constant_arguments",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_names_attribute_flow",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_names_non_python_scope",
         ),
         limitations=(
@@ -455,9 +458,13 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: symbol-level CALLS reachability plus "
             "statement-level dataflow for Python sources only (def-use "
             "propagation over resolved callsites; unresolved callees, "
-            "non-Python functions, and unbound *args/**kwargs are named "
-            "omissions, and seeds are unresolvable uses in the source "
-            "function); several sources map to one query per source",
+            "non-Python functions, unbound *args/**kwargs, and "
+            "object-attribute state crossing functions are named omissions, "
+            "and seeds are unresolvable uses in the source function); "
+            "sanitizer entries resolve to graph nodes — file.py:name scopes "
+            "to one definition while a bare name denotes every callable with "
+            "that name (named sanitizer_name_ambiguous); several sources "
+            "map to one query per source",
         ),
     ),
     # --------------------------------------------------------------------- change
@@ -519,7 +526,11 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: conformance counts callable members only — "
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
-            "logical check can appear twice",
+            "logical check can appear twice; the producer resolves interface "
+            "targets by bare name across languages, so a same-named "
+            "interface in another language adds bogus verdicts "
+            "(strict-xfail-pinned in "
+            "test_shape_check_does_not_follow_cross_language_interface_edges)",
         ),
     ),
     _e(
@@ -755,15 +766,22 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_typed_graph_real_producer.py::test_taint_is_symbol_reachability_with_its_limits_named",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_reaches_the_sink_param",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_sanitizer_scopes_to_resolved_symbol",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_skips_constant_arguments",
+            "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_names_attribute_flow",
             "tests/test_typed_graph_real_producer.py::test_taint_statement_dataflow_names_non_python_scope",
         ),
         limitations=(
             "partial semantics: symbol-level CALLS reachability plus "
             "statement-level dataflow for Python sources only (def-use "
             "propagation over resolved callsites; unresolved callees, "
-            "non-Python functions, and unbound *args/**kwargs are named "
-            "omissions, and seeds are unresolvable uses in the source "
-            "function); not a sound over-approximation",
+            "non-Python functions, unbound *args/**kwargs, and "
+            "object-attribute state crossing functions are named omissions, "
+            "and seeds are unresolvable uses in the source function); "
+            "sanitizer entries resolve to graph nodes — file.py:name scopes "
+            "to one definition while a bare name denotes every callable with "
+            "that name (named sanitizer_name_ambiguous); not a sound "
+            "over-approximation",
         ),
     ),
     _kind(
@@ -784,7 +802,11 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: conformance counts callable members only — "
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
-            "logical check can appear twice",
+            "logical check can appear twice; the producer resolves interface "
+            "targets by bare name across languages, so a same-named "
+            "interface in another language adds bogus verdicts "
+            "(strict-xfail-pinned in "
+            "test_shape_check_does_not_follow_cross_language_interface_edges)",
         ),
     ),
     _kind(

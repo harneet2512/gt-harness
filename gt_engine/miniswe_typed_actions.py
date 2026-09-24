@@ -73,7 +73,10 @@ KIND_ARGUMENT_DOCS = {
         "include_name_matched (boolean, default false; when true, "
         "name-matched call edges below the 0.5 receiver/import-proof "
         "confidence floor are also followed), and sanitizers (array of "
-        "function names whose return value cleanses tainted input); "
+        "function names whose return value cleanses tainted input; "
+        "entries may be qualified as file.py:name to scope to one "
+        "definition, otherwise a bare name denotes every callable with "
+        "that name); "
         "symbol-level call reachability plus statement-level dataflow for "
         "Python sources via def-use propagation over resolved callsites"
     ),

@@ -285,7 +285,7 @@ def test_exact_literal_search(polyglot_session, polyglot_conf, polyglot_repo):
     golden_assert("static/exact_literal_search_depends", payload, polyglot_repo)
     matches = payload["direct_answer"]["matches"]
     assert {row["path"] for row in matches} == {"pyapp/server.py"}
-    assert {row["line"] for row in matches} == {79, 88}
+    assert {row["line"] for row in matches} == {79, 89}
 
 
 def test_syntax_server_py(polyglot_session, polyglot_conf, polyglot_repo):

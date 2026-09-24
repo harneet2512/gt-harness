@@ -81,14 +81,34 @@ def list_items():
     if safe:
         total = len(safe)
     out = execute(safe)
-    return {"total": total, "out": str(out), "probe": probe}
+    ech = extras.clean(raw)
+    probe2 = execute(ech)
+    warm = execute("ls")
+    return {"total": total, "out": str(out), "probe": probe,
+            "ech": ech, "warm": warm}
+
+
+def pin(store, value):
+    store.cmd = value
 
 
 @app.route("/save")
 def save_item():
     s = Store()
     s.save(request.args.get("c"))
+    pin(s, request.args.get("d"))
     return s.run()
+
+
+# Deferred import keeps the same-name sanitizer collision leg below the
+# statement lines pinned by earlier tests.
+import extras
+''',
+    "app/extras.py": '''"""A same-named ``clean`` in a different module: not a sanitizer."""
+
+
+def clean(value):
+    return value
 ''',
     "app/tools.py": '''from mcp.server.fastmcp import FastMCP
 
@@ -351,19 +371,75 @@ def test_taint_statement_dataflow_reaches_the_sink_param(polyglot):
     paths = answer["dataflow_paths"]
     assert paths, "def-use dataflow must reach the sink parameter"
     sink_lines = {path["sink_line"] for path in paths}
-    # ``probe = execute(raw)`` and ``out = execute(safe)`` inside list_items.
-    assert sink_lines == {31, 36}
+    # ``probe = execute(raw)``, ``out = execute(safe)``, and the pass-through
+    # ``probe2 = execute(ech)`` leg inside list_items; the constant
+    # ``warm = execute("ls")`` leg produces no path.
+    assert sink_lines == {31, 36, 38}
     for path in paths:
         assert path["sink"] == "execute"
         assert path["tainted_params"] == ["cmd"]
         kinds = [hop["kind"] for hop in path["hops"]]
         assert kinds[0] == "external_seed"
         assert "param_bind" in kinds
+    # The ``ech`` leg's chain shows the resolved ``extras.clean`` pass-through.
+    ech_path = next(path for path in paths if path["sink_line"] == 38)
+    assert [
+        (hop["kind"], hop.get("callee"))
+        for hop in ech_path["hops"]
+    ] == [
+        ("external_seed", None),
+        ("param_bind", "clean"),
+        ("return_flow", "clean"),
+        ("param_bind", "execute"),
+    ]
     assert any(
         reach["callee"] == "run"
         for reach in answer["unresolved_reaches"]
     ), "subprocess.run stays an honestly unresolved tainted callsite"
     assert "callsite_args_unresolved" in omissions
+
+
+def test_taint_statement_dataflow_skips_constant_arguments(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(root, graph, "taint", {"source": "list_items", "sink": "execute"})
+    # ``warm = execute("ls")`` binds a constant: no dataflow path may be
+    # fabricated for it, while symbol-level CALLS reachability still reports
+    # the list_items -> execute edge that covers all four callsites.
+    assert 39 not in {path["sink_line"] for path in answer["dataflow_paths"]}
+    assert {path["sink_line"] for path in answer["dataflow_paths"]} == {31, 36, 38}
+    assert ["list_items", "execute"] in [path["path"] for path in answer["paths"]]
+
+
+def test_taint_statement_dataflow_sanitizer_scopes_to_resolved_symbol(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(
+        root, graph, "taint",
+        {"source": "list_items", "sink": "execute",
+         "sanitizers": ["app/server.py:clean"]},
+    )
+    # The qualified entry resolves to exactly the server.py ``clean`` node;
+    # ``extras.clean`` is a different symbol and must not cut the ``ech`` leg.
+    cuts = answer["sanitizer_cuts"]
+    assert [cut["callsite"] for cut in cuts] == ["app/server.py:32"]
+    assert {path["sink_line"] for path in answer["dataflow_paths"]} == {31, 38}
+    assert "sanitizer_name_ambiguous:app/server.py:clean" not in answer["dataflow_omissions"]
+
+
+def test_taint_statement_dataflow_names_attribute_flow(polyglot):
+    root, graph, _ = polyglot
+    payload, answer = _run(root, graph, "taint", {"source": "save_item", "sink": "run"})
+    # ``s.save``/``s.run`` are receiver-attribute dispatches the producer left
+    # ``candidate_only`` (unresolved), and ``pin``'s ``store.cmd = value`` is
+    # object-attribute state the bounded engine does not track across
+    # functions. Both gaps must be named rather than silently dropped.
+    assert answer["dataflow_paths"] == []
+    omissions = set(answer["dataflow_omissions"])
+    assert "callsite_args_unresolved" in omissions
+    assert "attribute_flow_untracked" in omissions
+    assert any(
+        reach["callee"] == "save" and reach["callsite"] == "app/server.py:51"
+        for reach in answer["unresolved_reaches"]
+    )
 
 
 def test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg(polyglot):
@@ -373,9 +449,13 @@ def test_taint_statement_dataflow_sanitizer_cuts_the_safe_leg(polyglot):
         {"source": "list_items", "sink": "execute", "sanitizers": ["clean"]},
     )
     cuts = answer["sanitizer_cuts"]
-    assert [cut["sanitizer"] for cut in cuts] == ["clean"]
+    assert [cut["sanitizer"] for cut in cuts] == ["clean", "clean"]
+    assert {cut["callsite"] for cut in cuts} == {"app/server.py:32", "app/server.py:37"}
     assert cuts[0]["tainted_params"] == ["value"]
-    # The sanitized ``safe`` leg is cut; the unsanitized ``probe`` leg survives.
+    # A bare name denotes every callable with that name — both ``clean`` defs
+    # cut, and the matching breadth is named rather than silent.
+    assert "sanitizer_name_ambiguous:clean" in answer["dataflow_omissions"]
+    # The sanitized ``safe``/``ech`` legs are cut; ``probe`` survives.
     assert {path["sink_line"] for path in answer["dataflow_paths"]} == {31}
 
 
@@ -395,7 +475,12 @@ def test_rename_previews_the_graph_edit_sites(polyglot):
     payload, answer = _run(root, graph, "rename", {"symbol": "clean", "new_name": "sanitize"})
     assert answer["files_to_touch"] == ["app/server.py"]
     calls = answer["edit_sites_by_type"]["CALLS"]
-    assert [(row["referencing_symbol"], row["line"]) for row in calls] == [("list_items", 32)]
+    # Edit-site enumeration is name-based: the ``extras.clean`` callsite at
+    # line 37 references a different resolved symbol but still lists here.
+    assert [(row["referencing_symbol"], row["line"]) for row in calls] == [
+        ("list_items", 32),
+        ("list_items", 37),
+    ]
     assert "text_references_not_enumerated" in payload["evidence"]["omissions"]
 
 
@@ -410,6 +495,55 @@ def test_shape_check_reports_the_missing_interface_method(polyglot):
     root, graph, _ = polyglot
     _, answer = _run(root, graph, "shape_check", {"symbol": "Friendly"})
     assert any("wave" in check.get("missing_methods", []) for check in answer["checks"])
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "producer resolves IMPLEMENTS/DECLARED_IMPLEMENTS targets by bare "
+        "interface name across languages: the TypeScript Friendly picks up "
+        "the unrelated Go Greeter contract and fails it. A producer fix "
+        "(language-scoped interface binding) turns this into XPASS and the "
+        "xfail must then be removed."
+    ),
+)
+def test_shape_check_does_not_follow_cross_language_interface_edges(
+    gt_index, tmp_path
+):
+    binary, info = gt_index
+    files = {
+        "app/shapes.ts": (
+            "export interface Greeter {\n"
+            "  greet(name: string): string;\n"
+            "  wave(): void;\n"
+            "}\n"
+            "\n"
+            "export class Friendly implements Greeter {\n"
+            "  greet(name: string): string {\n"
+            '    return "hi " + name;\n'
+            "  }\n"
+            "  wave(): void {}\n"
+            "}\n"
+        ),
+        "svc/main.go": (
+            "package svc\n"
+            "\n"
+            "type Greeter interface {\n"
+            "\tGreet(name string) string\n"
+            "}\n"
+        ),
+    }
+    root = tmp_path / "repo"
+    graph = _index(binary, info, files, root)
+    _, answer = _run(root, graph, "shape_check", {"symbol": "Friendly"})
+    # ``Friendly`` satisfies its own (TypeScript) interface; the Go ``Greeter``
+    # contract is an unrelated same-named symbol and must never be checked.
+    assert answer["checks"], answer
+    assert all(
+        check["required_count"] == 2 and not check["missing_methods"]
+        for check in answer["checks"]
+    ), answer["checks"]
+    assert answer["failed"] == 0
 
 
 def test_shape_check_passes_a_conforming_class_with_an_empty_method(polyglot):
