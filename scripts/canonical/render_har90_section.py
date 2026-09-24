@@ -116,7 +116,7 @@ def _capability_matrix(entries, costs) -> str:
         freshness = (
             "execution" if bare == "verification_status"
             else "graph_revision"
-        ) if is_kind else (cost_row.get("invalidated_by") or "—")
+        ) if is_kind else str(cost_row.get("invalidated_by") or "—").replace("|", "/")
         internal = (
             ", ".join(entry.facades) or "—"
         ) if is_kind else (entry.facade or "—")
