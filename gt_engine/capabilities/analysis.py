@@ -68,9 +68,19 @@ def _stored_analysis(session: "GTSession", function: str) -> tuple[Any | None, d
         )
     except Exception as exc:  # noqa: BLE001 - analysis abstains, never raises
         conn.close()
+        # ``CFGAnalysisError: no persisted CFG`` is the producer's honest
+        # per-language coverage statement — surface it as a named
+        # omission rather than a bare exception type.
+        reason = str(exc)
+        omission = (
+            "no_persisted_cfg"
+            if "no persisted CFG" in reason
+            else f"analysis_failed:{type(exc).__name__}"
+        )
         return None, {
-            "omissions": [f"analysis_failed:{type(exc).__name__}"],
+            "omissions": [omission],
             "symbol": function,
+            "detail": reason[:200],
         }
     conn.close()
     return analysis, {

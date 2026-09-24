@@ -1,0 +1,1093 @@
+{
+  "capabilities": {
+    "analysis.callable_values": {
+      "answer_bytes": 39,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 1,
+      "min_ms": 1,
+      "p50_ms": 1,
+      "p95_ms": 1,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "analysis.cfg": {
+      "answer_bytes": 66,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 80,
+      "min_ms": 62,
+      "p50_ms": 65,
+      "p95_ms": 80,
+      "semantics": "partial",
+      "status": "abstain"
+    },
+    "analysis.control_dependence": {
+      "answer_bytes": 66,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 67,
+      "min_ms": 61,
+      "p50_ms": 63,
+      "p95_ms": 67,
+      "semantics": "partial",
+      "status": "abstain"
+    },
+    "analysis.reaching_definitions": {
+      "answer_bytes": 66,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 158,
+      "min_ms": 61,
+      "p50_ms": 64,
+      "p95_ms": 158,
+      "semantics": "partial",
+      "status": "abstain"
+    },
+    "analysis.slice": {
+      "answer_bytes": 535,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 55,
+      "min_ms": 51,
+      "p50_ms": 53,
+      "p95_ms": 55,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "analysis.taint": {
+      "answer_bytes": 847,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 57,
+      "min_ms": 51,
+      "p50_ms": 53,
+      "p95_ms": 57,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "change.affected_tests": {
+      "answer_bytes": 854,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision|edit",
+      "max_ms": 7,
+      "min_ms": 5,
+      "p50_ms": 5,
+      "p95_ms": 7,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "change.edit_transaction": {
+      "answer_bytes": 4,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "partial",
+      "status": "unavailable"
+    },
+    "change.patch_impact": {
+      "answer_bytes": 485,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision|edit",
+      "max_ms": 60,
+      "min_ms": 56,
+      "p50_ms": 58,
+      "p95_ms": 60,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "change.route_impact": {
+      "answer_bytes": 2292,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 54,
+      "min_ms": 47,
+      "p50_ms": 50,
+      "p95_ms": 54,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "change.shape_change": {
+      "answer_bytes": 517,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 53,
+      "min_ms": 48,
+      "p50_ms": 50,
+      "p95_ms": 53,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "freshness.amend_state": {
+      "answer_bytes": 157,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit|graph_revision",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "freshness.fallback_state": {
+      "answer_bytes": 216,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit|graph_revision",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "freshness.graph_state": {
+      "answer_bytes": 234,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit|graph_revision",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "freshness.index_revision": {
+      "answer_bytes": 43,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit|graph_revision",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "freshness.unit_state": {
+      "answer_bytes": 4,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "unavailable"
+    },
+    "localization.definition": {
+      "answer_bytes": 294,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 63,
+      "min_ms": 43,
+      "p50_ms": 48,
+      "p95_ms": 63,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "localization.hybrid_rank": {
+      "answer_bytes": 3146,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "edit|graph_revision",
+      "max_ms": 17,
+      "min_ms": 12,
+      "p50_ms": 13,
+      "p95_ms": 17,
+      "semantics": "heuristic",
+      "status": "partial"
+    },
+    "localization.lexical_search": {
+      "answer_bytes": 899,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 66,
+      "min_ms": 56,
+      "p50_ms": 60,
+      "p95_ms": 66,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "localization.references": {
+      "answer_bytes": 1296,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 52,
+      "min_ms": 44,
+      "p50_ms": 46,
+      "p95_ms": 52,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "runtime.covering_tests": {
+      "answer_bytes": 854,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision|edit",
+      "max_ms": 5,
+      "min_ms": 5,
+      "p50_ms": 5,
+      "p95_ms": 5,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "runtime.failure_fingerprint": {
+      "answer_bytes": 4,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "execution",
+      "max_ms": 1,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 1,
+      "semantics": "partial",
+      "status": "unavailable"
+    },
+    "runtime.last_test_result": {
+      "answer_bytes": 4,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "execution",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "partial",
+      "status": "unavailable"
+    },
+    "runtime.repeated_failure_state": {
+      "answer_bytes": 71,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "execution",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "exact",
+      "status": "ok"
+    },
+    "runtime.verification_state": {
+      "answer_bytes": 17,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "execution",
+      "max_ms": 0,
+      "min_ms": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "semantics": "partial",
+      "status": "unavailable"
+    },
+    "structure.callees": {
+      "answer_bytes": 1004,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 64,
+      "min_ms": 53,
+      "p50_ms": 55,
+      "p95_ms": 64,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "structure.callers": {
+      "answer_bytes": 666,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 51,
+      "min_ms": 43,
+      "p50_ms": 46,
+      "p95_ms": 51,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "structure.communities": {
+      "answer_bytes": 750,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 1,
+      "min_ms": 1,
+      "p50_ms": 1,
+      "p95_ms": 1,
+      "semantics": "partial",
+      "status": "ok"
+    },
+    "structure.framework_relationships": {
+      "answer_bytes": 81,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 56,
+      "min_ms": 46,
+      "p50_ms": 52,
+      "p95_ms": 56,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "structure.processes": {
+      "answer_bytes": 71,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 62,
+      "min_ms": 52,
+      "p50_ms": 55,
+      "p95_ms": 62,
+      "semantics": "partial",
+      "status": "partial"
+    },
+    "structure.symbol_context": {
+      "answer_bytes": 598,
+      "cacheable": false,
+      "calls": 20,
+      "invalidated_by": "graph_revision",
+      "max_ms": 63,
+      "min_ms": 52,
+      "p50_ms": 56,
+      "p95_ms": 63,
+      "semantics": "partial",
+      "status": "partial"
+    }
+  },
+  "generated_at": "2026-09-24T02:34:46Z",
+  "host": {
+    "cpu_count": 12,
+    "machine": "AMD64",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.0"
+  },
+  "producer": {
+    "amend_capabilities": [
+      "batch_parser_node_reuse_v1"
+    ],
+    "binary": "C:\\gt-smoke-a6\\gt-index-new.exe",
+    "build_info": {
+      "build_id": "3d3c0f87802e8b782ca880d4367df5ea4d008f118b74ca6a921eb05cbc559d71",
+      "build_tags": "netgo,osusergo,sqlite_fts5",
+      "build_time_utc": "2026-09-23T02:46:46Z",
+      "capabilities": [
+        "atomic_graph_publication",
+        "batch_parser_node_reuse_v1",
+        "call_resolution_v2",
+        "data_access_edges_v1",
+        "framework_surface_resolution_v1",
+        "incremental_stale_suppression",
+        "parse_failure_accounting",
+        "parser_inspection_v1",
+        "retained_call_candidates",
+        "source_revision_meta_v1",
+        "versioned_query_policy"
+      ],
+      "complete": true,
+      "executable_sha256": "412f5a0490bcc552b687ad008ef4cf83f8d3dec30b8af24ee46c49c496d3d395",
+      "git_commit": "0ff6ab4ebeb6bbccc549a8f62a7b4478aee604b1",
+      "go_toolchain": "go1.26.7",
+      "graph_schema_version": "v15.4-callsite-actuals",
+      "schema": "gt-index.build.v1",
+      "source_fingerprint": "a70e4eac87a96b4320c6f5f976b6b09045244b6902f0770ba313df45cc297a9f"
+    },
+    "sha256": "412f5a0490bcc552b687ad008ef4cf83f8d3dec30b8af24ee46c49c496d3d395"
+  },
+  "repos": {
+    "airflow600": {
+      "amend": {
+        "one_file": {
+          "changed_paths": [
+            "airflow-core/docs/conf.py"
+          ],
+          "journal_outcome": "adopted",
+          "txn_wall_seconds": 126.156
+        },
+        "per_file": {
+          "note": "producer build-info does not declare incremental_amend_in_place; only the batch lane exists on this binary",
+          "supported": false
+        },
+        "ten_file": {
+          "changed_paths": [
+            "airflow-core/docs/empty_plugin/empty_plugin.py",
+            "airflow-core/docs/howto/docker-compose/airflow.sh",
+            "airflow-core/docs/img/diagram_auth_manager_airflow_architecture.py",
+            "airflow-core/docs/img/diagram_basic_airflow_architecture.py",
+            "airflow-core/docs/img/diagram_dag_processor_airflow_architecture.py",
+            "airflow-core/docs/img/diagram_distributed_airflow_architecture.py",
+            "airflow-core/docs/img/diagram_multi_team_airflow_architecture.py",
+            "airflow-core/docs/img/diagram_task_lifecycle.py",
+            "airflow-core/docs/static/gh-jira-links.js",
+            "airflow-core/docs/static/redirects.js"
+          ],
+          "journal_outcome": "adopted",
+          "txn_wall_seconds": 124.844
+        }
+      },
+      "amend_edit_sets": {
+        "one_file": [
+          "airflow-core/docs/conf.py"
+        ],
+        "ten_files": [
+          "airflow-core/docs/empty_plugin/empty_plugin.py",
+          "airflow-core/docs/howto/docker-compose/airflow.sh",
+          "airflow-core/docs/img/diagram_auth_manager_airflow_architecture.py",
+          "airflow-core/docs/img/diagram_basic_airflow_architecture.py",
+          "airflow-core/docs/img/diagram_dag_processor_airflow_architecture.py",
+          "airflow-core/docs/img/diagram_distributed_airflow_architecture.py",
+          "airflow-core/docs/img/diagram_multi_team_airflow_architecture.py",
+          "airflow-core/docs/img/diagram_task_lifecycle.py",
+          "airflow-core/docs/static/gh-jira-links.js",
+          "airflow-core/docs/static/redirects.js"
+        ]
+      },
+      "ensure_index_diagnostics": [],
+      "ensure_index_publish_seconds": 132.469,
+      "file_bound": 600,
+      "index": {
+        "argv": [
+          "C:\\gt-smoke-a6\\gt-index-new.exe",
+          "-root",
+          "D:\\tmp\\gt-canonical-costs\\airflow600\\repo",
+          "-output",
+          "D:\\tmp\\gt-canonical-costs\\airflow600\\index.db",
+          "-workers",
+          "8",
+          "-max-files",
+          "600",
+          "-source-revision",
+          "costs-index-1"
+        ],
+        "graph_db_bytes": 410382336,
+        "log": "D:\\tmp\\gt-canonical-costs\\airflow600\\index.log",
+        "peak_rss_bytes": 648302592,
+        "returncode": 0,
+        "wall_seconds": 117.406
+      },
+      "indexed_file_count": 600,
+      "published_graph": "D:\\tmp\\gt-canonical-costs\\airflow600\\state\\761bfad8b70fa00c\\revisions\\32934f55454596a7fa59e5b9227b00480657df3f1f712a762ca08d6a868710cf\\graph.db",
+      "snapshot": {
+        "tables": {
+          "assertions": {
+            "rows": 4,
+            "sha256": "57d9e0c0191976c4e2bf3736c76f0f2e45c06ea70caf22ac7df382cf9427d464"
+          },
+          "cfg_blocks": {
+            "rows": 221,
+            "sha256": "28e563538f8368257f9770f42b38ba9e72e6129ec1f546f6685a09cd93823429"
+          },
+          "cfg_defs": {
+            "rows": 165,
+            "sha256": "fd1f0fc5d74874a2703add7ec75b8624136d7063dd4665266fa4d2407c1e8097"
+          },
+          "cfg_edges": {
+            "rows": 200,
+            "sha256": "86bd582459c476aa8745c1bf8dd45db19d9512daacaa4c41a01c1f178604c7de"
+          },
+          "cfg_uses": {
+            "rows": 500,
+            "sha256": "9064ffb584de0e2fe43cd6f06b039254df03272320c2b5955199216a92874702"
+          },
+          "closure": {
+            "rows": 7610,
+            "sha256": "0c2b188ccb9ef5191665a5540132c5b4045676ba34ec5f8bfdc258cc5aaf5efd"
+          },
+          "cochanges": {
+            "rows": 0,
+            "sha256": "cabfe1696b8713629b957ab291ffb0b5aba595ef4ac2a4560d1d271d11fc79a8"
+          },
+          "communities": {
+            "rows": 67,
+            "sha256": "fcc971197d1985f06f5afc6f05ec2ca7ce13ed2ed18a86768f7e0d1bc69f58b6"
+          },
+          "community_members": {
+            "rows": 244,
+            "sha256": "d9d7a589656dd02cd25848e83d4ef52bf2b87f838d651b9b4e3e033c3f997ae6"
+          },
+          "edges": {
+            "rows": 185037,
+            "sha256": "0339b091c11cb3a75375e9af41d5e5c934801626a67c3d822ea7661db6157004"
+          },
+          "nodes": {
+            "rows": 164450,
+            "sha256": "658d0bfabec5ee740cf26015f7c05d42ef3562e582232871cf38f2d96cc0f4f9"
+          },
+          "process_steps": {
+            "rows": 0,
+            "sha256": "4eee62fda7080a1ac1a3967deb1b6dcbc686619be9a52780db6ee407ee7fff11"
+          },
+          "processes": {
+            "rows": 0,
+            "sha256": "cd2136ad4e7200dd19bdafcbea5599e95a598cd08d10581a2661185d6716871b"
+          },
+          "resolution_callsites": {
+            "rows": 15962,
+            "sha256": "e023a24e0ff5d31d674fedfa8db27c462fa4cf7996f6d9abd0b5800bf9ed2025"
+          },
+          "resolution_candidates": {
+            "rows": 0,
+            "sha256": "a7d2e81eed7dc8aa2b0bfbe4aa78acfb65b769332d0eaa27899b12fa59a31578"
+          }
+        },
+        "wall_seconds": 7.094
+      },
+      "subset_workspace": {
+        "files_kept": 600,
+        "files_removed": 9938
+      },
+      "title": "apache/airflow @ first-600 lexical indexable files",
+      "workspace": "D:\\tmp\\gt-canonical-costs\\airflow600\\repo"
+    },
+    "fixture": {
+      "amend": {
+        "one_file": {
+          "changed_paths": [
+            "client/web.js"
+          ],
+          "journal_outcome": "adopted",
+          "txn_wall_seconds": 2.922
+        },
+        "per_file": {
+          "note": "producer build-info does not declare incremental_amend_in_place; only the batch lane exists on this binary",
+          "supported": false
+        },
+        "ten_file": {
+          "changed_paths": [
+            "gosvc/main.go",
+            "gosvc/main_test.go",
+            "javaapp/OrderController.java",
+            "javaapp/OrderControllerTest.java",
+            "javaapp/OrderRepository.java",
+            "javaapp/OrderService.java",
+            "javaapp/Pricing.java",
+            "pyapp/helpers.py",
+            "pyapp/server.py",
+            "pyapp/test_server.py"
+          ],
+          "journal_outcome": "adopted",
+          "txn_wall_seconds": 2.454
+        }
+      },
+      "amend_edit_sets": {
+        "one_file": [
+          "client/web.js"
+        ],
+        "ten_files": [
+          "gosvc/main.go",
+          "gosvc/main_test.go",
+          "javaapp/OrderController.java",
+          "javaapp/OrderControllerTest.java",
+          "javaapp/OrderRepository.java",
+          "javaapp/OrderService.java",
+          "javaapp/Pricing.java",
+          "pyapp/helpers.py",
+          "pyapp/server.py",
+          "pyapp/test_server.py"
+        ]
+      },
+      "ensure_index_diagnostics": [],
+      "ensure_index_publish_seconds": 2.485,
+      "file_bound": null,
+      "index": {
+        "argv": [
+          "C:\\gt-smoke-a6\\gt-index-new.exe",
+          "-root",
+          "D:\\tmp\\gt-canonical-costs\\fixture\\repo",
+          "-output",
+          "D:\\tmp\\gt-canonical-costs\\fixture\\index.db",
+          "-workers",
+          "8",
+          "-source-revision",
+          "costs-index-1"
+        ],
+        "graph_db_bytes": 1908736,
+        "log": "D:\\tmp\\gt-canonical-costs\\fixture\\index.log",
+        "peak_rss_bytes": 164007936,
+        "returncode": 0,
+        "wall_seconds": 0.594
+      },
+      "indexed_file_count": 13,
+      "published_graph": "D:\\tmp\\gt-canonical-costs\\fixture\\state\\d796b6d2fa0ecfbd\\revisions\\9bbc64f2cad75926afadf4b4602c1d047737eb4621de04be2db831005ee65c06\\graph.db",
+      "snapshot": {
+        "tables": {
+          "assertions": {
+            "rows": 9,
+            "sha256": "fafe8aea96f00d879f135fa74e7a0d6d6a42294fc9bdff4e1f8cc64c3fa0fb8b"
+          },
+          "cfg_blocks": {
+            "rows": 74,
+            "sha256": "8c737ce7fdb9b18b6194d828750fda299d67e8c94b08b6e5bd016d3a2f1ebac0"
+          },
+          "cfg_defs": {
+            "rows": 34,
+            "sha256": "a0d9c60f1260b5d39b44982a789296b7ba8ea5980b971b9a29990393fea03baf"
+          },
+          "cfg_edges": {
+            "rows": 52,
+            "sha256": "2dc9229e183217381491bf698c132b0cba39f23fae86b8ea26c037a1f328c3d9"
+          },
+          "cfg_uses": {
+            "rows": 87,
+            "sha256": "f14e2cc7ae8aec8fa0d2157c682108098bd466a8397d75f6a2172b0979435682"
+          },
+          "closure": {
+            "rows": 30,
+            "sha256": "a97ee4ff7501d860c41ebd5908eaed6f4a82783e6d91fe292ff5177f3b763db2"
+          },
+          "cochanges": {
+            "rows": 0,
+            "sha256": "cabfe1696b8713629b957ab291ffb0b5aba595ef4ac2a4560d1d271d11fc79a8"
+          },
+          "communities": {
+            "rows": 3,
+            "sha256": "24d9fc63cee1f8096ca05f494e68d81438ec85686d1138df15979b5e44876b2e"
+          },
+          "community_members": {
+            "rows": 7,
+            "sha256": "0da8ff5883b7f6dc512d277ac30a88b00d9e7d5cd282af203266669a3352278b"
+          },
+          "edges": {
+            "rows": 717,
+            "sha256": "1df8fa63cfd2ec81da12662fa6835143907aa9673600fa78977169336c1ea17c"
+          },
+          "nodes": {
+            "rows": 649,
+            "sha256": "b4b5f16ec0148510e2e6ff69cae4161d2970b4f425822eec4ad9ecb38d0e639d"
+          },
+          "process_steps": {
+            "rows": 9,
+            "sha256": "1a9da178e46df353ab9cb8de2c85027b3fe14aebd05a1b7784b45a3cb0b73664"
+          },
+          "processes": {
+            "rows": 4,
+            "sha256": "8f08a323ed7f119fd43a4a05d7d9895fe043798ba7aab2bc87a2cfeb21aaa871"
+          },
+          "resolution_callsites": {
+            "rows": 61,
+            "sha256": "6a07fb899d0a3eab0359e0f9297604abd8edf7a80f1be6e91810d6c35f7b0413"
+          },
+          "resolution_candidates": {
+            "rows": 0,
+            "sha256": "a7d2e81eed7dc8aa2b0bfbe4aa78acfb65b769332d0eaa27899b12fa59a31578"
+          }
+        },
+        "wall_seconds": 0.031
+      },
+      "title": "tests/canonical/fixtures/polyglot",
+      "workspace": "D:\\tmp\\gt-canonical-costs\\fixture\\repo"
+    },
+    "groundtruth600": {
+      "amend": {
+        "one_file": {
+          "changed_paths": [
+            "artifact_deepswe/__init__.py"
+          ],
+          "direct_seam": {
+            "amended_paths": 0,
+            "published": null,
+            "reason": "incremental_parent_uncertifiable:graph_schema_invalid:OperationalError:fts5: syntax error near \"AND\"",
+            "wall_seconds": 10.672
+          },
+          "journal_outcome": "boundary_skipped",
+          "note": "parent 2661101568 B > SYNC_AMEND_MAX_GRAPH_BYTES; txn-boundary amend skipped by design, shared seam timed directly",
+          "txn_wall_seconds": 0.016
+        },
+        "per_file": {
+          "note": "producer build-info does not declare incremental_amend_in_place; only the batch lane exists on this binary",
+          "supported": false
+        },
+        "ten_file": {
+          "changed_paths": [
+            "artifact_deepswe/gt_agent.py",
+            "artifact_deepswe/gt_integration/gt_ae_block.sh",
+            "artifact_deepswe/gt_integration/gt_vertex_token_shim.py",
+            "artifact_deepswe/gt_mini_patch.py",
+            "artifact_deepswe/gt_oracle.py",
+            "artifact_deepswe/gt_oracle_sense.py",
+            "artifact_deepswe/phase_policy.py",
+            "artifact_deepswe/tests/conftest.py",
+            "artifact_deepswe/tests/test_a2_handoff_failclosed.py",
+            "artifact_deepswe/tests/test_cluster5_oracle_verify_gaps.py"
+          ],
+          "direct_seam": {
+            "amended_paths": 0,
+            "published": null,
+            "reason": "incremental_parent_uncertifiable:graph_schema_invalid:OperationalError:fts5: syntax error near \"AND\"",
+            "wall_seconds": 10.718
+          },
+          "journal_outcome": "boundary_skipped",
+          "txn_wall_seconds": 0.032
+        }
+      },
+      "amend_edit_sets": {
+        "one_file": [
+          "artifact_deepswe/__init__.py"
+        ],
+        "ten_files": [
+          "artifact_deepswe/gt_agent.py",
+          "artifact_deepswe/gt_integration/gt_ae_block.sh",
+          "artifact_deepswe/gt_integration/gt_vertex_token_shim.py",
+          "artifact_deepswe/gt_mini_patch.py",
+          "artifact_deepswe/gt_oracle.py",
+          "artifact_deepswe/gt_oracle_sense.py",
+          "artifact_deepswe/phase_policy.py",
+          "artifact_deepswe/tests/conftest.py",
+          "artifact_deepswe/tests/test_a2_handoff_failclosed.py",
+          "artifact_deepswe/tests/test_cluster5_oracle_verify_gaps.py"
+        ]
+      },
+      "ensure_index_diagnostics": [],
+      "ensure_index_publish_seconds": 287.812,
+      "file_bound": 600,
+      "index": {
+        "argv": [
+          "C:\\gt-smoke-a6\\gt-index-new.exe",
+          "-root",
+          "D:\\tmp\\gt-canonical-costs\\groundtruth600\\repo",
+          "-output",
+          "D:\\tmp\\gt-canonical-costs\\groundtruth600\\index.db",
+          "-workers",
+          "8",
+          "-max-files",
+          "600",
+          "-source-revision",
+          "costs-index-1"
+        ],
+        "graph_db_bytes": 2661007360,
+        "log": "D:\\tmp\\gt-canonical-costs\\groundtruth600\\index.log",
+        "peak_rss_bytes": 1601986560,
+        "returncode": 0,
+        "wall_seconds": 309.594
+      },
+      "indexed_file_count": 600,
+      "published_graph": "D:\\tmp\\gt-canonical-costs\\groundtruth600\\state\\54140c9dfd2cf892\\revisions\\b47ac0233b42230735e2393ce2b81836e714a8be42c05e2a85a99ac6629e4068\\graph.db",
+      "snapshot": {
+        "tables": {
+          "assertions": {
+            "rows": 2826,
+            "sha256": "5b6fd3a58211000fbd74eb1518c1228aeb8400cd564dbe6bd2e483bc468f6491"
+          },
+          "cfg_blocks": {
+            "rows": 20874,
+            "sha256": "a0a2666988d0296ce8b71fd881ae8285a1517ec632bb4e9283912dbcec8244ea"
+          },
+          "cfg_defs": {
+            "rows": 18707,
+            "sha256": "48917a4f4f9a39ffb36fe50c97456053c2da05f1acf796b6bd11cb09c5487b8d"
+          },
+          "cfg_edges": {
+            "rows": 27617,
+            "sha256": "8d84034c3be02df8c31855d855f4b2b1b8a9337678622f2ab545be05039518f3"
+          },
+          "cfg_uses": {
+            "rows": 77699,
+            "sha256": "b5520ffcb6608c796c6d0557f6b7a9fd555907b04a00a81a26c622bb6c3af4a7"
+          },
+          "closure": {
+            "rows": 14683,
+            "sha256": "be45311949c0d9e36cd415a141d92171590f402b7f559171d2f1786c6678b354"
+          },
+          "cochanges": {
+            "rows": 0,
+            "sha256": "cabfe1696b8713629b957ab291ffb0b5aba595ef4ac2a4560d1d271d11fc79a8"
+          },
+          "communities": {
+            "rows": 46,
+            "sha256": "66406cf7f982c1310e68edbea26d502c8e14f6dee7d7a8d3fbda7d033da51c58"
+          },
+          "community_members": {
+            "rows": 204,
+            "sha256": "15dedbd52d5f1d49f549b583f3d5a6c10c90160a39ebfbeab5812bcfd73b07a5"
+          },
+          "edges": {
+            "rows": 323890,
+            "sha256": "3c8f6eab0eaeac2d44f3d057d2e993d700099d68329eeb0f16f0e520a99fba7c"
+          },
+          "nodes": {
+            "rows": 306120,
+            "sha256": "bf929dc2b8734072513ca941469e95f6cfd397f0d5ec398facd0900c495d5457"
+          },
+          "process_steps": {
+            "rows": 2565,
+            "sha256": "122957b2b1eb81fc2421f36c63866a421f7242d122f0d28ca08c4362e528e6b4"
+          },
+          "processes": {
+            "rows": 899,
+            "sha256": "5911c9c01a93f18d6889720ddc7e47f818bf0100ffc299453dcafa6d7b4141c0"
+          },
+          "resolution_callsites": {
+            "rows": 32129,
+            "sha256": "3d951f7d8f4168cd733c8fff90c01c6b0e6187c13db09e0427b67831bc2c723b"
+          },
+          "resolution_candidates": {
+            "rows": 0,
+            "sha256": "a7d2e81eed7dc8aa2b0bfbe4aa78acfb65b769332d0eaa27899b12fa59a31578"
+          }
+        },
+        "wall_seconds": 21.766
+      },
+      "subset_workspace": {
+        "files_kept": 600,
+        "files_removed": 1911
+      },
+      "title": "gt-index producer repo @ first-600 lexical indexable files",
+      "workspace": "D:\\tmp\\gt-canonical-costs\\groundtruth600\\repo"
+    },
+    "harness": {
+      "amend": {
+        "one_file": {
+          "changed_paths": [
+            "benchmarks/__init__.py"
+          ],
+          "direct_seam": {
+            "amended_paths": 0,
+            "published": null,
+            "reason": "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:limit=4294967296need=13080510464:cgroup_max=Nonecurrent=Nonebasis=no_ceiling_evidence",
+            "wall_seconds": 270.406
+          },
+          "journal_outcome": "boundary_skipped",
+          "note": "parent 16212541440 B > SYNC_AMEND_MAX_GRAPH_BYTES; txn-boundary amend skipped by design, shared seam timed directly",
+          "txn_wall_seconds": 0.0
+        },
+        "per_file": {
+          "note": "producer build-info does not declare incremental_amend_in_place; only the batch lane exists on this binary",
+          "supported": false
+        },
+        "ten_file": {
+          "changed_paths": [
+            "benchmarks/swelive_harness/__init__.py",
+            "benchmarks/swelive_harness/adapter.py",
+            "benchmarks/swelive_harness/prewarm_graph.py",
+            "benchmarks/swelive_harness/run_pier.py",
+            "benchmarks/swelive_harness/sitecustomize.py",
+            "benchmarks/swelive_harness/test_adapter.py",
+            "conftest.py",
+            "docs/headtohead-runs/aws_claude4_5_haiku/t1/calc.py",
+            "docs/headtohead-runs/aws_claude4_5_haiku/t1/test_calc.py",
+            "docs/headtohead-runs/aws_claude4_5_haiku/t3/inventory.py"
+          ],
+          "direct_seam": {
+            "amended_paths": 0,
+            "published": null,
+            "reason": "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:limit=4294967296need=13080510464:cgroup_max=Nonecurrent=Nonebasis=no_ceiling_evidence",
+            "wall_seconds": 390.875
+          },
+          "journal_outcome": "boundary_skipped",
+          "txn_wall_seconds": 0.015
+        }
+      },
+      "amend_edit_sets": {
+        "one_file": [
+          "benchmarks/__init__.py"
+        ],
+        "ten_files": [
+          "benchmarks/swelive_harness/__init__.py",
+          "benchmarks/swelive_harness/adapter.py",
+          "benchmarks/swelive_harness/prewarm_graph.py",
+          "benchmarks/swelive_harness/run_pier.py",
+          "benchmarks/swelive_harness/sitecustomize.py",
+          "benchmarks/swelive_harness/test_adapter.py",
+          "conftest.py",
+          "docs/headtohead-runs/aws_claude4_5_haiku/t1/calc.py",
+          "docs/headtohead-runs/aws_claude4_5_haiku/t1/test_calc.py",
+          "docs/headtohead-runs/aws_claude4_5_haiku/t3/inventory.py"
+        ]
+      },
+      "ensure_index_diagnostics": [],
+      "ensure_index_publish_seconds": 4019.188,
+      "file_bound": null,
+      "index": {
+        "argv": [
+          "C:\\gt-smoke-a6\\gt-index-new.exe",
+          "-root",
+          "D:\\tmp\\gt-canonical-costs\\harness\\repo",
+          "-output",
+          "D:\\tmp\\gt-canonical-costs\\harness\\index.db",
+          "-workers",
+          "8",
+          "-source-revision",
+          "costs-index-1"
+        ],
+        "graph_db_bytes": 16212029440,
+        "log": "D:\\tmp\\gt-canonical-costs\\harness\\index.log",
+        "peak_rss_bytes": 6801371136,
+        "returncode": 0,
+        "wall_seconds": 1926.485
+      },
+      "indexed_file_count": 742,
+      "published_graph": "D:\\tmp\\gt-canonical-costs\\harness\\state\\9fce4c0bb913ff22\\revisions\\fa37537359ee6118d58d7f85f7264335a625f1156dc137bb1de88321b3359258\\graph.db",
+      "snapshot": {
+        "tables": {
+          "assertions": {
+            "rows": 12042,
+            "sha256": "48264080dc0550b407b910e1bb7e745703797ea13eec8767570039f0ce33c02e"
+          },
+          "cfg_blocks": {
+            "rows": 150,
+            "sha256": "399d248e3e64a5b836cbfb90c5635f3b281c18120cd0c65f2ac58682df20bfe2"
+          },
+          "cfg_defs": {
+            "rows": 68,
+            "sha256": "7373c688bd29d4d22c4c0a52c34d0d83b60ebee760eae7763da76cab815caaaf"
+          },
+          "cfg_edges": {
+            "rows": 132,
+            "sha256": "a992a38c0cf77248111d39d67266ed8edc83a0a67b1008c97daa2aceda69875f"
+          },
+          "cfg_uses": {
+            "rows": 249,
+            "sha256": "ccc472465b2e901d7ea8f4dc4a06a406bc7da080b4cad84ca4b4e0e62c862328"
+          },
+          "closure": {
+            "rows": 53512,
+            "sha256": "7f04198cbf6303d4fe063983db71f63fddf30934fb2f5779031602f095663222"
+          },
+          "cochanges": {
+            "rows": 0,
+            "sha256": "cabfe1696b8713629b957ab291ffb0b5aba595ef4ac2a4560d1d271d11fc79a8"
+          },
+          "communities": {
+            "rows": 114,
+            "sha256": "a905ded34646a0987b35f87384008974468a3ae8d9c9dcddbfbee8c8358f274a"
+          },
+          "community_members": {
+            "rows": 416,
+            "sha256": "dd21d0cbf57daa48d88b90e96dc80e680f184e2a75d030f41fc6a65c92604e98"
+          },
+          "edges": {
+            "rows": 808476,
+            "sha256": "c3459b2d4844c6d1ad351c93576b1f44ee792e74c173ca914d594838a4ef1dbc"
+          },
+          "nodes": {
+            "rows": 787491,
+            "sha256": "3a10e1a27d93f94434bebdb91edbf864fe35fb2e329f269d83c63ca1ba87e4c9"
+          },
+          "process_steps": {
+            "rows": 12396,
+            "sha256": "daf6713ded7ccdbc3f900246760a1f35c32b99dd675d53a6cb3d4217135b43ef"
+          },
+          "processes": {
+            "rows": 4151,
+            "sha256": "f948918c0843956eb5ac1b227eaa4cee9315c18299de6f26c7e25b3b2753bc0d"
+          },
+          "resolution_callsites": {
+            "rows": 77407,
+            "sha256": "402771cf7ec8ab4e28005e2696aaa36456ae57787cbb692679c3a3be8da6977e"
+          },
+          "resolution_candidates": {
+            "rows": 0,
+            "sha256": "a7d2e81eed7dc8aa2b0bfbe4aa78acfb65b769332d0eaa27899b12fa59a31578"
+          }
+        },
+        "wall_seconds": 182.484
+      },
+      "title": "gt-harness canonical checkout (D:/gt-canonical)",
+      "workspace": "D:\\tmp\\gt-canonical-costs\\harness\\repo"
+    }
+  },
+  "schema": "gt.canonical_costs.v1",
+  "storage_limitations": [
+    "groundtruth FULL index is storage-blocked on this host: the producer repo writes a ~58GiB WAL+DB peak at checkpoint and the run failed three times (C: exhaustion; see smoke logs C:/gt-smoke-a6/producer_new.log + run notes on HAR-90). The groundtruth600 leg measures the same deterministic lexical-first-600-file bound the smoke matrix used."
+  ],
+  "wire_overhead": {
+    "api_impact": {
+      "answer_bytes": 56,
+      "envelope_bytes": 3272,
+      "overhead_ratio": 58.429
+    },
+    "callers": {
+      "answer_bytes": 666,
+      "envelope_bytes": 5096,
+      "overhead_ratio": 7.652
+    },
+    "definition": {
+      "answer_bytes": 294,
+      "envelope_bytes": 3983,
+      "overhead_ratio": 13.548
+    },
+    "exact_literal_search": {
+      "answer_bytes": 899,
+      "envelope_bytes": 6149,
+      "overhead_ratio": 6.84
+    },
+    "patch_impact": {
+      "answer_bytes": 485,
+      "envelope_bytes": 4850,
+      "overhead_ratio": 10.0
+    },
+    "processes": {
+      "answer_bytes": 71,
+      "envelope_bytes": 3290,
+      "overhead_ratio": 46.338
+    },
+    "references": {
+      "answer_bytes": 1296,
+      "envelope_bytes": 7038,
+      "overhead_ratio": 5.431
+    },
+    "rename": {
+      "answer_bytes": 806,
+      "envelope_bytes": 5448,
+      "overhead_ratio": 6.759
+    },
+    "route_map": {
+      "answer_bytes": 1542,
+      "envelope_bytes": 7638,
+      "overhead_ratio": 4.953
+    },
+    "shape_check": {
+      "answer_bytes": 517,
+      "envelope_bytes": 4623,
+      "overhead_ratio": 8.942
+    },
+    "slice": {
+      "answer_bytes": 535,
+      "envelope_bytes": 4678,
+      "overhead_ratio": 8.744
+    },
+    "symbol_context": {
+      "answer_bytes": 598,
+      "envelope_bytes": 4875,
+      "overhead_ratio": 8.152
+    },
+    "syntax": {
+      "answer_bytes": 234,
+      "envelope_bytes": 3873,
+      "overhead_ratio": 16.551
+    },
+    "taint": {
+      "answer_bytes": 847,
+      "envelope_bytes": 5659,
+      "overhead_ratio": 6.681
+    },
+    "tool_map": {
+      "answer_bytes": 30,
+      "envelope_bytes": 3176,
+      "overhead_ratio": 105.867
+    },
+    "verification_status": {
+      "answer_bytes": 41,
+      "envelope_bytes": 3288,
+      "overhead_ratio": 80.195
+    }
+  }
+}
