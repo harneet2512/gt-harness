@@ -1,19 +1,19 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T07:32:38Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T08:41:38Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `613481a8ae31a881c1d752ab5b2a6b7ee88f4d50` |
+| harness | `canonical/gt-har90` @ `1aa09b140e89beb2f53e055697d2821c3e35d67f` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
 | producer build-info | commit `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` toolchain `go1.22.5` tags `netgo,osusergo,sqlite_fts5` schema `v15.4-callsite-actuals` |
 | producer capabilities | `atomic_graph_publication`, `batch_parser_node_reuse_v1`, `call_resolution_v2`, `data_access_edges_v1`, `framework_surface_resolution_v1`, `incremental_stale_suppression`, `parse_failure_accounting`, `parser_inspection_v1`, `retained_call_candidates`, `source_revision_meta_v1`, `versioned_query_policy` |
 
-Wheel↔source correspondence: `scripts/verify_wheel_source.py` PASS — 328 files byte-identical to the producer tree at the recorded commit. The vendored binary is a native WSL2/musl build of the same commit (uncertified path — no pinned docker builder available; `builder-identity.json` records the real toolchain).
+Wheel↔source correspondence: `scripts/verify_wheel_source.py` PASS — 328 files byte-identical to the producer tree at the recorded commit. The vendored binary is a certified Route-B build of the same commit: `build_producer_linux.yml` run `35969660322` inside digest-pinned `golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f` (`builder-identity.json` records the lane).
 
 Reviewer prerequisites for reproducing V-A6/V-C1/V-F from this section on a fresh worktree:
 

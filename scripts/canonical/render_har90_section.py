@@ -37,6 +37,9 @@ LEDGER = REPO_ROOT / "docs" / "canonical" / "RUNTIME_LEDGER.md"
 WHEEL_SRC = REPO_ROOT / "vendor" / "GROUNDTRUTH_WHEEL_SOURCE.txt"
 WHEEL = REPO_ROOT / "vendor" / "groundtruth_mcp-1.0.0-py3-none-any.whl"
 BUILD_INFO = REPO_ROOT / "vendor" / "gt-index-linux-amd64.build-info.json"
+BUILDER_IDENTITY = (
+    REPO_ROOT / "vendor" / "gt-index-linux-amd64.builder-identity.json"
+)
 BINARY = REPO_ROOT / "vendor" / "gt-index-linux-amd64"
 
 
@@ -211,11 +214,18 @@ def render() -> str:
       f"`{build_info.get('graph_schema_version')}` |")
     a(f"| producer capabilities | `{'`, `'.join(build_info.get('capabilities') or ())}` |")
     a("")
+    builder = (
+        json.loads(BUILDER_IDENTITY.read_text(encoding="utf-8"))
+        if BUILDER_IDENTITY.is_file()
+        else {}
+    )
     a("Wheel↔source correspondence: `scripts/verify_wheel_source.py` PASS — "
       "328 files byte-identical to the producer tree at the recorded "
-      "commit. The vendored binary is a native WSL2/musl build of the "
-      "same commit (uncertified path — no pinned docker builder "
-      "available; `builder-identity.json` records the real toolchain).")
+      "commit. The vendored binary is a certified Route-B build of the "
+      "same commit: `build_producer_linux.yml` run "
+      f"`{builder.get('run_id', 'unknown')}` inside digest-pinned "
+      f"`{builder.get('builder_image', 'unknown')}` "
+      "(`builder-identity.json` records the lane).")
     a("")
     a("Reviewer prerequisites for reproducing V-A6/V-C1/V-F from this "
       "section on a fresh worktree:")
