@@ -1163,17 +1163,16 @@
    "status": "VERIFIED_DESCENDANT_LINEAGE_EXCEPTION"
   },
   "producer_build": {
-   "binary_sha256": "b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35",
-   "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-   "build_info_sha256": "cc0e78db552b497404ae73e67762e57078d801da5c173b28d55262a2568e1d67",
-   "build_method": "native_wsl2_ubuntu_musl_go1.22.2",
-   "build_tags": "netgo,osusergo,sqlite_fts5",
-   "builder_image_digest": null,
    "schema": "gt.producer_build_binding.v1",
+   "status": "VERIFIED",
    "source_commit": "1e83ea687bf2df5d9a168b2bc2c77ea3fd990307",
    "source_tree": "eb3b81c5980831cc84becd8729fe134e334febb6",
-   "static_linking": true,
-   "status": "LOCAL_GATES_VERIFIED_NATIVE_UNCERTIFIED"
+   "binary_sha256": "d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e",
+   "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
+   "build_info_sha256": "d2acf2b005b5adcf5a84b7f73dc2ffd8d9da263ee60391bb73cbef35a493b4c6",
+   "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+   "build_tags": "netgo,osusergo,sqlite_fts5",
+   "static_linking": true
   },
   "producer_capabilities": [
    "atomic_graph_publication",
@@ -1189,8 +1188,8 @@
    "versioned_query_policy"
   ],
   "producer_path": "vendor/gt-index-linux-amd64",
-  "producer_sha256": "b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35",
-  "provenance_status": "LINEAGE_VERIFIED_NATIVE_BUILD_UNCERTIFIED",
+  "producer_sha256": "d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e",
+  "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
   "repository": "https://github.com/harneet2512/groundtruth.git",
   "source_commit": "1e83ea687bf2df5d9a168b2bc2c77ea3fd990307",
   "source_tree": "eb3b81c5980831cc84becd8729fe134e334febb6",
@@ -1228,7 +1227,6 @@
   "gt_engine/cochange_evidence.py",
   "gt_engine/content_address.py",
   "gt_engine/context.py",
-  "gt_engine/context_packet.py",
   "gt_engine/contract.py",
   "gt_engine/contract_embeddings.py",
   "gt_engine/contract_text.py",
@@ -1285,7 +1283,9 @@
   "gt_engine/task_contract.py",
   "gt_engine/test_names.py",
   "gt_engine/tool_outcomes.py",
+  "gt_engine/treatment_flags.py",
   "gt_engine/trust_calibration_report.py",
+  "gt_engine/typed_output_bounds.py",
   "gt_engine/utility.py",
   "gt_engine/verification_contract.py",
   "gt_engine/verify.py",

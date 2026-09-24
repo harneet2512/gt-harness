@@ -1,11 +1,13 @@
 {
-  "build_method": "native_wsl_musl",
-  "builder_image_digest": "a310afce6bda9a2eec2b642d835427bbba05003140a4793ea8fa0829fb41ef13",
-  "certification": "uncertified_local_build",
-  "docker_pinned_image": false,
-  "go": "go version go1.22.2 linux/amd64",
-  "musl_gcc": "13",
-  "runner": "local-wsl2-ubuntu",
-  "runner_image_version": null,
-  "schema": "gt.producer_builder.v1"
+ "build_method": "github_actions_docker_pinned_image",
+ "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+ "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+ "certification": "certified_route_b_source_bound",
+ "docker_pinned_image": true,
+ "go": "go1.22.5",
+ "run_id": "35969660322",
+ "run_url": "https://github.com/harneet2512/groundtruth/actions/runs/35969660322",
+ "source_commit": "1e83ea687bf2df5d9a168b2bc2c77ea3fd990307",
+ "trigger_branch": "final_hardening/har90-producer-certify",
+ "workflow": ".github/workflows/build_producer_linux.yml"
 }
