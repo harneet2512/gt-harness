@@ -619,7 +619,27 @@ def main() -> int:
     parser.add_argument("--gt-off", action="store_true")
     parser.add_argument("--synthetic-transport", action="store_true")
     parser.add_argument("--gt-mode", default="advisory")
+    # C6: the DeepSWE workflow's deadline/mode knobs reach this parser via the
+    # verbatim argv forward to miniswe_gt_run; the supervisor itself consumes
+    # exactly these two (deadline and treatment label).
+    parser.add_argument("--integration-mode", default="")
+    parser.add_argument("--execution-budget-sec", type=int, default=0)
     args, _ = parser.parse_known_args()
+    from gt_engine.treatment_flags import (
+        TreatmentFlagRefusal,
+        resolve_deadline_seconds,
+    )
+
+    try:
+        deadline_seconds = resolve_deadline_seconds(args)
+    except TreatmentFlagRefusal as exc:
+        print(f"treatment flag refused: {exc}", file=sys.stderr)
+        return 2
+    # integration_mode=off is the same bare-treatment request as --gt-off;
+    # normalize args so helpers and the verbatim argv forward agree.
+    if args.integration_mode == "off" and not args.gt_off:
+        args.gt_off = True
+        args.gt_mode = "off"
     baseline = ""
     checkpoint_command = None
     checkpoint_status_path = None
@@ -628,7 +648,7 @@ def main() -> int:
             baseline = _git(Path(args.cwd), ["rev-parse", "HEAD"]).decode().strip()
         except (OSError, subprocess.SubprocessError):
             pass  # worker emits setup failure; supervisor still conserves its exit
-    if baseline and time.monotonic() < started + max(0, args.time_budget_seconds):
+    if baseline and time.monotonic() < started + max(0, deadline_seconds):
         from gt_engine.engine_state import RuntimeLayout
 
         layout = RuntimeLayout.from_run_args(args)
@@ -643,7 +663,7 @@ def main() -> int:
             "directory": str(directory),
             "run_nonce": run_nonce, "workspace_sha256": workspace_sha256,
             "excluded_roots": [str(path) for path in layout.excluded_roots],
-            "deadline": started + max(0, args.time_budget_seconds),
+            "deadline": started + max(0, deadline_seconds),
             "synthetic_transport": args.synthetic_transport,
         })
         checkpoint_command = [sys.executable, "-I", "-m", "scripts.miniswe_checkpoint",
@@ -682,7 +702,7 @@ def main() -> int:
 
     try:
         result = supervise([sys.executable, "-m", "scripts.miniswe_gt_run", *sys.argv[1:]],
-                           deadline=started + max(0, args.time_budget_seconds),
+                           deadline=started + max(0, deadline_seconds),
                            checkpoint_command=checkpoint_command,
                            checkpoint_status_path=checkpoint_status_path,
                            abort_probe=_churn_abort_probe)

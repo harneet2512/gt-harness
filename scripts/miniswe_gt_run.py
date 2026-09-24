@@ -1745,6 +1745,32 @@ def main() -> int:
         help="set one capability mode: off/shadow/advisory/assistive/enforced",
     )
     parser.add_argument("--synthetic-transport", action="store_true")
+    # C6: treatment knobs declared on MiniSweAgent.CLI_FLAGS are forwarded
+    # here through the supervisor's verbatim argv. Every name is consumed by
+    # gt_engine.treatment_flags; nothing may drop silently.
+    for name in (
+        "integration-mode", "policy-mode", "preflight-mode", "treatment-profile",
+        "treatment-runtime-contract-path", "preemptive-retrieval-model-dir",
+        "require-graph-ready",
+        "enable-all-features", "enable-submit-readiness",
+        "enable-repository-intelligence", "enable-lint",
+        "enable-feature-guidance", "enable-context-frontier",
+        "enable-preemptive-retrieval", "enable-persistent-execution-state",
+        "enable-context-compaction", "enable-completion-controller",
+        "enable-progress-control", "enable-adaptive-validation-timeout",
+        "enable-shadow-submit-gate", "enable-decision-sufficiency",
+        "enable-task-start-advisory", "enable-replay-capture",
+    ):
+        parser.add_argument("--" + name, default="")
+    for name in (
+        "execution-budget-sec", "gt-request-token-budget",
+        "repository-initial-index-timeout-sec", "repository-refresh-timeout-sec",
+        "persistent-state-bootstrap-timeout-sec",
+        "persistent-state-bootstrap-input-tokens",
+        "persistent-state-bootstrap-output-tokens",
+        "persistent-state-context-tokens",
+    ):
+        parser.add_argument("--" + name, type=int, default=0)
     args = parser.parse_args()
     patch_baseline = ""
     capability_modes: dict[str, str] = {}
@@ -1754,6 +1780,12 @@ def main() -> int:
             parser.error("--gt-capability-mode requires NAME=MODE with a valid MODE")
         capability_modes[name] = mode
     try:
+        from gt_engine.treatment_flags import resolve_treatment_flags
+
+        # C6: consume every forwarded treatment knob before any setup. A knob
+        # asserting a mechanism this build lacks refuses by name through the
+        # audited setup-error path; nothing drops silently.
+        treatment_resolution = resolve_treatment_flags(args)
         # Baseline capture is setup work, and it is unconditional: the terminal
         # submission_patch_observed journal row and the report's
         # submission_patch_state need it even when --patch-output was not
@@ -2011,6 +2043,7 @@ def main() -> int:
         manifest["research_valid"]
         and TERMINAL_EXIT_CODES.get(terminal, 5) == 0
     )
+    manifest["treatment_kwargs"] = treatment_resolution
     task_id = resolve_run_task_identity(args.task_id, args.task)
     manifest_path = Path(args.manifest) if args.manifest else (
         Path(args.state_dir) / task_id / "reproducibility_manifest.json"

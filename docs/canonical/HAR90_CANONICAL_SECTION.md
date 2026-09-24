@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T02:40:49Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T03:09:20Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `1c10e6f9112840ecfe5b5051071a7112f673cff0` |
+| harness | `canonical/gt-har90` @ `4ad85592e4b246cf1788f7ac594898b1f7ae56ac` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35` |
@@ -152,7 +152,8 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - **Per-file amend lane unsupported by the certified producer.** `gt-index` @1e83ea68 declares `batch_parser_node_reuse_v1` (batch amend, measured below) but not `incremental_amend_in_place`; the per-file lane never runs and every amend takes the batch path.
 - **Persisted CFG coverage is per-language.** `analysis.cfg`/`reaching_definitions`/`control_dependence` return `ok` where the producer persists CFG rows (verified on Go/TS/Java/JS fixture functions) and abstain with `no_persisted_cfg` where it does not (Python fixture functions have no persisted CFG in this build) — coverage truth, never a fabricated graph.
 - **Sync amend defers past 512 MiB parents by design.** Parents larger than `SYNC_AMEND_MAX_GRAPH_BYTES` skip the transaction-boundary amend and publish on the serving boundary (or refuse with a journaled reason under memory pressure). Measured timings below reflect that lane.
-- **C6 unresolved at render time.** The dropped `--ak` Harbor knobs await the owner's A-vs-B decision posted to HAR-90; no dispatch has happened.
+- **C6 resolved: option A — declare and consume.** All 32 `--ak` knobs are declared as `CliFlag`s (`eval/miniswe_agent.py`) and consumed by `gt_engine/treatment_flags.py` through the supervisor and runner: `integration_mode=off` now delivers the real GT-off path, `execution_budget_sec` drives the deadline, and knobs asserting mechanisms canonical lacks refuse by name (`treatment_knob_unsupported:<name>`) instead of dropping silently. The `certified_full`/`persistent_state_only` workflow profiles therefore refuse on this build — the treatment machinery they describe lives on another lineage.
+- **Comparison workflow's treatment profiles are not runnable on canonical.** `certified_full`/`persistent_state_only` assert PES/preemptive/shadow-gate mechanisms absent from this branch; they now fail closed with named refusals. The `baseline` arm runs correctly (real GT-off).
 - `freshness.index_revision`: pure EngineState/adapter attribute read; the revision value rides inside typed-action honesty envelopes but no revision report is ever delivered to the model
 - `freshness.graph_state`: the same snapshot the adapter's graph_query_snapshot serves the typed path's graph binding; the state report itself is never rendered to the model
 - `freshness.amend_state`: the amend mechanism is live on every recorded edit transaction and its outcome is journaled, never delivered

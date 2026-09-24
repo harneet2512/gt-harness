@@ -155,9 +155,21 @@ def _limitations(entries, costs) -> list[str]:
         "transaction-boundary amend and publish on the serving boundary "
         "(or refuse with a journaled reason under memory pressure). "
         "Measured timings below reflect that lane.",
-        "**C6 unresolved at render time.** The dropped `--ak` Harbor "
-        "knobs await the owner's A-vs-B decision posted to HAR-90; no "
-        "dispatch has happened.",
+        "**C6 resolved: option A — declare and consume.** All 32 `--ak` "
+        "knobs are declared as `CliFlag`s (`eval/miniswe_agent.py`) and "
+        "consumed by `gt_engine/treatment_flags.py` through the supervisor "
+        "and runner: `integration_mode=off` now delivers the real GT-off "
+        "path, `execution_budget_sec` drives the deadline, and knobs "
+        "asserting mechanisms canonical lacks refuse by name "
+        "(`treatment_knob_unsupported:<name>`) instead of dropping "
+        "silently. The `certified_full`/`persistent_state_only` workflow "
+        "profiles therefore refuse on this build — the treatment "
+        "machinery they describe lives on another lineage.",
+        "**Comparison workflow's treatment profiles are not runnable on "
+        "canonical.** `certified_full`/`persistent_state_only` assert "
+        "PES/preemptive/shadow-gate mechanisms absent from this branch; "
+        "they now fail closed with named refusals. The `baseline` arm "
+        "runs correctly (real GT-off).",
     ]
     for entry in entries:
         for limitation in entry.limitations:
