@@ -114,6 +114,13 @@ export class Friendly implements Greeter {
     return "hi " + name;
   }
 }
+
+export class Polite implements Greeter {
+  greet(name: string): string {
+    return "hi " + name;
+  }
+  wave(): void {}
+}
 ''',
     "svc/main.go": '''package svc
 
@@ -248,12 +255,20 @@ def polyglot(gt_index, tmp_path_factory) -> tuple[Path, Path, dict]:
     return root, graph, info
 
 
-def _run(root: Path, graph: Path, kind: str, arguments: dict) -> tuple[dict, dict]:
+def _run(
+    root: Path,
+    graph: Path,
+    kind: str,
+    arguments: dict,
+    *,
+    graph_source_revision: str = FIXTURE_REVISION,
+) -> tuple[dict, dict]:
     _, result = execute_typed_action_fail_open(
         {"tool_name": "groundtruth", "tool_call_id": f"real-{kind}",
          "gt_action": {"kind": kind, "arguments": arguments}},
         repo_root=root,
-        configuration={"graph_db": str(graph), "graph_source_revision": FIXTURE_REVISION},
+        configuration={"graph_db": str(graph),
+                       "graph_source_revision": graph_source_revision},
     )
     assert len(result["output"].encode("utf-8")) <= QUERY_RESULT_MAX_BYTES
     payload = json.loads(result["output"])
@@ -278,12 +293,24 @@ def test_producer_graph_revision_is_verified_or_honestly_flagged(polyglot):
         meta = dict(conn.execute("SELECT key, value FROM project_meta").fetchall())
     if SOURCE_REVISION_CAPABILITY in (info.get("capabilities") or ()):
         assert meta.get("source_revision") == FIXTURE_REVISION
+        assert not revision_omissions, omissions
     else:
         # A producer without the flag records no workspace revision; its
         # git_commit is the producer's own build commit, never the fixture's.
         assert "source_revision" not in meta
         assert meta.get("git_commit") != FIXTURE_REVISION
         assert revision_omissions, omissions
+
+
+def test_producer_graph_revision_mismatch_is_flagged(polyglot):
+    root, graph, info = polyglot
+    if SOURCE_REVISION_CAPABILITY not in (info.get("capabilities") or ()):
+        pytest.skip("producer lacks source_revision_meta_v1; mismatch cannot be verified")
+    payload, _ = _run(
+        root, graph, "definition", {"symbol": "clean"},
+        graph_source_revision="different-workspace-revision",
+    )
+    assert "graph_revision_mismatch" in payload["evidence"]["omissions"]
 
 
 def test_route_map_reads_producer_route_edges(polyglot):
@@ -338,6 +365,32 @@ def test_shape_check_reports_the_missing_interface_method(polyglot):
     assert any("wave" in check.get("missing_methods", []) for check in answer["checks"])
 
 
+def test_shape_check_passes_a_conforming_class_with_an_empty_method(polyglot):
+    """`Polite` implements both members; `wave(): void {}` has an empty body.
+
+    Pins the class-side detection leg: an empty-bodied method_definition must
+    count as implemented, so a conforming class earns `status: pass` — and a
+    fully-passing check takes the exact-verdict path (returncode 0) rather
+    than the partial AUGMENT path the other shape_check legs exercise."""
+    root, graph, _ = polyglot
+    _, result = execute_typed_action_fail_open(
+        {"tool_name": "groundtruth", "tool_call_id": "real-shape-pass",
+         "gt_action": {"kind": "shape_check", "arguments": {"symbol": "Polite"}}},
+        repo_root=root,
+        configuration={"graph_db": str(graph),
+                       "graph_source_revision": FIXTURE_REVISION},
+    )
+    payload = json.loads(result["output"])
+    assert result["returncode"] == 0, payload
+    answer = payload["direct_answer"]
+    assert answer["checks"], answer
+    for check in answer["checks"]:
+        assert check["interface"] == "Greeter"
+        assert check["missing_methods"] == [], check
+        assert check["status"] == "pass"
+        assert check["implemented_count"] == check["required_count"] == 2
+
+
 def test_tool_map_executes_and_names_what_it_cannot_see(polyglot):
     root, graph, _ = polyglot
     payload, answer = _run(root, graph, "tool_map", {})
@@ -345,16 +398,16 @@ def test_tool_map_executes_and_names_what_it_cannot_see(polyglot):
     assert isinstance(answer["tools"], list)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="producer gap: gt-index emits DECORATES only for class decorators that resolve "
-           "to an in-repository callable, so a function registered with @mcp.tool() is "
-           "never detected",
-)
 def test_tool_map_detects_a_function_registered_as_an_mcp_tool(polyglot):
+    """An external decorator still gets a DECORATES edge via the `Decorator`
+    occurrence node (mechanism `syntactic_decorator_applied`), so `@mcp.tool()`
+    on `lookup` is visible to tool_map. Rows key the symbol under `tool`."""
     root, graph, _ = polyglot
     _, answer = _run(root, graph, "tool_map", {})
-    assert "lookup" in {tool.get("name") for tool in answer["tools"]}
+    rows = {tool.get("tool"): tool for tool in answer["tools"]}
+    assert "lookup" in rows
+    assert rows["lookup"]["decorator"] == "tool"
+    assert rows["lookup"]["file_path"] == "app/tools.py"
 
 
 def test_slice_backward_over_the_python_source_substrate(polyglot):

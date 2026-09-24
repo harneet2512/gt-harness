@@ -74,7 +74,7 @@ These were measured on the polyglot fixture in `tests/test_typed_graph_real_prod
 ## Known defects left in place (pinned as strict xfails or documented)
 
 - **route_map (wheel):** an API_CALL-only route yields anchor line 0, and the whole answer becomes `producer_not_supported`.
-- **shape_check (producer/wheel):** TS interface members are not counted (`required_count` 0), so a class missing a method passes vacuously.
-- **tool_map (producer):** DECORATES is emitted only for class decorators that resolve to an in-repository callable, so `@mcp.tool()` functions are never detected.
+- **shape_check (producer/wheel):** conformance counts callable members only — interface `property_signature` members are unchecked, and each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row (one logical check can appear twice).
+- **tool_map (wheel):** undecorated registration sites (`server.add_tool(f)` calls) are not provable from the graph — reported as `registration_sites_untracked`, never guessed.
 - **callers/references (wheel):** these silently keep 20 rows per band while still labelling the answer exact.
 - **exact_literal_search (wheel):** scope `.` scans `.git/`.

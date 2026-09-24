@@ -503,13 +503,14 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         tests=(
             "tests/test_typed_graph_real_producer.py::test_shape_check_runs_the_interface_conformance_check",
             "tests/test_typed_graph_real_producer.py::test_shape_check_reports_the_missing_interface_method",
+            "tests/test_typed_graph_real_producer.py::test_shape_check_passes_a_conforming_class_with_an_empty_method",
         ),
         limitations=(
             _TYPED_FACADE_LIMIT,
-            "partial semantics: the TS conformance check enumerates "
-            "interface members but under-detects empty-bodied class "
-            "methods — Friendly implements wave() yet it reports missing, "
-            "so a conforming class can fail spuriously (documented defect)",
+            "partial semantics: conformance counts callable members only — "
+            "interface property signatures are unchecked; each IMPLEMENTS/"
+            "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
+            "logical check can appear twice",
         ),
     ),
     _e(
@@ -759,12 +760,13 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
         tests=(
             "tests/test_typed_graph_real_producer.py::test_shape_check_runs_the_interface_conformance_check",
             "tests/test_typed_graph_real_producer.py::test_shape_check_reports_the_missing_interface_method",
+            "tests/test_typed_graph_real_producer.py::test_shape_check_passes_a_conforming_class_with_an_empty_method",
         ),
         limitations=(
-            "partial semantics: the TS conformance check enumerates "
-            "interface members but under-detects empty-bodied class "
-            "methods — Friendly implements wave() yet it reports missing, "
-            "so a conforming class can fail spuriously (documented defect)",
+            "partial semantics: conformance counts callable members only — "
+            "interface property signatures are unchecked; each IMPLEMENTS/"
+            "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
+            "logical check can appear twice",
         ),
     ),
     _kind(
@@ -775,9 +777,10 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_typed_graph_real_producer.py::test_tool_map_detects_a_function_registered_as_an_mcp_tool",
         ),
         limitations=(
-            "partial semantics: DECORATES is emitted only for class "
-            "decorators resolving to in-repository callables, so "
-            "@mcp.tool() functions are never detected (documented defect)",
+            "partial semantics: external decorators bind through "
+            "occurrence nodes (name-only, uncertified); registration "
+            "sites without decorators (server.add_tool(f) calls) are "
+            "untracked by design",
         ),
     ),
     _kind(
