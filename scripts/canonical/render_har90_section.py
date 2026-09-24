@@ -220,6 +220,15 @@ def render() -> str:
     a("Reviewer prerequisites for reproducing V-A6/V-C1/V-F from this "
       "section on a fresh worktree:")
     a("")
+    a("- Exact verify install (provider-free, what the green claims were "
+      "made under): `python3 -m venv vfy && vfy/bin/pip install -e "
+      "\".[miniswe]\" pytest vendor/groundtruth_mcp-1.0.0-py3-none-any.whl`. "
+      "No `fastapi`/`flask`/`harbor` needed — the fixture's own pytest run "
+      "resolves import-time surfaces through "
+      "`tests/canonical/fixtures/polyglot/conftest.py` shims, and the "
+      "yaml↔CLI_FLAGS coverage test reads the flag literals by AST. The "
+      "`eval` extra (`harbor==0.20.0`) is only needed to *import* "
+      "`eval.miniswe_agent` itself.")
     a("- `GROUNDTRUTH_ROOT=/d/gt-canonical-producer` (or the equivalent "
       "producer worktree path) must be exported before "
       "`python scripts/generate_gt_finalstand.py --check`; its default "

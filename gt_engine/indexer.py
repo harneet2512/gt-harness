@@ -2935,9 +2935,13 @@ def _graph_fts5_health_reason(con: sqlite3.Connection, tables: set[str]) -> str 
                 terms.append(token)
     matched = False
     for term in terms[:32]:
+        # Quote every probe token: a node legitimately named AND/OR/NOT is a
+        # boolean operator to FTS5 when unquoted (groundtruth's own source
+        # has such a node — raw probing turned certification into
+        # 'fts5: syntax error near "AND"').
         rows = con.execute(
             "SELECT bm25(nodes_fts) FROM nodes_fts WHERE nodes_fts MATCH ?",
-            (term,),
+            ('"' + term.replace('"', '""') + '"',),
         ).fetchall()
         if not rows:
             continue

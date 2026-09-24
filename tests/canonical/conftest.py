@@ -201,7 +201,22 @@ def index_fixture(
     The fixture is copied — never indexed in place — so the workspace root
     is a scratch dir (keeping the checkout clean and making the produced
     ``repo_id``/absolute-path fields per-run values the scrubber owns).
+
+    The source tree must be pristine: untracked interpreter artifacts
+    (``__pycache__``/``.pyc``/``.pytest_cache``) would silently enter the
+    index and drift the goldens, so their presence fails loudly here.
     """
+    stray = [
+        str(p)
+        for p in src_root.rglob("*")
+        if "__pycache__" in p.parts
+        or p.suffix == ".pyc"
+        or ".pytest_cache" in p.parts
+    ]
+    assert not stray, (
+        "canonical fixture polluted by untracked artifacts; remove them "
+        f"before indexing: {stray[:5]}"
+    )
     shutil.copytree(src_root, dst_root)
     argv = [binary, "-root", str(dst_root), "-output", str(graph)]
     if SOURCE_REVISION_CAPABILITY in (info.get("capabilities") or ()):

@@ -506,8 +506,10 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         ),
         limitations=(
             _TYPED_FACADE_LIMIT,
-            "partial semantics: TS interface members are not counted, so a "
-            "class missing a method can pass vacuously (documented defect)",
+            "partial semantics: the TS conformance check enumerates "
+            "interface members but under-detects empty-bodied class "
+            "methods — Friendly implements wave() yet it reports missing, "
+            "so a conforming class can fail spuriously (documented defect)",
         ),
     ),
     _e(
@@ -759,9 +761,10 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_typed_graph_real_producer.py::test_shape_check_reports_the_missing_interface_method",
         ),
         limitations=(
-            "partial semantics: TS interface members are not counted "
-            "(required_count 0), so a class missing a method can pass "
-            "vacuously (documented defect)",
+            "partial semantics: the TS conformance check enumerates "
+            "interface members but under-detects empty-bodied class "
+            "methods — Friendly implements wave() yet it reports missing, "
+            "so a conforming class can fail spuriously (documented defect)",
         ),
     ),
     _kind(

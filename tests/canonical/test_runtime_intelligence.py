@@ -412,7 +412,11 @@ def test_execution_evidence_roundtrip_and_fingerprint(runtime_workspace):
     assert evidence.returncode == 0, "fixture pytest did not pass"
     assert evidence.observed_test_outcome == "pass"
     assert evidence.kind == "test"
+    # Revision match AND mismatch: the evidence binds the post-edit
+    # revision, never the pre-edit one.
+    assert txn.post_revision != txn.pre_revision
     assert evidence.repository_revision == txn.post_revision
+    assert evidence.repository_revision != txn.pre_revision
 
     row = ws.journal_event("execution_evidence")
     assert row is not None
@@ -427,6 +431,11 @@ def test_execution_evidence_roundtrip_and_fingerprint(runtime_workspace):
     assert last.answer["outcome"] == "pass"
     assert last.answer["observed_test_outcome"] == "pass"
     assert last.answer["repository_revision"] == txn.post_revision
+    assert last.answer["repository_revision"] != txn.pre_revision
+    # Envelope revisions come from EngineState — the recorded edit moved
+    # the source revision to the post-edit value.
+    assert last.source_revision == txn.post_revision
+    assert last.source_revision != txn.pre_revision
 
     state = runtime.verification_state(ws.session)
     assert state.status == "ok", state.omissions

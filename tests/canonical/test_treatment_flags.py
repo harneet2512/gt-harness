@@ -292,15 +292,32 @@ def test_certified_full_profile_refuses_honestly():
 
 
 def test_cli_flags_cover_workflow_knobs():
-    """Every --ak name in the workflow yaml has a declared CliFlag."""
-    import re
-    from eval.miniswe_agent import MiniSweAgent
+    """Every --ak name in the workflow yaml has a declared CliFlag.
 
-    yaml = open(
-        ".github/workflows/deepswe_miniswe_central.yml", encoding="utf-8"
-    ).read()
+    Reads the ``CliFlag(...)``/``EnvVar(...)`` ``kwarg=`` literals out of
+    ``eval/miniswe_agent.py`` by AST so the coverage check runs in a clean
+    verify venv — importing the module requires ``harbor`` (the ``eval``
+    extra), which the documented verify install does not include."""
+    import ast
+    import re
+    from pathlib import Path
+
+    yaml = Path(
+        ".github/workflows/deepswe_miniswe_central.yml"
+    ).read_text(encoding="utf-8")
     knob_names = set(re.findall(r"--ak ([a-z_]+)=", yaml))
-    declared = {f.kwarg for f in MiniSweAgent.CLI_FLAGS}
-    declared |= {e.kwarg for e in getattr(MiniSweAgent, "ENV_VARS", [])}
+    tree = ast.parse(
+        Path("eval/miniswe_agent.py").read_text(encoding="utf-8")
+    )
+    declared = {
+        kw.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"CliFlag", "EnvVar"}
+        for kw in node.keywords
+        if kw.arg == "kwarg" and isinstance(kw.value, ast.Constant)
+    }
+    assert declared, "no CliFlag/EnvVar kwarg literals parsed"
     missing = knob_names - declared
     assert not missing, f"undelcared --ak knobs: {sorted(missing)}"

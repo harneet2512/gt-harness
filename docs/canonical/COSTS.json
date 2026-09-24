@@ -373,7 +373,7 @@
       "status": "partial"
     }
   },
-  "generated_at": "2026-09-24T02:34:46Z",
+  "generated_at": "2026-09-24T05:28:07Z",
   "host": {
     "cpu_count": 12,
     "machine": "AMD64",
@@ -704,12 +704,12 @@
           "direct_seam": {
             "amended_paths": 0,
             "published": null,
-            "reason": "incremental_parent_uncertifiable:graph_schema_invalid:OperationalError:fts5: syntax error near \"AND\"",
-            "wall_seconds": 10.672
+            "reason": "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:limit=4294967296need=5193728000:cgroup_max=Nonecurrent=Nonebasis=no_ceiling_evidence",
+            "wall_seconds": 11.797
           },
           "journal_outcome": "boundary_skipped",
           "note": "parent 2661101568 B > SYNC_AMEND_MAX_GRAPH_BYTES; txn-boundary amend skipped by design, shared seam timed directly",
-          "txn_wall_seconds": 0.016
+          "txn_wall_seconds": 0.015
         },
         "per_file": {
           "note": "producer build-info does not declare incremental_amend_in_place; only the batch lane exists on this binary",
@@ -731,11 +731,11 @@
           "direct_seam": {
             "amended_paths": 0,
             "published": null,
-            "reason": "incremental_parent_uncertifiable:graph_schema_invalid:OperationalError:fts5: syntax error near \"AND\"",
-            "wall_seconds": 10.718
+            "reason": "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT:batch_amend_floor:limit=4294967296need=5193728000:cgroup_max=Nonecurrent=Nonebasis=no_ceiling_evidence",
+            "wall_seconds": 10.594
           },
           "journal_outcome": "boundary_skipped",
-          "txn_wall_seconds": 0.032
+          "txn_wall_seconds": 0.063
         }
       },
       "amend_edit_sets": {
@@ -756,7 +756,7 @@
         ]
       },
       "ensure_index_diagnostics": [],
-      "ensure_index_publish_seconds": 287.812,
+      "ensure_index_publish_seconds": 13.406,
       "file_bound": 600,
       "index": {
         "argv": [
@@ -772,11 +772,11 @@
           "-source-revision",
           "costs-index-1"
         ],
-        "graph_db_bytes": 2661007360,
+        "graph_db_bytes": 2661011456,
         "log": "D:\\tmp\\gt-canonical-costs\\groundtruth600\\index.log",
-        "peak_rss_bytes": 1601986560,
+        "peak_rss_bytes": 1597681664,
         "returncode": 0,
-        "wall_seconds": 309.594
+        "wall_seconds": 282.562
       },
       "indexed_file_count": 600,
       "published_graph": "D:\\tmp\\gt-canonical-costs\\groundtruth600\\state\\54140c9dfd2cf892\\revisions\\b47ac0233b42230735e2393ce2b81836e714a8be42c05e2a85a99ac6629e4068\\graph.db",
@@ -843,7 +843,7 @@
             "sha256": "a7d2e81eed7dc8aa2b0bfbe4aa78acfb65b769332d0eaa27899b12fa59a31578"
           }
         },
-        "wall_seconds": 21.766
+        "wall_seconds": 21.625
       },
       "subset_workspace": {
         "files_kept": 600,

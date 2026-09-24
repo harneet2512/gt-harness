@@ -84,6 +84,30 @@ def test_preflight_refuses_a_malformed_index(tmp_path) -> None:
     assert reason  # DatabaseError: database disk image is malformed — typed refusal
 
 
+def test_preflight_tolerates_nodes_named_like_fts5_operators(tmp_path) -> None:
+    """A node literally named AND/OR/NOT must not break the probe.
+
+    Probe tokens used to reach MATCH unquoted, so groundtruth's own source
+    (which has such a node) failed certification with
+    'fts5: syntax error near "AND"' — the recorded groundtruth600 cost-leg
+    refusal. Quoted probes treat them as ordinary terms."""
+    graph = tmp_path / "graph.db"
+    with sqlite3.connect(graph) as con:
+        con.execute("CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT)")
+        con.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name TEXT)")
+        con.executemany(
+            "INSERT INTO nodes(id, name) VALUES (?, ?)",
+            [(1, "AND"), (2, "OR"), (3, "NOT"), (4, "beta"), (5, "gamma")],
+        )
+        con.execute(
+            "CREATE VIRTUAL TABLE nodes_fts USING fts5("
+            "name, content='nodes', content_rowid='id')"
+        )
+        con.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+    ok, reason = indexer._graph_schema_receipt(graph)
+    assert (ok, reason) == (True, "ok")
+
+
 def test_preflight_tolerates_absent_index_locally(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("GT_TASK_ID", raising=False)
     monkeypatch.delenv("GT_PRODUCT_SOURCE_SHA", raising=False)
