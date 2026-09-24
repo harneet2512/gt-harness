@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T06:46:57Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-24T07:17:24Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `138dd0babe65dd4644bb123809e19f8c2498e50b` |
+| harness | `canonical/gt-har90` @ `524a5d8633fb14eefda76cbe16b1dfed14b65bdd` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `b00914248c737abc86a1845ab27bc4da6ea80131679b36ea44c58908e7f52e35` |
@@ -56,7 +56,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 22 | `change.edit_transaction` | `gt_engine/miniswe_integration.py:MiniSweAdapter.record_edit_transaction` | AVAILABLE | partial | `gt_engine/capabilities/change.py:edit_transaction` | none | edit | p50 0ms / p95 0ms | no | 1 ref |
 | 23 | `change.patch_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:patch_impact` | typed_on_request | graph_revision/edit | p50 58ms / p95 60ms | yes | 1 ref |
 | 24 | `change.route_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:route_impact` | typed_on_request | graph_revision | p50 50ms / p95 54ms | yes | 1 ref |
-| 25 | `change.shape_change` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:shape_change` | typed_on_request | graph_revision | p50 50ms / p95 53ms | yes | 2 refs |
+| 25 | `change.shape_change` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `gt_engine/capabilities/change.py:shape_change` | typed_on_request | graph_revision | p50 50ms / p95 53ms | yes | 3 refs |
 | 26 | `change.affected_tests` | `gt_engine/miniswe_covering.py:_symbols_for_files` | AVAILABLE | partial | `gt_engine/capabilities/change.py:affected_tests` | none | graph_revision/edit | p50 5ms / p95 7ms | no | 2 refs |
 | 27 | `runtime.last_test_result` | `gt_engine/miniswe_integration.py:MiniSweAdapter.record_execution_evidence` | MODEL_FACING | partial | `gt_engine/capabilities/runtime.py:last_test_result` | gateway_auto:execution_evidence | execution | p50 0ms / p95 0ms | yes | 1 ref |
 | 28 | `runtime.covering_tests` | `gt_engine/miniswe_covering.py:_symbols_for_files` | AVAILABLE | partial | `gt_engine/capabilities/runtime.py:covering_tests` | none | graph_revision/edit | p50 5ms / p95 5ms | no | 1 ref |
@@ -76,7 +76,7 @@ One canonical implementation, two consumers. `EngineState` owns current/graph so
 | 42 | `kind.api_impact` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.route_impact, structure.framework_relationships` | typed_on_request | graph_revision | env 3272B / ans 56B | yes | 1 ref |
 | 43 | `kind.taint` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.taint` | typed_on_request | graph_revision | env 5659B / ans 847B | yes | 1 ref |
 | 44 | `kind.rename` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `—` | typed_on_request | graph_revision | env 5448B / ans 806B | yes | 1 ref |
-| 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.shape_change` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 2 refs |
+| 45 | `kind.shape_check` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `change.shape_change` | typed_on_request | graph_revision | env 4623B / ans 517B | yes | 3 refs |
 | 46 | `kind.tool_map` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `structure.framework_relationships` | typed_on_request | graph_revision | env 3176B / ans 30B | yes | 2 refs |
 | 47 | `kind.slice` | `gt_engine/miniswe_typed_actions.py:execute_typed_action` | MODEL_FACING | partial | `analysis.slice` | typed_on_request | graph_revision | env 4678B / ans 535B | yes | 3 refs |
 | 48 | `task_contract` | `gt_engine/task_contract.py:extract_task_contract` | AVAILABLE | — | `—` | none | — | — | no | 1 ref |
@@ -211,7 +211,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `change.route_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.route_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `change.shape_change`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `change.shape_change`: partial semantics: the TS conformance check enumerates interface members but under-detects empty-bodied class methods — Friendly implements wave() yet it reports missing, so a conforming class can fail spuriously (documented defect)
+- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice
 - `change.affected_tests`: selection only: _symbols_for_files + wheel select_covering_tests compose the same front half the live covering lane runs pre-execution; the lane continues into run_covering_tests and only a failing verdict becomes a covering_red dose - the raw selection is never delivered
 - `runtime.last_test_result`: the model receives the rendered [GT_EXECUTION_EVIDENCE] line queued as an execution_evidence candidate; the journal row, CAS artifact and raw output the facade returns stay host-side
 - `runtime.covering_tests`: delegates to change.affected_tests; same selection-only limit - no execution, no delivery of the selection itself
@@ -231,8 +231,8 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `kind.taint`: partial semantics: symbol-level CALLS reachability - not dataflow and not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
-- `kind.shape_check`: partial semantics: the TS conformance check enumerates interface members but under-detects empty-bodied class methods — Friendly implements wave() yet it reports missing, so a conforming class can fail spuriously (documented defect)
-- `kind.tool_map`: partial semantics: DECORATES is emitted only for class decorators resolving to in-repository callables, so @mcp.tool() functions are never detected (documented defect)
+- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice
+- `kind.tool_map`: partial semantics: external decorators bind through occurrence nodes (name-only, uncertified); registration sites without decorators (server.add_tool(f) calls) are untracked by design
 - `kind.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `task_contract`: runner-side machinery: the obligations:task context unit is admitted through miniswe_gt_run, not the canonical runtime — extraction is verbatim-line anchored, not a semantic proof of coverage
 - `persistent_plan`: runner-side machinery: the plan_cursor:task context unit is admitted through miniswe_gt_run, not the canonical runtime; rows carry checks only when a test command was discovered
