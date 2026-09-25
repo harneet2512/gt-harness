@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-25T21:21:28Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-25T21:34:31Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `9f88364bb8d7b201554343dbafa69dd172c7b89e` |
+| harness | `canonical/gt-har90` @ `360b707ed1f70fba6e101a1b295931f378cf4f7c` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -315,4 +315,4 @@ gt_engine/capabilities/freshness.py:
 
 ---
 
-**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b verified the statement-level taint head through `ea8889ae`; R7 verified the review-fix head through `e91c347e` (fresh git-archive extraction — certified artifacts untouched, golden hashes reproduce; mandated suite: canonical 103/103 + producer leg 22+1x); R8 verified the shape_check cross-language guard + dispatch doc fix through `6b550bbf` (fresh extraction — full provider-free list: typed_graph_real_producer 23, typed_graph_dispatch 68, index_incremental, graph_fts5_preflight, producer_binding, vendored_producer_binding, canonical 103; guard repro shows the producer emits failed:2 while the harness answer reports failed:0 with cross_language_interface_filtered). A five-pass bug hunt over all 21 features landed `9f88364b` (taint sanitizer-subtree laundering and receiver/vararg binding, facade freshness binding honoring the EngineState concealment contract and the graph_queries capability gate, boundary-amend escalation for uncoverable dirty sets plus mask-clearing for provably non-indexable edits, typed-action fail-open honesty envelopes, and contract budget/step-limit knobs actually applied to runner args); provider-free list green (canonical 114 + dispatch + incremental + producer binding), pending fresh-archive R9 verification. Mini-SWE integration design landed at `53bf545b` (`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`).
+**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b verified the statement-level taint head through `ea8889ae`; R7 verified the review-fix head through `e91c347e` (fresh git-archive extraction — certified artifacts untouched, golden hashes reproduce; mandated suite: canonical 103/103 + producer leg 22+1x); R8 verified the shape_check cross-language guard + dispatch doc fix through `6b550bbf` (fresh extraction — full provider-free list: typed_graph_real_producer 23, typed_graph_dispatch 68, index_incremental, graph_fts5_preflight, producer_binding, vendored_producer_binding, canonical 103; guard repro shows the producer emits failed:2 while the harness answer reports failed:0 with cross_language_interface_filtered). A five-pass bug hunt over all 21 features landed `9f88364b` (taint sanitizer-subtree laundering and receiver/vararg binding, facade freshness binding honoring the EngineState concealment contract and the graph_queries capability gate, boundary-amend escalation for uncoverable dirty sets plus mask-clearing for provably non-indexable edits, typed-action fail-open honesty envelopes, and contract budget/step-limit knobs actually applied to runner args); R9 verified that head from a fresh git-archive extraction (certified artifacts byte-identical to R8, goldens reproduce in compare mode, canonical 114/114, mandated provider-free list 274+1 env skip, all six fix-verification points reproduced, zero test weakening). Mini-SWE integration design landed at `53bf545b` (`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`).

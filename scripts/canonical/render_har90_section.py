@@ -386,9 +386,11 @@ def render() -> str:
       "gate, boundary-amend escalation for uncoverable dirty sets plus "
       "mask-clearing for provably non-indexable edits, typed-action "
       "fail-open honesty envelopes, and contract budget/step-limit knobs "
-      "actually applied to runner args); provider-free list green "
-      "(canonical 114 + dispatch + incremental + producer binding), pending "
-      "fresh-archive R9 verification. Mini-SWE integration design "
+      "actually applied to runner args); R9 verified that head from a "
+      "fresh git-archive extraction (certified artifacts byte-identical to "
+      "R8, goldens reproduce in compare mode, canonical 114/114, mandated "
+      "provider-free list 274+1 env skip, all six fix-verification points "
+      "reproduced, zero test weakening). Mini-SWE integration design "
       "landed at `53bf545b` "
       "(`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`).")
     a("")
