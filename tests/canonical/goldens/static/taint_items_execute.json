@@ -161,6 +161,16 @@
         "reason": "callsite_unresolved"
       },
       {
+        "callee": "get",
+        "callsite": "pyapp/server.py:80",
+        "reason": "callsite_unresolved"
+      },
+      {
+        "callee": "startswith",
+        "callsite": "pyapp/server.py:55",
+        "reason": "callsite_unresolved"
+      },
+      {
         "callee": "run",
         "callsite": "pyapp/server.py:65",
         "reason": "callsite_unresolved"
@@ -180,7 +190,7 @@
     "artifact_id": "<VOLATILE>",
     "configuration_sha256": "<VOLATILE>",
     "coverage": "partial",
-    "direct_answer_json": "{\"certified_paths_found\":1,\"dataflow_omissions\":[\"callsite_args_unresolved\"],\"dataflow_paths\":[{\"caller\":\"run_query\",\"caller_file\":\"pyapp/server.py\",\"hops\":[{\"file\":\"pyapp/server.py\",\"kind\":\"external_seed\",\"line\":80,\"var\":\"request.args.get\"},{\"callee\":\"sanitize\",\"callsite\":\"pyapp/server.py:82\",\"kind\":\"param_bind\",\"param\":\"raw\"},{\"callee\":\"sanitize\",\"callsite\":\"pyapp/server.py:82\",\"kind\":\"return_flow\"},{\"callee\":\"run_query\",\"callsite\":\"pyapp/server.py:83\",\"kind\":\"param_bind\",\"param\":\"command\"},{\"callee\":\"execute\",\"callsite\":\"pyapp/server.py:61\",\"kind\":\"param_bind\",\"param\":\"command\"}],\"sink\":\"execute\",\"sink_file\":\"pyapp/server.py\",\"sink_line\":61,\"tainted_params\":[\"command\"]}],\"dataflow_scope\":{\"binding\":\"resolution_callsites_actual_to_parameter\",\"functions_analyzed\":4,\"rounds\":6,\"seed_model\":\"unresolvable_uses_in_source_function_are_attacker_controlled\"},\"field_channels\":[],\"heuristic_sinks_reached\":[],\"heuristic_sinks_reached_certified\":[],\"paths\":[{\"hop_detail\":[{\"call_line\":81,\"from\":\"list_items\",\"to\":\"run_query\",\"trust_tier\":\"CERTIFIED\",\"variables_at_call\":[\"probe\",\"raw\",\"request\",\"request.args\",\"request.args.get\",\"run_query\"]},{\"call_line\":61,\"from\":\"run_query\",\"to\":\"execute\",\"trust_tier\":\"CERTIFIED\",\"variables_at_call\":[\"command\",\"execute\"]}],\"hop_tiers\":[\"CERTIFIED\",\"CERTIFIED\"],\"hops\":2,\"path\":[\"list_items\",\"run_query\",\"execute\"],\"path_sites\":[\"pyapp/server.py:79\",\"pyapp/server.py:60\",\"pyapp/server.py:64\"],\"sink\":\"execute\",\"source\":\"list_items\",\"trust\":\"certified\"}],\"paths_found\":1,\"reachable_symbol_count\":3,\"sanitizer_cuts\":[],\"sink\":\"execute\",\"source\":\"list_items\",\"uncertain_paths\":[],\"unresolved_reaches\":[{\"callee\":\"str\",\"callsite\":\"pyapp/server.py:85\",\"reason\":\"callsite_unresolved\"},{\"callee\":\"run\",\"callsite\":\"pyapp/server.py:65\",\"reason\":\"callsite_unresolved\"}]}",
+    "direct_answer_json": "{\"certified_paths_found\":1,\"dataflow_omissions\":[\"callsite_args_unresolved\"],\"dataflow_paths\":[{\"caller\":\"run_query\",\"caller_file\":\"pyapp/server.py\",\"hops\":[{\"file\":\"pyapp/server.py\",\"kind\":\"external_seed\",\"line\":80,\"var\":\"request.args.get\"},{\"callee\":\"sanitize\",\"callsite\":\"pyapp/server.py:82\",\"kind\":\"param_bind\",\"param\":\"raw\"},{\"callee\":\"sanitize\",\"callsite\":\"pyapp/server.py:82\",\"kind\":\"return_flow\"},{\"callee\":\"run_query\",\"callsite\":\"pyapp/server.py:83\",\"kind\":\"param_bind\",\"param\":\"command\"},{\"callee\":\"execute\",\"callsite\":\"pyapp/server.py:61\",\"kind\":\"param_bind\",\"param\":\"command\"}],\"sink\":\"execute\",\"sink_file\":\"pyapp/server.py\",\"sink_line\":61,\"tainted_params\":[\"command\"]}],\"dataflow_scope\":{\"binding\":\"resolution_callsites_actual_to_parameter\",\"functions_analyzed\":4,\"rounds\":6,\"seed_model\":\"unresolvable_uses_in_source_function_are_attacker_controlled\"},\"field_channels\":[],\"heuristic_sinks_reached\":[],\"heuristic_sinks_reached_certified\":[],\"paths\":[{\"hop_detail\":[{\"call_line\":81,\"from\":\"list_items\",\"to\":\"run_query\",\"trust_tier\":\"CERTIFIED\",\"variables_at_call\":[\"probe\",\"raw\",\"request\",\"request.args\",\"request.args.get\",\"run_query\"]},{\"call_line\":61,\"from\":\"run_query\",\"to\":\"execute\",\"trust_tier\":\"CERTIFIED\",\"variables_at_call\":[\"command\",\"execute\"]}],\"hop_tiers\":[\"CERTIFIED\",\"CERTIFIED\"],\"hops\":2,\"path\":[\"list_items\",\"run_query\",\"execute\"],\"path_sites\":[\"pyapp/server.py:79\",\"pyapp/server.py:60\",\"pyapp/server.py:64\"],\"sink\":\"execute\",\"source\":\"list_items\",\"trust\":\"certified\"}],\"paths_found\":1,\"reachable_symbol_count\":3,\"sanitizer_cuts\":[],\"sink\":\"execute\",\"source\":\"list_items\",\"uncertain_paths\":[],\"unresolved_reaches\":[{\"callee\":\"str\",\"callsite\":\"pyapp/server.py:85\",\"reason\":\"callsite_unresolved\"},{\"callee\":\"get\",\"callsite\":\"pyapp/server.py:80\",\"reason\":\"callsite_unresolved\"},{\"callee\":\"startswith\",\"callsite\":\"pyapp/server.py:55\",\"reason\":\"callsite_unresolved\"},{\"callee\":\"run\",\"callsite\":\"pyapp/server.py:65\",\"reason\":\"callsite_unresolved\"}]}",
     "envelope_sha256": "<VOLATILE>",
     "omissions": [
       "symbol_level_reachability_only",
@@ -315,6 +325,16 @@
         {
           "callee": "str",
           "callsite": "pyapp/server.py:85",
+          "reason": "callsite_unresolved"
+        },
+        {
+          "callee": "get",
+          "callsite": "pyapp/server.py:80",
+          "reason": "callsite_unresolved"
+        },
+        {
+          "callee": "startswith",
+          "callsite": "pyapp/server.py:55",
           "reason": "callsite_unresolved"
         },
         {

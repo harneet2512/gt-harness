@@ -11,6 +11,7 @@ emits model-facing text or calls admission.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -96,8 +97,38 @@ def wrap(
     )
 
 
+def _query_snapshot(session: "GTSession") -> Any:
+    """The EngineState freshness snapshot, when the engine tracks one."""
+    engine_state = getattr(engine_of(session), "engine_state", None)
+    if engine_state is None:
+        return None
+    return engine_state.query_snapshot()
+
+
 def graph_db_path(session: "GTSession") -> str:
-    return str(getattr(engine_of(session), "graph_db", "") or "")
+    """The freshness-gated graph path — empty while the tracked graph is
+    stale, exactly as ``EngineState.query_snapshot`` conceals it.
+
+    Facades must not serve pre-edit graph rows as current; when the
+    EngineState tracks a graph, only a current graph is visible here.
+    An untracked ``engine.graph_db`` (bare/test sessions with no published
+    graph identity) still falls through. The handle is also withheld when
+    the ``graph_queries`` capability is off — the model-facing runtime
+    applies the same gate, and a capability switched off is not fail-closed
+    if the internal surface can still open the graph.
+    """
+    if not getattr(session, "capability_active", lambda _c: True)(
+        "graph_queries"
+    ):
+        return ""
+    engine = engine_of(session)
+    engine_state = getattr(engine, "engine_state", None)
+    if engine_state is not None and getattr(
+        engine_state, "graph_path", ""
+    ):
+        snapshot = engine_state.query_snapshot()
+        return snapshot.graph_path
+    return str(getattr(engine, "graph_db", "") or "")
 
 
 def graph_conn(session: "GTSession") -> sqlite3.Connection | None:
@@ -112,7 +143,7 @@ def graph_conn(session: "GTSession") -> sqlite3.Connection | None:
         graph = Path(root) / graph if root else graph
     if not graph.is_file():
         return None
-    return sqlite3.connect(str(graph))
+    return sqlite3.connect(graph.resolve().as_uri() + "?mode=ro", uri=True)
 
 
 _SEMANTICS_MAP = {
@@ -162,20 +193,60 @@ def run_typed(
             provenance=provenance,
             started_ms=started,
         )
-    request = build_action_request(
-        {
-            "gt_action": {"kind": kind, "arguments": dict(arguments)},
-            "tool_call_id": f"capability:{kind}",
-        },
-        repo_root=repo_root,
-        configuration=configuration,
+    # Bind the graph the same way the model-facing runtime does: the
+    # RevisionVector.graph is the source revision the published graph was
+    # built from, bound only while the graph is current — otherwise the
+    # producer would report graph_revision_mismatch on every call, and a
+    # stale graph would be queried as if fresh.
+    snapshot = _query_snapshot(session)
+    snapshot_current = bool(snapshot and snapshot.graph_current)
+    # Mirror the model-facing runtime: the graph handle itself is withheld
+    # when the graph_queries capability is off — the revision fields still
+    # report snapshot truth, only the handle is gated.
+    queries_active = bool(
+        getattr(session, "capability_active", lambda _c: True)(
+            "graph_queries")
     )
-    result = execute_typed_action(
-        request,
-        repo_root=repo_root,
-        graph_db=graph_db_path(session) or None,
-        harness_args=_harness_args_from(arguments),
-    )
+    effective_configuration = {
+        "graph_db": (
+            snapshot.graph_path
+            if snapshot_current and queries_active
+            else ""
+        ),
+        "graph_fresh": snapshot_current,
+        "graph_source_revision": (
+            snapshot.graph_source_revision if snapshot_current else ""
+        ),
+        "repository_revision": (
+            snapshot.source_revision if snapshot is not None else ""
+        ),
+    }
+    if configuration:
+        effective_configuration.update(configuration)
+    try:
+        request = build_action_request(
+            {
+                "gt_action": {"kind": kind, "arguments": dict(arguments)},
+                "tool_call_id": f"capability:{kind}",
+            },
+            repo_root=repo_root,
+            configuration=effective_configuration,
+        )
+        result = execute_typed_action(
+            request,
+            repo_root=repo_root,
+            graph_db=graph_db_path(session) or None,
+            harness_args=_harness_args_from(arguments),
+        )
+    except Exception as exc:  # noqa: BLE001 - facades abstain, never raise
+        return wrap(
+            session, kind,
+            status="error",
+            omissions=(f"capability_dispatch_failed:{type(exc).__name__}",),
+            semantics=semantics,
+            provenance=provenance,
+            started_ms=started,
+        )
     try:
         observation = json.loads(result["output"])
     except (KeyError, TypeError, ValueError):
@@ -199,11 +270,13 @@ def run_typed(
         "AUGMENT": "partial",
         "PASS_THROUGH": "abstain",
     }.get(mode, "partial")
+    # Evidence omissions stay evidence-vocabulary; decision reason codes
+    # (capability gates, refusals, budgets) are caveats on the answer, not
+    # missing evidence, so they surface under ``limitations``.
     omissions = list(evidence.get("omissions") or ())
-    for reason in decision.get("reason_codes") or ():
-        if reason not in omissions:
-            omissions.append(reason)
-    limitations: list[str] = []
+    limitations: list[str] = [
+        str(reason) for reason in (decision.get("reason_codes") or ())
+    ]
     if honesty.get("abstention_reason"):
         limitations.append(str(honesty["abstention_reason"]))
     limitations.extend(
@@ -273,12 +346,22 @@ def last_journal_event(session: "GTSession", event: str) -> dict[str, Any] | Non
     return last
 
 
+_CAS_DIGEST_RE = re.compile(r"[0-9a-f]{16,64}\Z")
+
+
 def read_cas_blob(session: "GTSession", namespace: str, digest: str) -> bytes | None:
     store = getattr(engine_of(session), "store", None)
     root = getattr(store, "root", None)
     if root is None or not digest:
         return None
-    target = Path(root) / namespace / f"{digest}.json"
+    # Strict digest/namespace shapes — both land in a filesystem path, so
+    # anything outside the CAS token alphabet (``..``, separators) is not a
+    # blob name at all.
+    if not _CAS_DIGEST_RE.fullmatch(str(digest)):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", str(namespace)):
+        return None
+    target = Path(root) / str(namespace) / f"{digest}.json"
     try:
         return target.read_bytes() if target.is_file() else None
     except OSError:

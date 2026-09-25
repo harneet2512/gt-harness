@@ -27,6 +27,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from types import MethodType
@@ -41,6 +42,7 @@ from .miniswe_evidence import (
     run_evidence_pipeline,
 )
 from .miniswe_integration import MiniSweAdapter, ProviderModelMismatch
+from .result_envelope import envelope_for_result
 from .provider_limits import (
     ProviderContextWindowUnavailable,
     ProviderRequestTooLarge,
@@ -1925,7 +1927,23 @@ def install_runtime_hooks(
                 # Bash text. A router/analyzer fault produces an INCOMPLETE
                 # observation so Mini-SWE can select Bash on its next turn.
                 typed_kind = str((action.get("gt_action") or {}).get("kind") or "")
-                typed_arguments = (action.get("gt_action") or {}).get("arguments") or {}
+                if typed_kind.startswith("ActionKind."):
+                    typed_kind = typed_kind.rsplit(".", 1)[-1].lower()
+                # Normalize alias spellings (``find_callers`` etc.) here so
+                # the capability, refresh, and fanout gates below see the
+                # canonical kind the dispatcher will execute — a respelled
+                # kind must not evade ``typed_callers`` or skip the refresh.
+                from gt_engine.miniswe_typed_actions import _KIND_ALIASES
+
+                typed_kind = _KIND_ALIASES.get(typed_kind, typed_kind)
+                typed_arguments = (action.get("gt_action") or {}).get(
+                    "arguments"
+                )
+                if not isinstance(typed_arguments, Mapping):
+                    # Malformed input belongs to the router contract: let the
+                    # fail-open path produce the INCOMPLETE observation
+                    # instead of crashing the action batch here.
+                    typed_arguments = {}
                 scopes = typed_arguments.get("paths", ["."])
                 repository_wide = bool(
                     typed_kind == "exact_literal_search"
@@ -1936,6 +1954,7 @@ def install_runtime_hooks(
                     output = json.dumps(
                         {
                             "schema": "gt.compiled_observation.v1",
+                            "action_request": None,
                             "direct_answer": None,
                             "evidence": {
                                 "schema": "gt.evidence_artifact.v1",
@@ -1947,6 +1966,15 @@ def install_runtime_hooks(
                                 "mode": "PASS_THROUGH",
                                 "reason_codes": ["refine_query_scope_next_turn"],
                             },
+                            "honesty": envelope_for_result(
+                                source_revision="",
+                                workspace_revision="",
+                                payload=None,
+                                returned_count=0,
+                                true_total=None,
+                                abstention_reason="query_fanout_refused",
+                                incomplete=True,
+                            ),
                         },
                         sort_keys=True,
                         separators=(",", ":"),
@@ -1980,6 +2008,15 @@ def install_runtime_hooks(
                             "mode": "PASS_THROUGH",
                             "reason_codes": ["capability_disabled"],
                         },
+                        "honesty": envelope_for_result(
+                            source_revision="",
+                            workspace_revision="",
+                            payload=None,
+                            returned_count=0,
+                            true_total=None,
+                            abstention_reason="capability_disabled",
+                            incomplete=True,
+                        ),
                     }
                     output = json.dumps(
                         payload, ensure_ascii=False, sort_keys=True,
@@ -2037,6 +2074,7 @@ def install_runtime_hooks(
                     output = json.dumps(
                         {
                             "schema": "gt.compiled_observation.v1",
+                            "action_request": None,
                             "direct_answer": None,
                             "evidence": {
                                 "schema": "gt.evidence_artifact.v1",
@@ -2048,6 +2086,15 @@ def install_runtime_hooks(
                                 "mode": "PASS_THROUGH",
                                 "reason_codes": ["refine_query_scope_next_turn"],
                             },
+                            "honesty": envelope_for_result(
+                                source_revision="",
+                                workspace_revision="",
+                                payload=None,
+                                returned_count=0,
+                                true_total=None,
+                                abstention_reason="query_turn_budget_exceeded",
+                                incomplete=True,
+                            ),
                         },
                         sort_keys=True,
                         separators=(",", ":"),

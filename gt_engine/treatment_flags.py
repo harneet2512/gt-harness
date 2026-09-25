@@ -199,16 +199,29 @@ def resolve_treatment_flags(args: Any) -> dict[str, dict[str, str]]:
         )
 
     # --- budget reconciliation -------------------------------------------
-    budget = resolve_deadline_seconds(args)
+    # The contract-supplied value must pass through ``effective()`` AND be
+    # written back onto args: the runner consumes args.time_budget_seconds /
+    # args.step_limit directly, so a contract-only knob recorded as "wired"
+    # but never set would be a silent drop.
+    budget = resolve_deadline_seconds(
+        args, execution_budget=effective("execution_budget_sec"))
     args.time_budget_seconds = budget
     resolution["execution_budget_sec"] = {
         "value": str(effective("execution_budget_sec") or "unset"),
         "disposition": "wired:deadline" if effective("execution_budget_sec")
         else "unset",
     }
+    step_limit = effective("step_limit")
+    if not _unset(step_limit):
+        try:
+            args.step_limit = int(step_limit)
+        except (TypeError, ValueError) as exc:
+            raise TreatmentFlagRefusal(
+                f"treatment_knob_value_invalid:step_limit={step_limit}"
+            ) from exc
     resolution["step_limit"] = {
-        "value": str(get("step_limit") or "unset"),
-        "disposition": "wired:runner_arg",
+        "value": str(step_limit if not _unset(step_limit) else "unset"),
+        "disposition": "wired:runner_arg" if not _unset(step_limit) else "unset",
     }
     resolution["time_budget_seconds"] = {
         "value": str(budget),
@@ -331,16 +344,27 @@ def resolve_treatment_flags(args: Any) -> dict[str, dict[str, str]]:
     return resolution
 
 
-def resolve_deadline_seconds(args: Any) -> int:
+def resolve_deadline_seconds(args: Any, *, execution_budget: Any = None) -> int:
     """Reconcile ``--time-budget-seconds`` with ``--execution-budget-seconds``.
 
     ``time_budget_seconds`` carries the historical sentinel default of 1;
     ``execution_budget_sec`` is the workflow's resolved task deadline. When
     both carry explicit differing values the run refuses rather than silently
-    preferring one.
+    preferring one. ``execution_budget`` lets the resolver pass the
+    contract-effective value: the argparse default alone would report a
+    contract-supplied deadline "wired" while never applying it.
     """
     tbs = int(getattr(args, "time_budget_seconds", 0) or 0)
-    ebs = int(getattr(args, "execution_budget_sec", 0) or 0)
+    raw_ebs = (
+        execution_budget if execution_budget is not None
+        else getattr(args, "execution_budget_sec", 0)
+    )
+    try:
+        ebs = int(raw_ebs or 0)
+    except (TypeError, ValueError) as exc:
+        raise TreatmentFlagRefusal(
+            f"treatment_knob_value_invalid:execution_budget_sec={raw_ebs}"
+        ) from exc
     explicit_tbs = tbs != 1
     if ebs and explicit_tbs and ebs != tbs:
         raise TreatmentFlagRefusal(

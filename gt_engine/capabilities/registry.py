@@ -458,13 +458,16 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: symbol-level CALLS reachability plus "
             "statement-level dataflow for Python sources only (def-use "
             "propagation over resolved callsites; unresolved callees, "
-            "non-Python functions, unbound *args/**kwargs, and "
-            "object-attribute state crossing functions are named omissions, "
-            "and seeds are unresolvable uses in the source function); "
-            "sanitizer entries resolve to graph nodes — file.py:name scopes "
-            "to one definition while a bare name denotes every callable with "
-            "that name (named sanitizer_name_ambiguous); several sources "
-            "map to one query per source",
+            "resolved-but-unanalyzable targets, ambiguous same-line "
+            "callsites, positional overflow, unbound *args/**kwargs, and "
+            "object-attribute state crossing functions are named omissions "
+            "and tainted unresolved callsites are reported as "
+            "unresolved_reaches; seeds are unresolvable uses in the source "
+            "function); sanitizer entries resolve to graph nodes — "
+            "file.py:name scopes to one definition while a bare name "
+            "denotes every callable with that name (named "
+            "sanitizer_name_ambiguous); several sources and sinks map to "
+            "one query per source-sink pair",
         ),
     ),
     # --------------------------------------------------------------------- change
@@ -775,13 +778,15 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: symbol-level CALLS reachability plus "
             "statement-level dataflow for Python sources only (def-use "
             "propagation over resolved callsites; unresolved callees, "
-            "non-Python functions, unbound *args/**kwargs, and "
-            "object-attribute state crossing functions are named omissions, "
-            "and seeds are unresolvable uses in the source function); "
-            "sanitizer entries resolve to graph nodes — file.py:name scopes "
-            "to one definition while a bare name denotes every callable with "
-            "that name (named sanitizer_name_ambiguous); not a sound "
-            "over-approximation",
+            "resolved-but-unanalyzable targets, ambiguous same-line "
+            "callsites, positional overflow, unbound *args/**kwargs, and "
+            "object-attribute state crossing functions are named omissions "
+            "and tainted unresolved callsites are reported as "
+            "unresolved_reaches; seeds are unresolvable uses in the source "
+            "function); sanitizer entries resolve to graph nodes — "
+            "file.py:name scopes to one definition while a bare name "
+            "denotes every callable with that name (named "
+            "sanitizer_name_ambiguous); not a sound over-approximation",
         ),
     ),
     _kind(

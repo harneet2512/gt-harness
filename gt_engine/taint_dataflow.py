@@ -43,6 +43,10 @@ class _Func:
     cfg: Any
     chains: Any
     param_names: list[str]
+    is_method: bool = False
+    is_static: bool = False
+    vararg: str | None = None
+    kwarg: str | None = None
     calls: list[ast.Call] = field(default_factory=list)
 
 
@@ -86,19 +90,22 @@ def _callee_name(call: ast.Call) -> str:
     return ""
 
 
-def _loads_of(expr: ast.AST) -> list[tuple[str, int]]:
+def _load_nodes(expr: ast.AST) -> Iterable[tuple[ast.AST, str, int]]:
     # Mirror the use-space ``cfg.effects`` produces: bare ``Load`` names plus
-    # rendered attribute chains (``a.b`` yields "a.b" and "a").
-    out: list[tuple[str, int]] = []
+    # rendered attribute chains (``a.b`` yields "a.b" and "a"). Yields the
+    # node itself so callers can test sanitizer-subtree enclosure.
     for node in ast.walk(expr):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            out.append((node.id, node.lineno))
+            yield node, node.id, node.lineno
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             try:
-                out.append((ast.unparse(node), node.lineno))
+                yield node, ast.unparse(node), node.lineno
             except (ValueError, TypeError):
                 pass
-    return out
+
+
+def _loads_of(expr: ast.AST) -> list[tuple[str, int]]:
+    return [(n, line) for _node, n, line in _load_nodes(expr)]
 
 
 def _calls_in(expr: ast.AST) -> Iterable[ast.Call]:
@@ -164,14 +171,19 @@ class _Engine:
                     "target": row[3],
                 }
             )
-        self.nodes_by_id: dict[int, tuple[str, str, int]] = {}
+        self.nodes_by_id: dict[int, tuple[str, str, int, str]] = {}
         for row in conn.execute(
-            "SELECT id, name, file_path, start_line FROM nodes"
+            "SELECT id, name, file_path, start_line, label FROM nodes"
             " WHERE label IN ('Function','Method')"
         ):
-            self.nodes_by_id[int(row[0])] = (str(row[1]), str(row[2]), int(row[3]))
+            self.nodes_by_id[int(row[0])] = (
+                str(row[1]),
+                str(row[2]),
+                int(row[3]),
+                str(row[4] or ""),
+            )
         self.local_names_by_file: dict[str, set[str]] = {}
-        for name, file_path, _line in self.nodes_by_id.values():
+        for name, file_path, _line, _label in self.nodes_by_id.values():
             self.local_names_by_file.setdefault(file_path, set()).add(name)
 
     def file_index(self, rel: str) -> _FileIndex | None:
@@ -198,7 +210,7 @@ class _Engine:
         meta = self.nodes_by_id.get(node_id)
         if meta is None:
             return None
-        name, file_path, start_line = meta
+        name, file_path, start_line, label = meta
         if not file_path.endswith(".py"):
             self.state.omissions.add(f"dataflow_python_only:{file_path}")
             return None
@@ -226,6 +238,12 @@ class _Engine:
         chains = use_def_chains(cfg, reaching_definitions(cfg, tree))
         params = [a.arg for a in (*tree.args.posonlyargs, *tree.args.args)]
         params += [a.arg for a in tree.args.kwonlyargs]
+        decorator_names = {
+            _callee_name(ast.Call(func=d, args=[], keywords=[]))
+            if not isinstance(d, (ast.Name, ast.Attribute))
+            else (d.id if isinstance(d, ast.Name) else d.attr)
+            for d in tree.decorator_list
+        }
         func = _Func(
             key=key,
             node_id=node_id,
@@ -235,10 +253,33 @@ class _Engine:
             cfg=cfg,
             chains=chains,
             param_names=params,
+            is_method=label == "Method",
+            is_static="staticmethod" in decorator_names,
+            vararg=tree.args.vararg.arg if tree.args.vararg else None,
+            kwarg=tree.args.kwarg.arg if tree.args.kwarg else None,
         )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                func.calls.append(node)
+        # Calls nested inside a def/class body belong to that inner scope —
+        # binding them under this function's taint context would misattribute
+        # both the caller label and the reaching defs.
+        stack: list[ast.AST] = [tree]
+        while stack:
+            node = stack.pop()
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    stack.extend(child.decorator_list)
+                    stack.extend(child.args.defaults)
+                    stack.extend(
+                        d for d in child.args.kw_defaults if d is not None
+                    )
+                    continue
+                if isinstance(child, ast.ClassDef):
+                    stack.extend(child.decorator_list)
+                    stack.extend(child.bases)
+                    stack.extend(child.keywords)
+                    continue
+                if isinstance(child, ast.Call):
+                    func.calls.append(child)
+                stack.append(child)
         self.state.funcs[key] = func
         return func
 
@@ -253,10 +294,25 @@ class _Engine:
         name = _callee_name(call)
         matched = [r for r in same_line if r["callee"] == name]
         if matched:
+            # Two same-line calls to the same leaf name resolving to
+            # different targets (``a.f(x) + b.f(y)``) cannot be told apart
+            # — the callsite table carries only leaf names and lines.
+            targets = {r["target"] for r in matched}
+            if len(targets) > 1:
+                self.state.omissions.add(
+                    f"callsite_row_ambiguous:{func.file}:{call.lineno}"
+                )
+                return None
             return matched[0]
-        if len(same_line) == 1:
-            return same_line[0]
-        return None
+        # A name mismatch is never guessed at — except the lone-row case for
+        # a call with no nameable callee (``f(x)(t)``), and only when the AST
+        # shows a single Call on that line so the row cannot belong to a
+        # sibling call.
+        if name or len(same_line) != 1:
+            return None
+        if sum(1 for c in func.calls if c.lineno == call.lineno) != 1:
+            return None
+        return same_line[0]
 
     def _is_sanitizer_call(self, call: ast.Call, row: dict[str, Any] | None) -> bool:
         # Resolved callsites match by node identity: a same-named function in
@@ -288,19 +344,34 @@ class _Engine:
             state.taint_chains[(key, dkey)] = chain
         state.param_taint[key] = dict(param_chains)
 
-        # Loads inside a sanitizer call are consumed by the sanitizer: they
-        # feed its cut record, never the enclosing statement's defs, returns,
-        # or other calls' argument binding.
-        sanitizer_loads: list[tuple[int, frozenset]] = []
+        # Loads and nested calls inside a sanitizer call's subtree are
+        # consumed by the sanitizer: they feed its cut record, never the
+        # enclosing statement's defs, returns, or other calls' argument
+        # binding. Enclosure is tracked per AST node (not per (name, line))
+        # so a same-line sibling use outside the subtree stays visible —
+        # ``sink(t, clean(t))`` still binds ``t``.
+        sanitizer_call_ids: set[int] = set()
         for c in func.calls:
             row = self.row_for_call(func, c)
             if self._is_sanitizer_call(c, row):
-                sanitizer_loads.append((id(c), frozenset(_loads_of(c))))
+                sanitizer_call_ids.add(id(c))
+        enclosing_sanitizer: dict[int, ast.Call] = {}
+        if sanitizer_call_ids:
+            mark_stack: list[tuple[ast.AST, ast.Call | None]] = [
+                (func.tree, None)
+            ]
+            while mark_stack:
+                node, enc = mark_stack.pop()
+                if isinstance(node, ast.Call) and id(node) in sanitizer_call_ids:
+                    enc = node
+                for child in ast.iter_child_nodes(node):
+                    if enc is not None:
+                        enclosing_sanitizer[id(child)] = enc
+                    mark_stack.append((child, enc))
 
-        def laundered_for(owner: ast.Call | None) -> frozenset:
-            return frozenset().union(
-                *(loads for cid, loads in sanitizer_loads if cid != id(owner))
-            ) if sanitizer_loads else frozenset()
+        def laundered_node(node: ast.AST, owner: ast.Call | None) -> bool:
+            enc = enclosing_sanitizer.get(id(node))
+            return enc is not None and enc is not owner
 
         def chain_of_use(ukey: tuple[str, int]) -> tuple | None:
             return state.taint_chains.get((key, ("__use__", *ukey)))
@@ -317,19 +388,41 @@ class _Engine:
                 return True
             return False
 
+        def best_def_chain(ukey: tuple[str, int]) -> tuple | None:
+            # Deterministic pick among tainted reaching defs: prefer the
+            # longest chain (more provenance), break ties by def key —
+            # ``use_to_defs`` is a set, so order must be derived, never
+            # hash-order dependent.
+            best: tuple | None = None
+            best_dkey: tuple[str, int] | None = None
+            for dkey in chains.use_to_defs.get(ukey, ()):
+                if dkey not in tainted_defs:
+                    continue
+                cand = state.taint_chains.get((key, dkey))
+                if cand is None:
+                    continue
+                if (
+                    best is None
+                    or len(cand) > len(best)
+                    or (len(cand) == len(best) and dkey < best_dkey)  # type: ignore[operator]
+                ):
+                    best, best_dkey = cand, dkey
+            return best
+
         def arg_taint(expr: ast.AST, owner: ast.Call | None = None) -> tuple | None:
-            laundered = laundered_for(owner)
-            for n, line in _loads_of(expr):
-                if (n, line) in laundered:
+            for node, n, line in _load_nodes(expr):
+                if laundered_node(node, owner):
                     continue
                 if (n, line) in tainted_uses:
                     return chain_of_use((n, line)) or (
                         {"kind": "flow", "var": n, "line": line},
                     )
-                for dkey in chains.use_to_defs.get((n, line), ()):
-                    if dkey in tainted_defs:
-                        return state.taint_chains.get((key, dkey))
+                chain = best_def_chain((n, line))
+                if chain is not None:
+                    return chain
             for inner in _calls_in(expr):
+                if laundered_node(inner, owner):
+                    continue
                 if id(inner) in tainted_call_ids:
                     return state.taint_chains.get((key, ("__call__", inner.lineno)))
             return None
@@ -343,8 +436,17 @@ class _Engine:
                     for u in uses:
                         ukey = (u.name, u.line)
                         reaching = chains.use_to_defs.get(ukey, set())
-                        hit = next(
-                            (d for d in reaching if d in tainted_defs), None
+                        # Deterministic pick among tainted reaching defs:
+                        # longest chain (most provenance), then def key —
+                        # ``use_to_defs`` is a set, so hash order must never
+                        # decide provenance.
+                        hit = min(
+                            (d for d in reaching if d in tainted_defs),
+                            key=lambda d: (
+                                -len(state.taint_chains.get((key, d), ())),
+                                d,
+                            ),
+                            default=None,
                         )
                         if hit is not None:
                             if ukey not in tainted_uses:
@@ -409,17 +511,25 @@ class _Engine:
                                     changed = True
                     # Loads inside a sanitizer call feed the sanitizer, not
                     # the statement's own outputs: they cannot taint this
-                    # item's defs or a return through it.
-                    laundered: set[tuple[str, int]] = set()
-                    for call in _calls_in(item):
-                        row = self.row_for_call(func, call)
-                        if self._is_sanitizer_call(call, row):
-                            laundered.update(_loads_of(call))
+                    # item's defs or a return through it. A (name, line) key
+                    # is laundered only when it occurs strictly inside
+                    # sanitizer subtrees here — a same-line sibling use
+                    # outside them (``sink(t, clean(t))``) stays visible.
+                    inside_keys: set[tuple[str, int]] = set()
+                    outside_keys: set[tuple[str, int]] = set()
+                    for node, n, line in _load_nodes(item):
+                        if enclosing_sanitizer.get(id(node)) is not None:
+                            inside_keys.add((n, line))
+                        else:
+                            outside_keys.add((n, line))
+                    laundered: set[tuple[str, int]] = inside_keys - outside_keys
                     # A resolved callee's return-flow chain carries the true
                     # lineage (seed -> param_bind -> return_flow); it is
                     # preferred over seeded/bare uses of the callee expression.
                     item_taint: tuple | None = None
                     for call in _calls_in(item):
+                        if enclosing_sanitizer.get(id(call)) is not None:
+                            continue
                         if id(call) in tainted_call_ids:
                             item_taint = state.taint_chains.get(
                                 (key, ("__call__", call.lineno))
@@ -489,6 +599,12 @@ class _Engine:
         for kw in call.keywords:
             if arg_taint(kw.value, call):
                 tainted_arg = True
+        if isinstance(call.func, ast.Attribute) and arg_taint(
+            call.func.value, call
+        ):
+            # A tainted receiver (``s.save(...)`` with tainted ``s``) reaches
+            # the callee's ``self`` — taint enters the call.
+            tainted_arg = True
         target_id = row["target"] if row else None
         callee_label = (row or {}).get("callee") or _callee_name(call)
         if target_id is None:
@@ -511,30 +627,84 @@ class _Engine:
             if tainted_arg:
                 state.omissions.add("callsite_args_unresolved")
             return
-        tname, tfile, tline = target_meta
+        tname, tfile, tline, _tlabel = target_meta
         target_key = (tfile, tline)
         state.callers.setdefault(target_key, set()).add(func.key)
         target = self.func_for_node(int(target_id))
         if target is None:
+            # Resolved in the graph but not analyzable (non-Python, parse
+            # failure, function cap, source drift) — record the tainted
+            # callsite rather than dropping it silently.
+            if tainted_arg:
+                ukey = (func.file, call.lineno, callee_label)
+                if ukey not in state.seen_unresolved:
+                    state.seen_unresolved.add(ukey)
+                    state.events += 1
+                    state.unresolved_reaches.append(
+                        {
+                            "callsite": f"{func.file}:{call.lineno}",
+                            "callee": callee_label,
+                            "reason": "target_not_analyzable",
+                        }
+                    )
+                    state.omissions.add("callsite_target_not_analyzable")
             return
         params = target.param_names
         bound: dict[str, tuple] = {}
         pos_index = 0
+        pos_params = params
+        if (
+            target.is_method
+            and not target.is_static
+            and isinstance(call.func, ast.Attribute)
+            and params
+        ):
+            # Bound-method call ``obj.m(t)``: the first declared parameter is
+            # the receiver (``self``/``cls``), bound from the receiver
+            # expression — not from the first positional argument.
+            recv_chain = arg_taint(call.func.value, call)
+            if recv_chain:
+                bound[params[0]] = recv_chain + (
+                    {
+                        "kind": "param_bind",
+                        "callsite": f"{func.file}:{call.lineno}",
+                        "callee": tname,
+                        "param": params[0],
+                    },
+                )
+            pos_params = params[1:]
         for expr in call.args:
             if isinstance(expr, ast.Starred):
                 if arg_taint(expr.value, call):
                     state.omissions.add("star_args_unbound")
                 continue
-            if pos_index >= len(params):
-                break
+            if pos_index >= len(pos_params):
+                if target.vararg is not None:
+                    # ``def run(*cmds)``: extra positionals bind the vararg.
+                    chain = arg_taint(expr, call)
+                    if chain:
+                        cand = chain + (
+                            {
+                                "kind": "param_bind",
+                                "callsite": f"{func.file}:{call.lineno}",
+                                "callee": tname,
+                                "param": target.vararg,
+                            },
+                        )
+                        existing = bound.get(target.vararg)
+                        if existing is None or len(cand) > len(existing):
+                            bound[target.vararg] = cand
+                else:
+                    state.omissions.add("callee_positional_overflow")
+                continue
             chain = arg_taint(expr, call)
             if chain:
-                bound[params[pos_index]] = chain + (
+                bound[pos_params[pos_index]] = chain + (
                     {
                         "kind": "param_bind",
                         "callsite": f"{func.file}:{call.lineno}",
                         "callee": tname,
-                        "param": params[pos_index],
+                        "param": pos_params[pos_index],
                     },
                 )
             pos_index += 1
@@ -544,13 +714,22 @@ class _Engine:
                     state.omissions.add("star_args_unbound")
                 continue
             chain = arg_taint(kw.value, call)
-            if chain and kw.arg in params:
+            if chain and kw.arg in pos_params:
                 bound[kw.arg] = chain + (
                     {
                         "kind": "param_bind",
                         "callsite": f"{func.file}:{call.lineno}",
                         "callee": tname,
                         "param": kw.arg,
+                    },
+                )
+            elif chain and target.kwarg is not None:
+                bound[target.kwarg] = chain + (
+                    {
+                        "kind": "param_bind",
+                        "callsite": f"{func.file}:{call.lineno}",
+                        "callee": tname,
+                        "param": target.kwarg,
                     },
                 )
             elif chain:
@@ -582,14 +761,19 @@ class _Engine:
             longest = max(bound.values(), key=len)
             existing_path = state.seen_paths.get(pkey)
             if existing_path is not None:
-                # A longer re-bound chain carries more provenance; refresh the
-                # recorded hops so the answer shows the full lineage.
+                # A longer re-bound chain carries more provenance; refresh
+                # the recorded hops so the answer shows the full lineage.
+                # The tainted-param set itself is monotone: union it even
+                # when the longest chain did not grow, so a param tainted in
+                # a later round is still reported.
                 if len(longest) > len(existing_path["hops"]):
                     hops = list(longest)[-_MAX_PATH_HOPS:]
                     if len(longest) > _MAX_PATH_HOPS:
                         state.omissions.add("dataflow_path_hops_truncated")
                     existing_path["hops"] = hops
-                    existing_path["tainted_params"] = sorted(bound)
+                existing_path["tainted_params"] = sorted(
+                    set(existing_path["tainted_params"]) | set(bound)
+                )
             else:
                 state.events += 1
                 if len(state.paths) >= _MAX_PATHS:

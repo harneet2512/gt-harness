@@ -326,3 +326,112 @@ def test_localization_hybrid_rank_direct(polyglot_session):
     # Per-source receipts: lexical matched; dense honestly reports its asset state.
     sources = {s["source"]: s for s in result.answer.get("sources", ())}
     assert sources["lexical"]["result_count"] >= 1
+
+
+def test_graph_backed_facades_conceal_stale_graph(tmp_path):
+    """A dirtied graph must not keep serving facade rows as if current —
+    the EngineState concealment the model path already honors."""
+    db = _fixture_graph(tmp_path)
+    session, adapter = _session(tmp_path, graph_db=str(db))
+
+    fresh = structure.communities(session, "src/pay.py")
+    assert fresh.status == "ok"
+
+    adapter.engine_state.mark_paths_dirty(("src/pay.py",), revision="rev-e")
+    stale = structure.communities(session, "src/pay.py")
+    assert stale.status == "unavailable"
+    assert "graph_unavailable" in stale.omissions
+
+    assert analysis.callable_values(session, "handler").status == "unavailable"
+    cfg = analysis.cfg(session, "handler")
+    assert cfg.status == "abstain"
+    assert "graph_unavailable" in cfg.omissions
+
+
+def test_typed_facade_graph_binding_follows_freshness(tmp_path, monkeypatch):
+    """``run_typed`` binds RevisionVector.graph and passes graph_db only
+    while the graph is current — the same contract the model path uses."""
+    from gt_engine import miniswe_typed_actions
+
+    db = _fixture_graph(tmp_path)
+    session, adapter = _session(tmp_path, graph_db=str(db))
+    captured = {}
+    real = miniswe_typed_actions.execute_typed_action
+
+    def spy(request, **kw):
+        captured["graph_db"] = kw.get("graph_db")
+        return real(request, **kw)
+
+    monkeypatch.setattr(miniswe_typed_actions, "execute_typed_action", spy)
+
+    structure.callers(session, "handler")
+    assert captured["graph_db"] == str(db)
+
+    adapter.engine_state.mark_paths_dirty(("src/pay.py",), revision="rev-e")
+    structure.callers(session, "handler")
+    assert captured["graph_db"] is None
+
+
+def test_amend_state_defer_window_uses_the_monotonic_clock(tmp_path):
+    """``_graph_amend_defer_until`` is a time.monotonic() deadline; the
+    facade compared it to time.time() and reported False forever."""
+    import time
+
+    session, adapter = _session(tmp_path)
+    adapter._graph_amend_defer_until = time.monotonic() + 600
+    state = freshness.amend_state(session)
+    assert state.answer["amend_deferred"] is True
+    adapter._graph_amend_defer_until = time.monotonic() - 1
+    state = freshness.amend_state(session)
+    assert state.answer["amend_deferred"] is False
+
+
+def test_fallback_state_reports_suspension_reason_not_revision(tmp_path):
+    """``_recovery_suspended`` stores a reason string, not a revision."""
+    session, adapter = _session(tmp_path)
+    adapter._recovery_suspended = "unindexable_repository"
+    state = freshness.fallback_state(session)
+    assert state.answer["recovery_suspended"] is True
+    assert state.answer["suspended_reason"] == "unindexable_repository"
+    assert "suspended_at_revision" not in state.answer
+
+
+def test_taint_facade_empty_sources_is_unavailable(tmp_path):
+    session, _a = _session(tmp_path)
+    result = analysis.taint(session, [])
+    assert result.status == "unavailable"
+    assert "no_sources" in result.omissions
+
+
+def test_callees_envelope_keeps_its_own_capability_on_nonanswer(tmp_path):
+    """A non-dict symbol_context envelope must not leak the wrapped
+    facade's capability label through ``callees``."""
+    session, _a = _session(tmp_path)  # no graph: abstain/unavailable path
+    result = structure.callees(session, "nobody")
+    assert result.capability == "callees"
+
+
+def test_read_cas_blob_rejects_non_digest_names(tmp_path):
+    from gt_engine.capabilities._query import read_cas_blob
+
+    session, adapter = _session(tmp_path)
+    cas = Path(adapter.store.root) / "execution_evidence"
+    cas.mkdir(parents=True)
+    (cas / ("ab" * 32 + ".json")).write_text("{}")
+    outside = Path(adapter.store.root) / "escape.json"
+    outside.write_text("{}")
+
+    assert read_cas_blob(session, "execution_evidence", "ab" * 32) == b"{}"
+    assert read_cas_blob(session, "execution_evidence", "../escape") is None
+    assert read_cas_blob(session, "..", "ab" * 32) is None
+    assert read_cas_blob(session, "execution_evidence", "not-hex!") is None
+
+
+def test_communities_reports_error_on_unreadable_graph(tmp_path):
+    db = tmp_path / "graph.db"
+    db.write_bytes(b"not a sqlite database")
+    session, _a = _session(tmp_path, graph_db=str(db))
+    result = structure.communities(session, "src/pay.py")
+    assert result.status == "error"
+    assert result.omissions
+    assert result.omissions[0].startswith("graph_query_failed:")

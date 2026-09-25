@@ -1,6 +1,7 @@
 """Structure capability facade — graph neighborhood and grouping queries."""
 from __future__ import annotations
 
+import sqlite3
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -43,7 +44,22 @@ def callees(session: "GTSession", symbol: str, **hints: Any) -> CapabilityResult
     result = symbol_context(session, symbol, **hints)
     answer = result.answer
     if not isinstance(answer, dict):
-        return result
+        # Non-answer envelopes (abstain/error/unavailable) still belong to
+        # this facade — the caller asked for ``callees``, so the envelope
+        # must not keep ``symbol_context``'s capability label.
+        return CapabilityResult(
+            capability="callees",
+            status=result.status,
+            answer=result.answer,
+            omissions=result.omissions,
+            limitations=result.limitations,
+            semantics=result.semantics,
+            graph_revision=result.graph_revision,
+            source_revision=result.source_revision,
+            fresh=result.fresh,
+            cost=result.cost,
+            provenance=result.provenance,
+        )
     narrowed = {
         "symbol": answer.get("symbol"),
         "definition": answer.get("definition"),
@@ -134,6 +150,14 @@ def communities(session: "GTSession", file: str) -> CapabilityResult:
             status="ok" if communities else "partial",
             omissions=omissions,
             semantics="partial",
+            provenance=provenance,
+            started_ms=started,
+        )
+    except sqlite3.Error as exc:
+        return wrap(
+            session, "communities",
+            status="error",
+            omissions=(f"graph_query_failed:{type(exc).__name__}",),
             provenance=provenance,
             started_ms=started,
         )

@@ -109,7 +109,11 @@ def amend_state(session: "GTSession") -> CapabilityResult:
             if publication
             else None
         ),
-        "amend_deferred": defer_until > time.time(),
+        # ``_graph_amend_defer_until`` is a time.monotonic() deadline — it is
+        # set and compared on the monotonic clock inside
+        # ``_amend_spawn_deferred``; comparing it to time.time() would
+        # report the window closed forever.
+        "amend_deferred": defer_until > time.monotonic(),
         "amend_defer_until": defer_until,
         "amend_failure_streaks": {k: v for k, v in sorted(streaks.items())},
         "edit_epoch": int(getattr(engine, "_edit_epoch", 0) or 0),
@@ -134,9 +138,10 @@ def amend_state(session: "GTSession") -> CapabilityResult:
 def fallback_state(session: "GTSession") -> CapabilityResult:
     """Recovery/fallback posture the adapter currently holds.
 
-    Read-only over ``_recovery_suspended`` (the revision recovery was
-    suspended at), failure streaks/totals, and the delivered steer count —
-    the same fields ``_recovery_build_inline`` enforces.
+    Read-only over ``_recovery_suspended`` (the *reason* recovery was
+    suspended — e.g. ``unindexable_repository``; the adapter records no
+    revision there), failure streaks/totals, and the delivered steer
+    count — the same fields ``_recovery_build_inline`` enforces.
     """
 
     started = time.perf_counter()
@@ -144,7 +149,7 @@ def fallback_state(session: "GTSession") -> CapabilityResult:
     suspended = str(getattr(engine, "_recovery_suspended", "") or "")
     answer = {
         "recovery_suspended": bool(suspended),
-        "suspended_at_revision": suspended or None,
+        "suspended_reason": suspended or None,
         "recovery_failure_streak": int(
             getattr(engine, "_recovery_failure_streak", 0) or 0
         ),

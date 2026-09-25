@@ -311,6 +311,26 @@ def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _reseat_artifact_id(evidence: Any) -> None:
+    """Recompute ``evidence["artifact_id"]`` after harness-side mutation.
+
+    The producer derives ``artifact_id`` as the canonical sha256 of the
+    artifact minus the id field. Augmentation (taint merge, shape_check
+    guard, REPLACE->AUGMENT demotion, output bounding) mutates the emitted
+    dict, so the original id no longer re-derives from the emitted bytes.
+    Reseating keeps ``artifact_id == sha256(emitted content)`` true for any
+    consumer that re-validates.
+    """
+    if not isinstance(evidence, dict) or "artifact_id" not in evidence:
+        return
+    payload = {k: v for k, v in evidence.items() if k != "artifact_id"}
+    evidence["artifact_id"] = hashlib.sha256(
+        _canonical_bytes(
+            {"schema": "gt.evidence_artifact.v1", "artifact": payload}
+        )
+    ).hexdigest()
+
+
 def _snapshot_authority(
     repo_root: Path,
 ) -> tuple[str, tuple[tuple[str, str], ...], bool]:
@@ -662,7 +682,13 @@ _LANGUAGE_NAME_ALIASES = {
 }
 
 
-def _language_certification_omission(kind: str, arguments: Any) -> str:
+def _language_certification_omission(
+    kind: str,
+    arguments: Any,
+    *,
+    graph_db: str | Path | None = None,
+    repo_root: Path | None = None,
+) -> str:
     """Refuse a request scoped to a registered language the kind is not certified for.
 
     The certification matrix is per (language, operation). A ``language`` or
@@ -682,10 +708,44 @@ def _language_certification_omission(kind: str, arguments: Any) -> str:
         if name in REGISTERED_LANGUAGE_IDENTITIES:
             named.append(name)
     path = arguments.get("path")
+    path_is_prefix = False
     if isinstance(path, str) and path.strip():
         mapped = EXTENSION_LANGUAGES.get(Path(path.strip()).suffix.lower())
         if mapped:
             named.append(mapped)
+        else:
+            path_is_prefix = True
+    if path_is_prefix and graph_db:
+        # A ``path`` with no recognizable suffix is a directory prefix, and
+        # the producer resolves symbols under it with a LIKE-prefix match —
+        # so the languages actually in scope are whatever lives beneath it.
+        # Consult the graph rather than letting the prefix bypass the gate.
+        try:
+            import sqlite3
+
+            graph_path = Path(graph_db)
+            if not graph_path.is_absolute() and repo_root is not None:
+                graph_path = repo_root / graph_path
+            prefix = f"{path.strip().rstrip('/').rstrip('%')}%"
+            conn = sqlite3.connect(
+                graph_path.resolve().as_uri() + "?mode=ro", uri=True
+            )
+            try:
+                rows = conn.execute(
+                    "SELECT DISTINCT file_path FROM nodes"
+                    " WHERE file_path LIKE ?",
+                    (prefix,),
+                ).fetchall()
+            finally:
+                conn.close()
+            for (file_path,) in rows:
+                lang = EXTENSION_LANGUAGES.get(
+                    Path(str(file_path)).suffix.lower()
+                )
+                if lang and lang not in named:
+                    named.append(lang)
+        except Exception:  # noqa: BLE001 - gate derivation fails open
+            pass
     for name in named:
         if name not in certified:
             return f"typed_language_not_certified:{name}"
@@ -751,7 +811,10 @@ def execute_typed_action(
             certification_omission = "syntax_language_removed"
     else:
         certification_omission = _language_certification_omission(
-            kind, wire.get("arguments")
+            kind,
+            wire.get("arguments"),
+            graph_db=graph_db,
+            repo_root=root,
         )
     if certification_omission:
         evidence = {
@@ -832,6 +895,7 @@ def execute_typed_action(
         and isinstance(request, core.ActionRequest)
     ):
         context_type, execute_query = query_api
+        producer_error_omission = ""
         try:
             graph_path = Path(graph_db) if graph_db else None
             if graph_path is not None and not graph_path.is_absolute():
@@ -850,8 +914,12 @@ def execute_typed_action(
                     snapshot_complete=snapshot_complete,
                 ),
             )
-        except ValueError:
+        except ValueError as exc:
+            # A crashed producer query is not "unsupported" — name the
+            # failure class so a ValueError is not mistaken for a missing
+            # capability.
             artifact = None
+            producer_error_omission = f"producer_query_error:{type(exc).__name__}"
         if artifact is not None:
             validation = core.validate(artifact)
             if validation:
@@ -872,7 +940,11 @@ def execute_typed_action(
                 "action_id": wire.get("action_id", ""),
                 "semantics": "incomplete",
                 "direct_answer_json": "null",
-                "omissions": ["producer_not_supported"],
+                "omissions": [
+                    producer_error_omission
+                    if producer_error_omission
+                    else "producer_not_supported"
+                ],
             }
             direct_answer = None
             returncode = 2
@@ -966,8 +1038,12 @@ def execute_typed_action(
         try:
             import sqlite3
 
+            dataflow_graph = Path(graph_db)
+            if not dataflow_graph.is_absolute():
+                dataflow_graph = root / dataflow_graph
             dataflow_conn = sqlite3.connect(
-                f"file:{Path(graph_db).resolve()}?mode=ro", uri=True
+                dataflow_graph.resolve().as_uri() + "?mode=ro",
+                uri=True,
             )
             try:
                 dataflow = taint_dataflow.augment_taint(
@@ -1028,8 +1104,12 @@ def execute_typed_action(
         try:
             import sqlite3
 
+            guard_graph = Path(graph_db)
+            if not guard_graph.is_absolute():
+                guard_graph = root / guard_graph
             guard_conn = sqlite3.connect(
-                f"file:{Path(graph_db).resolve()}?mode=ro", uri=True
+                guard_graph.resolve().as_uri() + "?mode=ro",
+                uri=True,
             )
             try:
                 guard_omissions = (
@@ -1041,8 +1121,10 @@ def execute_typed_action(
                 )
             finally:
                 guard_conn.close()
-        except Exception:  # noqa: BLE001 - degrade to the producer answer
-            guard_omissions = []
+        except Exception as exc:  # noqa: BLE001 - degrade to the producer answer
+            # The producer answer still ships, but the failed guard must be
+            # named — otherwise a known cross-language defect passes silent.
+            guard_omissions = [f"shape_guard_error:{type(exc).__name__}"]
         if guard_omissions:
             direct_answer = guard_answer
             if isinstance(evidence.get("direct_answer_json"), str):
@@ -1146,6 +1228,7 @@ def execute_typed_action(
             result["decision"] = decision_payload
         if isinstance(honesty, dict):
             honesty["completeness"] = "incomplete"
+    _reseat_artifact_id(evidence)
     output = _canonical_bytes(result).decode("utf-8")
     return {
         "output": output,
@@ -1185,9 +1268,12 @@ def execute_typed_action_fail_open(
             ),
         )
     except Exception as exc:  # noqa: BLE001 - native harness must continue
+        request_wire = (
+            _request_mapping(request) if request is not None else None
+        )
         payload = {
             "schema": "gt.compiled_observation.v1",
-            "action_request": _request_mapping(request) if request is not None else None,
+            "action_request": request_wire,
             "evidence": {
                 "schema": "gt.evidence_artifact.v1",
                 "semantics": "incomplete",
@@ -1201,6 +1287,15 @@ def execute_typed_action_fail_open(
                 "mode": "PASS_THROUGH",
                 "reason_codes": ["typed_router_failure"],
             },
+            "honesty": envelope_for_result(
+                source_revision="",
+                workspace_revision="",
+                payload=None,
+                returned_count=0,
+                true_total=None,
+                abstention_reason="typed_router_failure",
+                incomplete=True,
+            ),
         }
         output = _canonical_bytes(payload).decode("utf-8")
         return request, {
@@ -1209,6 +1304,13 @@ def execute_typed_action_fail_open(
             "exception_info": f"GroundTruth typed action unavailable: {type(exc).__name__}",
             "extra": {
                 "gt_typed_action": True,
+                # The request was built before the failure: keep its lineage
+                # so an auditor can join it to the suppressed observation.
+                "action_request_sha256": (
+                    hashlib.sha256(_canonical_bytes(request_wire)).hexdigest()
+                    if request_wire is not None
+                    else ""
+                ),
                 "compiled_observation_sha256": hashlib.sha256(
                     output.encode("utf-8")
                 ).hexdigest(),

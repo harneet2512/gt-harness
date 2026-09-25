@@ -3638,3 +3638,250 @@ def test_no_tool_call_responses_are_reprompted_not_fatal(tmp_path, gt_off):
     )
     assert agent.config.max_consecutive_format_errors == 0
     assert agent.config.step_limit == 100
+
+
+def test_typed_action_nonmapping_arguments_fail_open(tmp_path, monkeypatch):
+    """Malformed ``arguments`` reach the router's fail-open lane as an
+    INCOMPLETE observation — they must not crash the action batch."""
+    _configure_fixture_provider(monkeypatch)
+    (tmp_path / "mod.py").write_text("needle = 1\n", encoding="utf-8")
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state",
+        predicates=[Predicate("p", "p")], repo_root=str(tmp_path),
+    )
+    install_runtime_hooks(agent, _session(adapter))
+    messages = agent.execute_actions(
+        {
+            "extra": {
+                "actions": [
+                    {
+                        "tool_name": "groundtruth",
+                        "tool_call_id": "gt-bad",
+                        "gt_action": {"kind": "callers", "arguments": "oops"},
+                    }
+                ]
+            }
+        }
+    )
+    assert len(messages) == 1
+    raw = messages[0]["content"].split("<output>", 1)[1]
+    payload = json.loads(raw.rsplit("</output>", 1)[0])
+    assert payload["schema"] == "gt.compiled_observation.v1"
+    # The malformed batch must produce a compiled observation rather than a
+    # crash — an abstain (PASS_THROUGH) or an honest partial (AUGMENT).
+    assert payload["decision"]["mode"] in {"PASS_THROUGH", "AUGMENT"}
+    assert "honesty" in payload
+
+
+def test_alias_kind_respects_capability_and_refresh_gates(tmp_path, monkeypatch):
+    """``find_callers`` is an alias for ``callers``: disabling
+    ``typed_callers`` must refuse it, and a stale graph must refresh
+    before it — the respelled name cannot evade either gate."""
+    _configure_fixture_provider(monkeypatch)
+    (tmp_path / "mod.py").write_text("def f(): return 1\n", encoding="utf-8")
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state",
+        predicates=[Predicate("p", "p")], repo_root=str(tmp_path),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    adapter.engine_state.bind_initial_source("ws-rev-1")
+    adapter.graph_fresh = False
+    phases = []
+
+    def refresh_graph(*, phase="graph_query"):
+        phases.append(phase)
+        adapter.graph_fresh = True
+        return True
+
+    monkeypatch.setattr(adapter, "refresh_graph", refresh_graph)
+    session = GTSession(
+        GTSessionConfig(
+            task_id=adapter.task_id, repo_root=adapter.repo_root,
+            state_dir=str(adapter.store.root.parent),
+            disabled_capabilities=("typed_callers",),
+        ),
+        engine=adapter,
+    )
+    install_runtime_hooks(agent, session)
+    messages = agent.execute_actions(
+        {
+            "extra": {
+                "actions": [
+                    {
+                        "tool_name": "groundtruth",
+                        "tool_call_id": "gt-alias",
+                        "gt_action": {
+                            "kind": "find_callers",
+                            "arguments": {"symbol": "f"},
+                        },
+                    }
+                ]
+            }
+        }
+    )
+    assert len(messages) == 1
+    raw = messages[0]["content"].split("<output>", 1)[1]
+    payload = json.loads(raw.rsplit("</output>", 1)[0])
+    assert payload["decision"]["mode"] == "PASS_THROUGH"
+    assert "capability_disabled" in payload["decision"]["reason_codes"]
+    # A disabled alias still passes the refresh gate first only when the
+    # canonical kind would — disabled short-circuits before refresh.
+    assert phases == []
+
+    # Re-enable the capability on a fresh agent/session pair: the alias now
+    # drives the canonical gate set, including the stale-graph refresh.
+    agent2 = FakeAgent()
+    adapter2 = MiniSweAdapter(
+        task_id="t2", state_dir=tmp_path / "state2",
+        predicates=[Predicate("p", "p")], repo_root=str(tmp_path),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    adapter2.engine_state.bind_initial_source("ws-rev-1")
+    adapter2.graph_fresh = False
+
+    def refresh_graph2(*, phase="graph_query"):
+        phases.append(phase)
+        adapter2.graph_fresh = True
+        return True
+
+    monkeypatch.setattr(adapter2, "refresh_graph", refresh_graph2)
+    install_runtime_hooks(agent2, _session(adapter2))
+    agent2.execute_actions(
+        {
+            "extra": {
+                "actions": [
+                    {
+                        "tool_name": "groundtruth",
+                        "tool_call_id": "gt-alias2",
+                        "gt_action": {
+                            "kind": "find_callers",
+                            "arguments": {"symbol": "f"},
+                        },
+                    }
+                ]
+            }
+        }
+    )
+    assert phases == ["graph_query"]
+
+
+def _wired_adapter(tmp_path):
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state",
+        predicates=[], repo_root=str(tmp_path),
+    )
+    adapter.begin_implement()
+    adapter.engine_state.bind_initial_source("rev-0")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"g")
+    adapter.engine_state.publish_graph(
+        graph_path=str(graph), graph_revision="g0", source_revision="rev-0"
+    )
+    adapter.graph_db = str(graph)
+    adapter.repository_revision = "rev-0"
+    return adapter
+
+
+def test_note_edit_marks_new_paths_into_existing_overlay(tmp_path):
+    """A heuristic edit while the overlay is non-empty must still mask its
+    paths — dropping them let a later publish claim currency over nodes
+    the edit already invalidated."""
+    adapter = _wired_adapter(tmp_path)
+    es = adapter.engine_state
+    adapter.repository_revision = "rev-1"
+    adapter.note_edit(("a.py",))
+    adapter.note_edit(("b.py",))
+    masked = set(es.query_snapshot().masked_paths)
+    assert {"a.py", "b.py"} <= masked
+    # Non-transaction edits advance the epoch marks the LSP-salvage
+    # staleness check reads — an unmarked edit could merge a candidate
+    # built before it.
+    assert adapter._path_edit_epochs.get("b.py") == adapter._edit_epoch
+
+
+def test_snapshot_delta_marks_path_edit_epochs(tmp_path):
+    adapter = _wired_adapter(tmp_path)
+    es = adapter.engine_state
+
+    class _Item:
+        def __init__(self, path):
+            self.path = path
+            self.kind = "file"
+            self.sha256 = "x" * 64
+
+    class _Snap:
+        def __init__(self, rev, files):
+            self.revision = rev
+            self.files = files
+            self.complete = True
+            self.omissions = ()
+
+        def canonical_bytes(self):
+            return json.dumps({"rev": self.revision}, sort_keys=True).encode()
+
+    adapter.record_repository_snapshot(_Snap("rev-0", [_Item("a.py")]),
+                                       boundary="test")
+    # Dirty the graph so the delta path is exercised.
+    adapter.repository_revision = "rev-1"
+    adapter.note_edit(("a.py",))
+    es.publish_graph(graph_path=es.graph_path, graph_revision="g1",
+                     source_revision="rev-1")
+    adapter.record_repository_snapshot(
+        _Snap("rev-2", [_Item("a.py"), _Item("b.py")]), boundary="test")
+    assert "b.py" in es.query_snapshot().masked_paths
+    assert adapter._path_edit_epochs.get("b.py") == adapter._edit_epoch
+
+
+def test_boundary_amend_uncoverable_set_escalates_to_rebuild(tmp_path, monkeypatch):
+    """``dirty_paths_exceed_limit``/``config_input_changed`` are uncoverable
+    by the amend lane: the boundary must buy a whole-tree build, not
+    journal the same refusal forever."""
+    from gt_engine import indexer
+
+    adapter = _wired_adapter(tmp_path)
+    es = adapter.engine_state
+    adapter.repository_revision = "rev-1"
+    es.mark_paths_dirty(
+        tuple(f"f{i}.py" for i in range(9)), revision="rev-1")
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, "dirty_paths_exceed_limit:9", ()))
+    rebuilt = []
+    monkeypatch.setattr(
+        adapter, "_recovery_build_inline",
+        lambda *, phase: rebuilt.append(phase))
+    adapter._amend_graph_inline(phase="test")
+    assert rebuilt == ["test"]
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text().splitlines()
+    ]
+    assert any(row["event"] == "graph_amend_uncoverable" for row in rows)
+
+
+def test_boundary_amend_clears_provably_non_indexable_masks(tmp_path, monkeypatch):
+    """Every masked path carrying a producer-unparsed suffix cannot have
+    put nodes in the graph — the adopted parent re-publishes at the new
+    source revision rather than refusing forever."""
+    from gt_engine import indexer
+
+    adapter = _wired_adapter(tmp_path)
+    es = adapter.engine_state
+    adapter.repository_revision = "rev-1"
+    es.mark_paths_dirty(("README.lock", "data.bin"), revision="rev-1")
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, "no_amendable_paths", ()))
+    adapter._amend_graph_inline(phase="test")
+    assert es.graph_current
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text().splitlines()
+    ]
+    assert any(row["event"] == "graph_mask_cleared" for row in rows)

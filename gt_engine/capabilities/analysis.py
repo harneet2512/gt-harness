@@ -5,6 +5,7 @@ the typed ``slice``/``taint`` kinds run through the certified dispatcher.
 """
 from __future__ import annotations
 
+import sqlite3
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -301,6 +302,14 @@ def callable_values(
             provenance=provenance,
             started_ms=started,
         )
+    except sqlite3.Error as exc:
+        return wrap(
+            session, "callable_values",
+            status="error",
+            omissions=(f"graph_query_failed:{type(exc).__name__}",),
+            provenance=provenance,
+            started_ms=started,
+        )
     finally:
         conn.close()
 
@@ -319,17 +328,41 @@ def taint(
     cleanses tainted input for the Python statement-dataflow layer.
     """
 
-    source_list = [sources] if isinstance(sources, str) else list(sources)
-    sink = (sinks or [None])[0] if isinstance(sinks, list) else sinks
+    started = time.perf_counter()
+    try:
+        source_list = [sources] if isinstance(sources, str) else list(sources)
+        sink_list = (
+            [sinks]
+            if isinstance(sinks, str) or sinks is None
+            else list(sinks)
+        )
+    except TypeError:
+        source_list, sink_list = [], []
+    sink_list = sink_list or [None]
+    if not source_list:
+        return wrap(
+            session, "taint",
+            status="unavailable",
+            omissions=("no_sources",),
+            provenance="gt_engine.miniswe_typed_actions.execute_typed_action:taint",
+            started_ms=started,
+        )
     results = []
     for source in source_list:
-        args: dict[str, Any] = {"source": source}
-        if sink:
-            args["sink"] = sink
-        args.update({k: v for k, v in optional.items() if v not in (None, "")})
-        results.append(
-            {"source": source, "result": run_typed(session, "taint", args)}
-        )
+        for sink in sink_list:
+            args: dict[str, Any] = {"source": source}
+            if sink:
+                args["sink"] = sink
+            args.update(
+                {k: v for k, v in optional.items() if v not in (None, "")}
+            )
+            results.append(
+                {
+                    "source": source,
+                    "sink": sink,
+                    "result": run_typed(session, "taint", args),
+                }
+            )
     if len(results) == 1:
         return results[0]["result"]
     merged_omissions: list[str] = []
@@ -344,7 +377,14 @@ def taint(
     return CapabilityResult(
         capability="taint",
         status=worst,
-        answer=[{"source": r["source"], "answer": r["result"].answer} for r in results],
+        answer=[
+            {
+                "source": r["source"],
+                "sink": r["sink"],
+                "answer": r["result"].answer,
+            }
+            for r in results
+        ],
         omissions=tuple(dict.fromkeys(merged_omissions)),
         semantics=base.semantics,
         graph_revision=base.graph_revision,

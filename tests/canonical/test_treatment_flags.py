@@ -321,3 +321,33 @@ def test_cli_flags_cover_workflow_knobs():
     assert declared, "no CliFlag/EnvVar kwarg literals parsed"
     missing = knob_names - declared
     assert not missing, f"undelcared --ak knobs: {sorted(missing)}"
+
+
+def test_contract_budget_and_step_limit_apply(tmp_path):
+    """A contract-supplied deadline/step budget must reach the runner args —
+    previously both were recorded "wired" while never applied."""
+    path = _contract(
+        tmp_path, {"execution_budget_sec": 5400, "step_limit": 50})
+    args = _ns(treatment_runtime_contract_path=path, step_limit=None)
+    resolution = resolve_treatment_flags(args)
+    assert args.time_budget_seconds == 5400
+    assert args.step_limit == 50
+    assert resolution["execution_budget_sec"]["disposition"] == "wired:deadline"
+    assert resolution["step_limit"]["disposition"] == "wired:runner_arg"
+    assert resolution["step_limit"]["value"] == "50"
+
+
+def test_contract_budget_conflicts_with_explicit_time_budget(tmp_path):
+    path = _contract(tmp_path, {"execution_budget_sec": 5400})
+    args = _ns(treatment_runtime_contract_path=path, time_budget_seconds=300)
+    with pytest.raises(TreatmentFlagRefusal, match="budget_conflict"):
+        resolve_treatment_flags(args)
+
+
+def test_invalid_contract_step_limit_refuses_by_name(tmp_path):
+    path = _contract(tmp_path, {"step_limit": "lots"})
+    args = _ns(treatment_runtime_contract_path=path, step_limit=None)
+    with pytest.raises(
+        TreatmentFlagRefusal, match="step_limit"
+    ):
+        resolve_treatment_flags(args)

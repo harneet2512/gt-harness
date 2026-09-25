@@ -2474,11 +2474,17 @@ class MiniSweAdapter(GroundtruthController):
                 and set(normalized_paths) <= self._adopted_edit_paths
             )
             if not adopted:
-                if not self.engine_state.query_snapshot().overlay:
-                    self.engine_state.mark_paths_dirty(
-                        normalized_paths,
-                        revision=self.repository_revision or f"epoch:{self.workspace_epoch}",
-                    )
+                # Every newly dirty path enters the overlay — a non-empty
+                # overlay is not a reason to skip: dropping new masked paths
+                # here would let a later publish claim currency over nodes
+                # those paths' edits already invalidated.
+                self._edit_epoch += 1
+                self.engine_state.mark_paths_dirty(
+                    normalized_paths,
+                    revision=self.repository_revision or f"epoch:{self.workspace_epoch}",
+                )
+                for path in normalized_paths:
+                    self._path_edit_epochs[str(path)] = self._edit_epoch
                 self.graph_stale_since_revision = self.repository_revision
                 self.store.append(
                     "graph_invalidated",
@@ -2525,9 +2531,12 @@ class MiniSweAdapter(GroundtruthController):
                 if prior.get(path) != current.get(path)
             ))
             if changed:
+                self._edit_epoch += 1
                 self.engine_state.mark_paths_dirty(
                     changed, revision=self.repository_revision
                 )
+                for path in changed:
+                    self._path_edit_epochs[str(path)] = self._edit_epoch
             else:
                 state = self.engine_state.query_snapshot()
                 if not state.masked_paths:
@@ -2557,6 +2566,8 @@ class MiniSweAdapter(GroundtruthController):
                         # adopted graph's basis is an unreconstructable tree
                         # -- the advance cannot be enumerated against what
                         # the graph covers.
+                        self._edit_epoch += 1
+                        self._incomplete_edit_epoch = self._edit_epoch
                         self.engine_state.mark_source_unenumerated(
                             revision=self.repository_revision,
                             reason="source_advance_unenumerated",
@@ -3562,6 +3573,63 @@ class MiniSweAdapter(GroundtruthController):
         ):
             # The chain's base is gone: the one legitimate rebuild.
             self._recovery_build_inline(phase=phase)
+            return
+        if not published and (reason or "").startswith((
+            "dirty_paths_exceed_limit", "config_input_changed",
+        )):
+            # No amend can cover this set: an over-cap dirty set exceeds the
+            # per-file amend bound and a producer config change re-derives
+            # every other file's resolution, so the amend lane itself is
+            # void. The boundary promised "unbounded on path count" —
+            # refusing here instead journaled the same refusal forever while
+            # the overlay never drained. The whole-tree build is the resync
+            # these refusals are asking for.
+            self.store.append(
+                "graph_amend_uncoverable", phase=phase, reason=reason[:200],
+                dirty_paths=list(dirty), parent_graph=str(parent),
+            )
+            self._recovery_build_inline(phase=phase)
+            return
+        if (
+            not published
+            and reason == "no_amendable_paths"
+            and str(parent) == str(self.engine_state.graph_path or "")
+            and all(
+                PurePosixPath(str(p).replace("\\", "/")).suffix.lower()
+                not in indexer.INCREMENTAL_AMENDABLE_EXTS
+                and PurePosixPath(str(p).replace("\\", "/")).name
+                not in indexer.PRODUCER_CONFIG_NAMES
+                for p in dirty
+            )
+        ):
+            # The suffix check re-derives _amendable_paths' own skip rule on
+            # the dirty set rather than trusting the reason string alone: a
+            # mismatched or stale refusal over an amendable path would publish
+            # a graph that cannot know the edit happened. With the check,
+            # every masked path carries a suffix the producer never parses
+            # (and none is a config input that re-derives the whole graph),
+            # so none could have put nodes in the graph — the adopted
+            # parent's content is provably unchanged by these edits.
+            # Re-publish it at the new source revision instead of paying a
+            # rebuild (or refusing forever) to prove nothing changed. Only
+            # the already-adopted graph takes this shortcut: an unadopted
+            # parent still owes real certification.
+            if self.engine_state.publish_graph(
+                graph_path=str(parent),
+                graph_revision=self.engine_state.graph_revision,
+                source_revision=self.engine_state.source_revision,
+            ):
+                self.store.append(
+                    "graph_mask_cleared", phase=phase,
+                    cleared_paths=list(dirty),
+                    repository_revision=self.engine_state.source_revision,
+                    graph_revision=self.engine_state.graph_revision,
+                )
+                self.graph_db = self.engine_state.graph_path
+                self.graph_stale_since_revision = ""
+                self._record_graph_publication()
+            else:
+                self._recovery_build_inline(phase=phase)
             return
         if not published:
             self.store.append(
