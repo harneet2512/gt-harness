@@ -16,8 +16,10 @@ Producer resolution, first match wins:
    producer's source, 0becde10), stamped so the analysis phase runs.
 
 The module skips cleanly only when none of these yields a runnable binary.
-Known producer/query defects are pinned as strict xfails so a fix upstream
-turns them into failures that demand the xfail be removed.
+Known producer/query defects are either pinned as strict xfails (so a fix
+upstream turns them into failures that demand the xfail be removed) or
+compensated by a harness-side guard that names its filtering — as
+``shape_check``'s cross-language interface guard does.
 """
 
 from __future__ import annotations
