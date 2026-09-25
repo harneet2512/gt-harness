@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-25T21:34:31Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-25T23:55:21Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `360b707ed1f70fba6e101a1b295931f378cf4f7c` |
+| harness | `canonical/gt-har90` @ `83c3f598b50f983dcae48da1d11c403bea247059` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -180,14 +180,14 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `freshness.fallback_state`: recovery/rebuild streaks and the suspended flag are adapter-internal bookkeeping, journaled but never delivered
 - `freshness.unit_state`: read-only freshness view; demotion/collapse consume _context_unit_rendered live-byte records, not this report
 - `localization.lexical_search`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `localization.lexical_search`: exact kind: 20-match/256-byte-line caps; a '.' scope also scans .git/ (documented producer defect)
+- `localization.lexical_search`: exact kind: 20-match/256-byte-line caps; a '.' scope also scans .git/ on the certified wheel (fixed at producer 9cf513af, pending re-release)
 - `localization.hybrid_rank`: the model receives the compacted top-4 render (<=1400 B) the task-start/drift localization lane produces from this ranking - never the raw HybridRanking; admission fire-once and soft/hard task ceilings bound redelivery
 - `localization.definition`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `localization.definition`: partial semantics: name-level resolution
 - `localization.references`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `localization.references`: partial semantics: name-level resolution; bands silently keep 20 rows while labelling the answer exact (documented wheel defect)
+- `localization.references`: partial semantics: name-level resolution; bands cap at 20 rows and name the cut (references_truncated:<edge_type> -> INCOMPLETE)
 - `structure.callers`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `structure.callers`: partial semantics: name-level resolution; 20 rows per band (documented wheel defect)
+- `structure.callers`: partial semantics: name-level resolution; 20 rows per band, named (callers_truncated -> INCOMPLETE)
 - `structure.callees`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `structure.callees`: no callee kind exists; surfaces the certified symbol_context answer's callees band verbatim
 - `structure.symbol_context`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
@@ -211,27 +211,27 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `change.route_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.route_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `change.shape_change`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed)
+- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the certified producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed; language-scoped binding landed at producer 9cf513af, pending re-certification)
 - `change.affected_tests`: selection only: _symbols_for_files + wheel select_covering_tests compose the same front half the live covering lane runs pre-execution; the lane continues into run_covering_tests and only a failing verdict becomes a covering_red dose - the raw selection is never delivered
 - `runtime.last_test_result`: the model receives the rendered [GT_EXECUTION_EVIDENCE] line queued as an execution_evidence candidate; the journal row, CAS artifact and raw output the facade returns stay host-side
 - `runtime.covering_tests`: delegates to change.affected_tests; same selection-only limit - no execution, no delivery of the selection itself
 - `runtime.failure_fingerprint`: the live recovery-steer lane fingerprints via the wheel's canonical_test_failure_fingerprint, a different implementation - bridge.failure_fingerprint is production-parity code used by the bridge episode machinery and is never emitted to the model
 - `runtime.repeated_failure_state`: the model receives only the bounded GT_RECOVERY steer (<=2 per task) carrying the fingerprint hash and workspace epoch; the raw recurrence map and delivered counter stay host-side
 - `runtime.verification_state`: recorded baseline-vs-current classification, not a fresh verdict; the model sees the baseline clause inside the [GT_EXECUTION_EVIDENCE] line, not the state dict
-- `kind.exact_literal_search`: exact semantics; explicit scopes only, 20 matches, 256 B/line; scope '.' also scans .git/ (documented producer defect)
+- `kind.exact_literal_search`: exact semantics; explicit scopes only, 20 matches, 256 B/line; scope '.' also scans .git/ on the certified wheel (fixed at producer 9cf513af, pending re-release)
 - `kind.syntax`: exact semantics; parse-only over go/js/py/rb/ts certified extensions; no facade exposes it
 - `kind.patch_impact`: partial semantics: conservatively incomplete, augments only
 - `kind.verification_status`: execution_specific semantics bound to command and revision; no facade exposes it (runtime.verification_state reads the recorded journal classification instead)
 - `kind.definition`: partial semantics: name-level resolution
-- `kind.references`: partial semantics: name-level resolution; bands silently keep 20 rows while labelling the answer exact (documented wheel defect)
-- `kind.callers`: partial semantics: name-level resolution; 20 rows per band (documented wheel defect)
+- `kind.references`: partial semantics: name-level resolution; bands cap at 20 rows and name the cut (references_truncated:<edge_type> -> INCOMPLETE)
+- `kind.callers`: partial semantics: name-level resolution; 20 rows per band, named (callers_truncated -> INCOMPLETE)
 - `kind.symbol_context`: partial semantics: name-level resolution
 - `kind.processes`: partial semantics
-- `kind.route_map`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced; an API_CALL-only route yields anchor line 0 and the answer becomes producer_not_supported (documented wheel defect)
+- `kind.route_map`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced; an API_CALL-only route reports route_handler_unresolved + route_anchor_unavailable (never a fabricated anchor line)
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `kind.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, resolved-but-unanalyzable targets, ambiguous same-line callsites, positional overflow, unbound *args/**kwargs, and object-attribute state crossing functions are named omissions and tainted unresolved callsites are reported as unresolved_reaches; seeds are unresolvable uses in the source function); sanitizer entries resolve to graph nodes — file.py:name scopes to one definition while a bare name denotes every callable with that name (named sanitizer_name_ambiguous); not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
-- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed)
+- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the certified producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed; language-scoped binding landed at producer 9cf513af, pending re-certification)
 - `kind.tool_map`: partial semantics: external decorators bind through occurrence nodes (name-only, uncertified); registration sites without decorators (server.add_tool(f) calls) are untracked by design
 - `kind.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `task_contract`: runner-side machinery: the obligations:task context unit is admitted through miniswe_gt_run, not the canonical runtime — extraction is verbatim-line anchored, not a semantic proof of coverage

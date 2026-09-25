@@ -202,7 +202,8 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         limitations=(
             _TYPED_FACADE_LIMIT,
             "exact kind: 20-match/256-byte-line caps; a '.' scope also scans "
-            ".git/ (documented producer defect)",
+            ".git/ on the certified wheel (fixed at producer 9cf513af, "
+            "pending re-release)",
         ),
     ),
     _e(
@@ -250,8 +251,8 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         tests=("tests/test_typed_graph_dispatch.py::test_references_groups_incoming_edges_by_type",),
         limitations=(
             _TYPED_FACADE_LIMIT,
-            "partial semantics: name-level resolution; bands silently keep 20 "
-            "rows while labelling the answer exact (documented wheel defect)",
+            "partial semantics: name-level resolution; bands cap at 20 rows "
+            "and name the cut (references_truncated:<edge_type> -> INCOMPLETE)",
         ),
     ),
     # ------------------------------------------------------------------ structure
@@ -266,8 +267,8 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
         tests=("tests/test_typed_graph_dispatch.py::test_callers_walks_incoming_calls_edges_depth_banded",),
         limitations=(
             _TYPED_FACADE_LIMIT,
-            "partial semantics: name-level resolution; 20 rows per band "
-            "(documented wheel defect)",
+            "partial semantics: name-level resolution; 20 rows per band, "
+            "named (callers_truncated -> INCOMPLETE)",
         ),
     ),
     _e(
@@ -529,11 +530,12 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: conformance counts callable members only — "
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
-            "logical check can appear twice; the producer resolves interface "
-            "targets by bare name across languages, and the harness guard "
-            "drops verdicts measured against a foreign-language interface "
-            "(cross_language_interface_filtered; unattributed rows keep "
-            "cross_language_interface_unattributed)",
+            "logical check can appear twice; the certified producer resolves "
+            "interface targets by bare name across languages, and the harness "
+            "guard drops verdicts measured against a foreign-language "
+            "interface (cross_language_interface_filtered; unattributed rows "
+            "keep cross_language_interface_unattributed; language-scoped "
+            "binding landed at producer 9cf513af, pending re-certification)",
         ),
     ),
     _e(
@@ -666,7 +668,8 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
         ),
         limitations=(
             "exact semantics; explicit scopes only, 20 matches, 256 B/line; "
-            "scope '.' also scans .git/ (documented producer defect)",
+            "scope '.' also scans .git/ on the certified wheel (fixed at "
+            "producer 9cf513af, pending re-release)",
         ),
     ),
     _kind(
@@ -708,8 +711,8 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
         facades=("localization.references",),
         tests=("tests/test_typed_graph_dispatch.py::test_references_groups_incoming_edges_by_type",),
         limitations=(
-            "partial semantics: name-level resolution; bands silently keep "
-            "20 rows while labelling the answer exact (documented wheel defect)",
+            "partial semantics: name-level resolution; bands cap at 20 rows "
+            "and name the cut (references_truncated:<edge_type> -> INCOMPLETE)",
         ),
     ),
     _kind(
@@ -720,8 +723,8 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "tests/test_typed_graph_dispatch.py::test_callers_alias_find_callers_dispatches_as_callers",
         ),
         limitations=(
-            "partial semantics: name-level resolution; 20 rows per band "
-            "(documented wheel defect)",
+            "partial semantics: name-level resolution; 20 rows per band, "
+            "named (callers_truncated -> INCOMPLETE)",
         ),
     ),
     _kind(
@@ -752,8 +755,8 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
         ),
         limitations=(
             "partial semantics: fixed framework manifest; MIDDLEWARE_ON not "
-            "surfaced; an API_CALL-only route yields anchor line 0 and the "
-            "answer becomes producer_not_supported (documented wheel defect)",
+            "surfaced; an API_CALL-only route reports route_handler_unresolved"
+            " + route_anchor_unavailable (never a fabricated anchor line)",
         ),
     ),
     _kind(
@@ -807,11 +810,12 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "partial semantics: conformance counts callable members only — "
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
-            "logical check can appear twice; the producer resolves interface "
-            "targets by bare name across languages, and the harness guard "
-            "drops verdicts measured against a foreign-language interface "
-            "(cross_language_interface_filtered; unattributed rows keep "
-            "cross_language_interface_unattributed)",
+            "logical check can appear twice; the certified producer resolves "
+            "interface targets by bare name across languages, and the harness "
+            "guard drops verdicts measured against a foreign-language "
+            "interface (cross_language_interface_filtered; unattributed rows "
+            "keep cross_language_interface_unattributed; language-scoped "
+            "binding landed at producer 9cf513af, pending re-certification)",
         ),
     ),
     _kind(
