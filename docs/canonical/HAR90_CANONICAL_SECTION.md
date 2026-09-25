@@ -1,12 +1,12 @@
 # CANONICAL GT — verified implementation
 
-_Rendered 2026-09-24T22:34:51Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
+_Rendered 2026-09-25T19:01:29Z by `scripts/canonical/render_har90_section.py` from the canonical artifacts. The 2026-09-22 snapshot below is **superseded by this section for implementation facts**._
 
 ## A — Source state
 
 | artifact | identity |
 |---|---|
-| harness | `canonical/gt-har90` @ `6ae7e0de8d65881ea4b0fc21453b075d326b3446` |
+| harness | `canonical/gt-har90` @ `7919facdb2bfec19b4f2fccd981100a3cbb6215e` |
 | groundtruth (producer source) | `1e83ea687bf2df5d9a168b2bc2c77ea3fd990307` tree `eb3b81c5980831cc84becd8729fe134e334febb6` |
 | wheel | `groundtruth_mcp-1.0.0-py3-none-any.whl` sha256 `658cad06f1ac450c7c707a8a108b493f79c3d0121a5201150015b786dc6086dc` |
 | producer binary (vendored linux-amd64) | sha256 `d4655bcc4dd54a52df2ff1f5471af7f737d1ddd56b5f6cbc4da86e83632db40e` |
@@ -211,7 +211,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `change.route_impact`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
 - `change.route_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `change.shape_change`: host-side facade shares the certified pipeline (capabilities/_query.run_typed -> execute_typed_action); the facade object itself emits no model-facing text - delivery happens only when the model selects the groundtruth tool
-- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, so a same-named interface in another language adds bogus verdicts (strict-xfail-pinned in test_shape_check_does_not_follow_cross_language_interface_edges)
+- `change.shape_change`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed)
 - `change.affected_tests`: selection only: _symbols_for_files + wheel select_covering_tests compose the same front half the live covering lane runs pre-execution; the lane continues into run_covering_tests and only a failing verdict becomes a covering_red dose - the raw selection is never delivered
 - `runtime.last_test_result`: the model receives the rendered [GT_EXECUTION_EVIDENCE] line queued as an execution_evidence candidate; the journal row, CAS artifact and raw output the facade returns stay host-side
 - `runtime.covering_tests`: delegates to change.affected_tests; same selection-only limit - no execution, no delivery of the selection itself
@@ -231,7 +231,7 @@ Classes: **INTELLIGENCE/STATE** (computes or stores product state),
 - `kind.api_impact`: partial semantics: fixed framework manifest; MIDDLEWARE_ON not surfaced
 - `kind.taint`: partial semantics: symbol-level CALLS reachability plus statement-level dataflow for Python sources only (def-use propagation over resolved callsites; unresolved callees, non-Python functions, unbound *args/**kwargs, and object-attribute state crossing functions are named omissions, and seeds are unresolvable uses in the source function); sanitizer entries resolve to graph nodes — file.py:name scopes to one definition while a bare name denotes every callable with that name (named sanitizer_name_ambiguous); not a sound over-approximation
 - `kind.rename`: partial semantics; no facade exposes it
-- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, so a same-named interface in another language adds bogus verdicts (strict-xfail-pinned in test_shape_check_does_not_follow_cross_language_interface_edges)
+- `kind.shape_check`: partial semantics: conformance counts callable members only — interface property signatures are unchecked; each IMPLEMENTS/DECLARED_IMPLEMENTS edge emits its own verdict row, so one logical check can appear twice; the producer resolves interface targets by bare name across languages, and the harness guard drops verdicts measured against a foreign-language interface (cross_language_interface_filtered; unattributed rows keep cross_language_interface_unattributed)
 - `kind.tool_map`: partial semantics: external decorators bind through occurrence nodes (name-only, uncertified); registration sites without decorators (server.add_tool(f) calls) are untracked by design
 - `kind.slice`: partial semantics: CFG substrate only; interprocedural hops are name-matched
 - `task_contract`: runner-side machinery: the obligations:task context unit is admitted through miniswe_gt_run, not the canonical runtime — extraction is verbatim-line anchored, not a semantic proof of coverage
@@ -315,4 +315,4 @@ gt_engine/capabilities/freshness.py:
 
 ---
 
-**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b verified the statement-level taint head through `ea8889ae`; R7 verified the review-fix head through `e91c347e` (fresh git-archive extraction — certified artifacts untouched, golden hashes reproduce, 103/103 canonical + 22+1x producer leg, all four review items confirmed, fixpoint cycle dead). Mini-SWE integration design landed at `53bf545b` (`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`). Later heads are docs-only section renders.
+**CANONICAL GT.** Independently verified: R5 PASS + delta confirmed through `8c5d6ae3`; R6/R6b verified the statement-level taint head through `ea8889ae`; R7 verified the review-fix head through `e91c347e` (fresh git-archive extraction — certified artifacts untouched, golden hashes reproduce; its mandated suite was canonical 103/103 + producer leg 22+1x only). The follow-on shape_check harness guard and dispatch-doc fix are locally verified on the full provider-free list (typed_graph_real_producer, typed_graph_dispatch, index_incremental, graph_fts5_preflight, producer_binding, vendored_producer_binding, canonical). Mini-SWE integration design landed at `53bf545b` (`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`).

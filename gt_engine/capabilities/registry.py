@@ -527,10 +527,10 @@ FACADE_ENTRIES: tuple[CapabilityEntry, ...] = (
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
             "logical check can appear twice; the producer resolves interface "
-            "targets by bare name across languages, so a same-named "
-            "interface in another language adds bogus verdicts "
-            "(strict-xfail-pinned in "
-            "test_shape_check_does_not_follow_cross_language_interface_edges)",
+            "targets by bare name across languages, and the harness guard "
+            "drops verdicts measured against a foreign-language interface "
+            "(cross_language_interface_filtered; unattributed rows keep "
+            "cross_language_interface_unattributed)",
         ),
     ),
     _e(
@@ -803,10 +803,10 @@ KIND_ENTRIES: tuple[CapabilityEntry, ...] = (
             "interface property signatures are unchecked; each IMPLEMENTS/"
             "DECLARED_IMPLEMENTS edge emits its own verdict row, so one "
             "logical check can appear twice; the producer resolves interface "
-            "targets by bare name across languages, so a same-named "
-            "interface in another language adds bogus verdicts "
-            "(strict-xfail-pinned in "
-            "test_shape_check_does_not_follow_cross_language_interface_edges)",
+            "targets by bare name across languages, and the harness guard "
+            "drops verdicts measured against a foreign-language interface "
+            "(cross_language_interface_filtered; unattributed rows keep "
+            "cross_language_interface_unattributed)",
         ),
     ),
     _kind(

@@ -497,19 +497,13 @@ def test_shape_check_reports_the_missing_interface_method(polyglot):
     assert any("wave" in check.get("missing_methods", []) for check in answer["checks"])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "producer resolves IMPLEMENTS/DECLARED_IMPLEMENTS targets by bare "
-        "interface name across languages: the TypeScript Friendly picks up "
-        "the unrelated Go Greeter contract and fails it. A producer fix "
-        "(language-scoped interface binding) turns this into XPASS and the "
-        "xfail must then be removed."
-    ),
-)
 def test_shape_check_does_not_follow_cross_language_interface_edges(
     gt_index, tmp_path
 ):
+    """The producer resolves IMPLEMENTS targets by bare name across
+    languages; the harness-side guard must attribute each conformance row
+    to its edge and drop verdicts measured against a foreign-language
+    interface, naming ``cross_language_interface_filtered``."""
     binary, info = gt_index
     files = {
         "app/shapes.ts": (
@@ -535,7 +529,7 @@ def test_shape_check_does_not_follow_cross_language_interface_edges(
     }
     root = tmp_path / "repo"
     graph = _index(binary, info, files, root)
-    _, answer = _run(root, graph, "shape_check", {"symbol": "Friendly"})
+    payload, answer = _run(root, graph, "shape_check", {"symbol": "Friendly"})
     # ``Friendly`` satisfies its own (TypeScript) interface; the Go ``Greeter``
     # contract is an unrelated same-named symbol and must never be checked.
     assert answer["checks"], answer
@@ -544,6 +538,10 @@ def test_shape_check_does_not_follow_cross_language_interface_edges(
         for check in answer["checks"]
     ), answer["checks"]
     assert answer["failed"] == 0
+    assert (
+        "cross_language_interface_filtered"
+        in payload["evidence"]["omissions"]
+    ), payload["evidence"]["omissions"]
 
 
 def test_shape_check_passes_a_conforming_class_with_an_empty_method(polyglot):

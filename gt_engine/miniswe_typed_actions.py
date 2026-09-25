@@ -73,10 +73,10 @@ KIND_ARGUMENT_DOCS = {
         "include_name_matched (boolean, default false; when true, "
         "name-matched call edges below the 0.5 receiver/import-proof "
         "confidence floor are also followed), and sanitizers (array of "
-        "function names whose return value cleanses tainted input; "
-        "entries may be qualified as file.py:name to scope to one "
-        "definition, otherwise a bare name denotes every callable with "
-        "that name); "
+        "function names whose return value cleanses tainted input, "
+        "and entries may be qualified as a file path and name joined "
+        "by a colon to scope to one definition, otherwise a bare name "
+        "denotes every callable with that name); "
         "symbol-level call reachability plus statement-level dataflow for "
         "Python sources via def-use propagation over resolved callsites"
     ),
@@ -1003,6 +1003,57 @@ def execute_typed_action(
             ]
         omissions.extend(dataflow["dataflow_omissions"])
         evidence["omissions"] = omissions
+
+    if (
+        kind == "shape_check"
+        and graph_db
+        and isinstance(evidence, Mapping)
+        and isinstance(direct_answer, Mapping)
+    ):
+        # Producer defect: IMPLEMENTS/DECLARED_IMPLEMENTS targets resolve by
+        # bare interface name across languages, so an unrelated same-named
+        # interface can fail a class it was never attached to. Replaying the
+        # same edge query lets the harness attribute each verdict row to its
+        # edge and drop provably cross-language verdicts, naming the filter.
+        from gt_engine import shape_check_guard
+
+        raw_arguments = wire.get("arguments")
+        if not isinstance(raw_arguments, Mapping):
+            try:
+                raw_arguments = json.loads(wire.get("arguments_json") or "{}")
+            except (TypeError, ValueError):
+                raw_arguments = {}
+        guard_answer = dict(direct_answer)
+        guard_omissions: list[str] = []
+        try:
+            import sqlite3
+
+            guard_conn = sqlite3.connect(
+                f"file:{Path(graph_db).resolve()}?mode=ro", uri=True
+            )
+            try:
+                guard_omissions = (
+                    shape_check_guard.filter_cross_language_interfaces(
+                        conn=guard_conn,
+                        arguments=raw_arguments,
+                        answer=guard_answer,
+                    )
+                )
+            finally:
+                guard_conn.close()
+        except Exception:  # noqa: BLE001 - degrade to the producer answer
+            guard_omissions = []
+        if guard_omissions:
+            direct_answer = guard_answer
+            if isinstance(evidence.get("direct_answer_json"), str):
+                evidence["direct_answer_json"] = _canonical_bytes(
+                    guard_answer
+                ).decode("utf-8")
+            elif isinstance(evidence.get("answer"), Mapping):
+                evidence["answer"] = guard_answer
+            omissions = list(evidence.get("omissions") or ())
+            omissions.extend(guard_omissions)
+            evidence["omissions"] = omissions
 
     # Every public typed result carries the same conservative honesty envelope.
     # Legacy/incomplete producers never become ``complete`` merely because a
