@@ -379,10 +379,18 @@ def render() -> str:
       "index_incremental, graph_fts5_preflight, producer_binding, "
       "vendored_producer_binding, canonical 103; guard repro shows the "
       "producer emits failed:2 while the harness answer reports failed:0 "
-      "with cross_language_interface_filtered). Mini-SWE integration design "
+      "with cross_language_interface_filtered). A five-pass bug hunt over "
+      "all 21 features landed `9f88364b` (taint sanitizer-subtree laundering "
+      "and receiver/vararg binding, facade freshness binding honoring the "
+      "EngineState concealment contract and the graph_queries capability "
+      "gate, boundary-amend escalation for uncoverable dirty sets plus "
+      "mask-clearing for provably non-indexable edits, typed-action "
+      "fail-open honesty envelopes, and contract budget/step-limit knobs "
+      "actually applied to runner args); provider-free list green "
+      "(canonical 114 + dispatch + incremental + producer binding), pending "
+      "fresh-archive R9 verification. Mini-SWE integration design "
       "landed at `53bf545b` "
-      "(`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`). Later heads are "
-      "docs-only section renders.")
+      "(`docs/canonical/MINISWE_INTEGRATION_DESIGN.md`).")
     a("")
     return "\n".join(lines)
 
