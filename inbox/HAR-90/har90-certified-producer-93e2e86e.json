@@ -1,0 +1,55 @@
+{
+  "basis": "certified_producer_build_green",
+  "detail": {
+    "artifact_name": "gt-index-linux-amd64",
+    "build_info_sha256": "02f7d9fd0a5f1b20381aa4a141ab789a64f1b25db5a83b7b42daed691d3546ca",
+    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "capabilities": [
+      "atomic_graph_publication",
+      "batch_parser_node_reuse_v1",
+      "call_resolution_v2",
+      "data_access_edges_v1",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "parser_inspection_v1",
+      "retained_call_candidates",
+      "source_revision_meta_v1",
+      "versioned_query_policy"
+    ],
+    "checks": [
+      "build_producer_linux.yml run 36298175850 success in digest-pinned golang:1.22.5-bookworm (static, netgo,osusergo,sqlite_fts5); Go source identical to certified ec587ccc (source_fingerprint 0d107838 unchanged)",
+      "Go source unchanged since ec587ccc, where go test -tags sqlite_fts5 ./... was green on all 11 gt-index packages with tests; CI go-build job in 36298175846 green",
+      "producer CI 36298175846: go-build, benchmark green; pytest ubuntu-3.12 4594 passed, macos-3.12 4570 passed, macos-3.11 4570 passed (0 failed)",
+      "new tests/unit/test_mcp_package_lazy_server.py fails before the fix and passes after: route_map/_graph_db import with mcp.server.fastmcp blocked",
+      "verify_wheel_source PASS: wheel 6597a6c0 built from `git archive 93e2e86e` corresponds to src/ (328 files)"
+    ],
+    "conclusion": "success",
+    "confidence": "high",
+    "fixes": "groundtruth/mcp/__init__.py resolves create_server lazily, so graph endpoints import under mcp 2.x (the harness product lock pins mcp 2.1.1 for datacurve-pier; the eager fastmcp import broke route_map/api_impact in the Linux readiness suite). Carries all ec587ccc fixes: VTA fixed point bounded per iteration (indexed formals, value-set merge memo) so AnalyzeVTAWithBudget no longer hangs on aiomonitor; named nested functions recorded as definitions (py/js/ts/tsx/rust); inline route handlers bound at the registration line with handler_kind, while unresolvable named handlers still abstain; language-scoped bare-name binding and .git pruning (9cf513af). Graphs are edge-identical to the base on five real repos apart from the intended additions.",
+    "jobs_green": [
+      "producer",
+      "go-build",
+      "benchmark"
+    ],
+    "limitations": [
+      "producer CI lint job fails on 11 pre-existing ruff errors in files this change does not touch (cfg_analysis.py, test_cfg_analysis.py, test_typed_topology_queries.py, test_deterministic_graph_queries.py); identical at certified 1e83ea68 (CI 35969660366) and ec587ccc (CI 36290313971)",
+      "ubuntu-3.11 and both windows pytest jobs error at setup: the tests/test_typed_queries_real_graph.py session fixture cold-builds gt-index inside the 60s pytest-timeout; identical failure set at certified 1e83ea68 (CI 35969660366); the module passes on ubuntu-3.12 and both macos jobs"
+    ],
+    "paid_dispatch": false,
+    "parent_source_commit": "ec587cccf275d9c86dedf8962971afa5d6f4c972",
+    "producer_sha256": "291c9b983180e3e9e4ef116349c403a0d607be7bdf3fbd944877411d734d5dc1",
+    "repository": "harneet2512/groundtruth",
+    "source_fingerprint": "0d1078382ff4bd36a37cf09cf41255f8e60e2c6eadfa765ed8db33946daeb809",
+    "workflow": "build_producer_linux.yml",
+    "workflow_repo": "harneet2512/groundtruth",
+    "workflow_run_id": 36298175850
+  },
+  "head_sha": "93e2e86eef853fe76cbad3a1d3eaa1b73134704d",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "5d4b2d3622c5ec4ce7609bf4b58824f69c028796a14ada24f40b54bda0c7c367",
+  "packet_id": "har90-certified-producer-93e2e86e",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-90"
+}
