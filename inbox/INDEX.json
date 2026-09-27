@@ -188,7 +188,8 @@
   "har90-certified-producer-d51a5276",
   "har90-certified-producer-032014ef",
   "har90-certified-producer-0becde10",
-  "har90-local-producer-1e83ea68"
+  "har90-local-producer-1e83ea68",
+  "har90-certified-producer-ec587ccc"
  ],
  "schema": "gt.review_inbox.v1",
  "tickets": {
@@ -445,7 +446,8 @@
    "har90-certified-producer-d51a5276",
    "har90-certified-producer-032014ef",
    "har90-certified-producer-0becde10",
-   "har90-local-producer-1e83ea68"
+   "har90-local-producer-1e83ea68",
+   "har90-certified-producer-ec587ccc"
   ]
  }
 }
