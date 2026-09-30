@@ -321,3 +321,105 @@ def test_a_slow_index_build_never_delays_the_agent_s_start(tmp_path, monkeypatch
     events = (adapter.store.path).read_text(encoding="utf-8")
     assert "gt_thin_index_background" in events and "gt_thin_index_ready" not in events
     delivery.stop()
+
+
+
+def test_each_post_turn_refresh_leaves_a_receipt(tmp_path, monkeypatch):
+    """gt-index runs at nice 19 beside the agent's builds (PR #50): a starved
+    amend must show in receipts as a long refresh, with whether nice applied."""
+    import gt_engine.tool_server as tool_server
+
+    events = []
+    adapter = _adapter(tmp_path)
+    adapter.graph_fresh = False
+    adapter.store = SimpleNamespace(append=lambda event, **row: events.append((event, row)))
+    delivery = _Delivery()
+    delivery.session = SimpleNamespace()
+    agent = _agent(GTAttachedAgent, tmp_path, [["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]],
+                   delivery=delivery, adapter=adapter)
+
+    def amend(_session, **_kw):
+        time.sleep(0.15)  # above REFRESH_RECEIPT_MIN_SECONDS: real indexing work
+        adapter.graph_fresh = True
+
+    monkeypatch.setattr(tool_server, "refresh_if_stale", amend)
+    agent._refresh_after_turn()
+
+    receipts = [row for event, row in events if event == "gt_thin_refresh"]
+    assert len(receipts) == 1
+    assert receipts[0]["seconds"] >= 0.15 and receipts[0]["graph_fresh"] is True
+    assert isinstance(receipts[0]["low_priority"], bool)
+    assert agent.gt_stats["refresh_max_seconds"] >= 0.15
+
+
+def test_low_priority_active_reports_the_env_switch(monkeypatch):
+    from gt_engine import indexer
+
+    monkeypatch.setenv(indexer.INDEX_NICE_ENV, "0")
+    assert indexer.low_priority_active() is False
+
+
+def test_a_no_op_refresh_leaves_no_receipt(tmp_path, monkeypatch):
+    """Nothing to index (one FASTA): the refresher returns at once every turn;
+    validation run 36665598281 logged 89 such zero-second receipts on one task."""
+    import gt_engine.tool_server as tool_server
+
+    events = []
+    adapter = _adapter(tmp_path)
+    adapter.graph_fresh = False
+    adapter.store = SimpleNamespace(append=lambda event, **row: events.append(event))
+    delivery = _Delivery()
+    delivery.session = SimpleNamespace()
+    agent = _agent(GTAttachedAgent, tmp_path, [["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]],
+                   delivery=delivery, adapter=adapter)
+    monkeypatch.setattr(tool_server, "refresh_if_stale", lambda _session, **_kw: None)
+
+    agent._refresh_after_turn()
+
+    assert "gt_thin_refresh" not in events
+
+
+def _regression_agent(tmp_path, monkeypatch, found):
+    from gt_engine import regression_gate
+
+    events = []
+    adapter = _adapter(tmp_path)
+    adapter.store = SimpleNamespace(append=lambda event, **row: events.append((event, row)))
+    delivery = _Delivery()
+    delivery.session = SimpleNamespace()
+    delivery.review_baseline = "abc123"
+    submit = ["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]
+    agent = _agent(GTAttachedAgent, tmp_path, [submit, submit], delivery=delivery, adapter=adapter)
+
+    def fake_check(root, baseline, changed, reachable, execute, exists_at_start, **_kw):
+        return regression_gate.RegressionResult(regressions=list(found), failing_now=list(found),
+                                                candidates=["tests/test_config.py"], seconds=1.5)
+
+    monkeypatch.setattr(regression_gate, "check", fake_check)
+    monkeypatch.setattr("gt_engine.submit_review.changed_files_since", lambda root, baseline: ["pkg/config.py"])
+    return agent, events
+
+
+def test_a_regression_holds_the_first_submit_once(tmp_path, monkeypatch):
+    agent, events = _regression_agent(tmp_path, monkeypatch, ["tests/test_config.py::test_limit"])
+    agent.run("task")
+    held = [m for m in agent.messages if "[GT] regression check" in str(m.get("content"))]
+    assert len(held) == 1 and "tests/test_config.py::test_limit" in str(held[0]["content"])
+    assert agent.gt_stats["regression_held"] == 1
+    checks = [row for event, row in events if event == "gt_regression_check"]
+    assert len(checks) == 1 and checks[0]["regressions"] == ["tests/test_config.py::test_limit"]
+
+
+def test_no_regression_means_no_hold(tmp_path, monkeypatch):
+    agent, events = _regression_agent(tmp_path, monkeypatch, [])
+    agent.run("task")
+    assert not any("[GT] regression check" in str(m.get("content")) for m in agent.messages)
+    assert agent.gt_stats.get("regression_held", 0) == 0
+
+
+def test_the_regression_gate_can_be_switched_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("GT_REGRESSION_GATE", "0")
+    agent, events = _regression_agent(tmp_path, monkeypatch, ["tests/test_config.py::test_limit"])
+    agent.run("task")
+    assert not any("[GT] regression check" in str(m.get("content")) for m in agent.messages)
+    assert not any(event == "gt_regression_check" for event, _ in events)

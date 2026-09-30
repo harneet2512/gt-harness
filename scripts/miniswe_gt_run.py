@@ -891,10 +891,11 @@ def build_agent(
     }
     gt_disabled = gt_off or gt_mode == "off" or global_killed
     attached = False
+    workspace_gate = None  # the gate decision applied below, journaled once the store exists
     if not gt_disabled:
         from gt_engine.attached_delivery import (
-            attached_instance_template,
             attached_system_section,
+            instance_template_for,
             is_attached,
         )
 
@@ -905,7 +906,10 @@ def build_agent(
         # replaced so GT is part of how the agent works (GitNexus's levers).
         # The typed function tool stays unadvertised.
         system_template = f"{system_template}\n\n{attached_system_section()}"
-        instance_template = attached_instance_template(instance_template)
+        from gt_engine.workspace_gate import gate_report
+
+        workspace_gate = gate_report(cwd)
+        instance_template = instance_template_for(instance_template, cwd, report=workspace_gate)
         disabled_capabilities = tuple(
             dict.fromkeys((*disabled_capabilities, "typed_actions"))
         )
@@ -1263,6 +1267,8 @@ def build_agent(
     adapter._background_graph_builder = lambda: _StartupIndex(_initial_index)
     adapter._startup_finalize = _finalize_startup
     adapter.store.append("execution_transport", synthetic_transport=synthetic_transport)
+    if workspace_gate is not None:
+        adapter.store.append("gt_workspace_gate", **workspace_gate)
     delivery_path = (
         "legacy" if os.environ.get("GT_LEGACY_MODEL_VISIBLE", "").strip() == "1"
         else "compiled"

@@ -245,7 +245,7 @@ def build_agent(
         observer.install(agent.model)
         return agent, None, None
 
-    from gt_engine.attached_delivery import attached_instance_template, attached_system_section
+    from gt_engine.attached_delivery import attached_system_section, instance_template_for
     from gt_engine.thin_agent import GTAttachedAgent, build_attached_session
 
     adapter, session, delivery, layout = build_attached_session(
@@ -253,13 +253,22 @@ def build_agent(
         model=model, resolved_model=model_name,
     )
     delivery.start(layout.task_root / "bin", env_obj.config.env)
+    from gt_engine.workspace_gate import gate_report
+
+    gate = gate_report(cwd)  # once: the journaled decision is the applied one
+    store = getattr(getattr(session, "_engine", None), "store", None)
+    if store is not None:
+        try:
+            store.append("gt_workspace_gate", **gate)
+        except Exception as exc:  # noqa: BLE001 - journaling never costs the run
+            print(f"gt_workspace_gate not journaled: {type(exc).__name__}: {exc}", file=sys.stderr)
     agent = GTAttachedAgent(
         model_obj, env_obj,
         delivery=delivery,
         adapter=adapter,
         config_class=AgentConfig,
         system_template=f"{system_template}\n\n{attached_system_section()}",
-        instance_template=attached_instance_template(instance_template),
+        instance_template=instance_template_for(instance_template, cwd, report=gate),
         step_limit=step_limit,
         output_path=Path(output) if output else None,
     )

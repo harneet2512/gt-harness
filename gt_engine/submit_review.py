@@ -300,10 +300,10 @@ def added_text_since(repo_root: str, baseline: str) -> str:
     parts: list[str] = []
     try:
         ref = baseline or "HEAD"
-        diff = subprocess.run(["git", "-C", str(root), "diff", "--no-color", "-U0", ref],
+        diff = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(root), "diff", "--no-color", "-U0", ref],
                               capture_output=True, text=True, timeout=30, errors="replace").stdout
         parts += [line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
-        untracked = subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
+        untracked = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
                                    capture_output=True, text=True, timeout=30, errors="replace").stdout
         for rel in untracked.splitlines()[:200]:
             path = root / rel
@@ -319,7 +319,7 @@ def added_text_since(repo_root: str, baseline: str) -> str:
 
 def changed_files_since(repo_root: str, baseline: str) -> list[str]:
     try:
-        out = subprocess.run(["git", "-C", repo_root, "diff", "--name-only", baseline or "HEAD"],
+        out = subprocess.run(["git", "-c", "safe.directory=*", "-C", repo_root, "diff", "--name-only", baseline or "HEAD"],
                              capture_output=True, text=True, timeout=30, errors="replace").stdout
     except (OSError, subprocess.SubprocessError):
         return []
@@ -332,6 +332,15 @@ def session_review(session: "GTSession", baseline: str) -> str:
     issue = str(getattr(engine, "issue_text", "") or "")
     root = str(getattr(engine, "repo_root", "") or "")
     if not issue.strip() or not root:
+        return ""
+    from gt_engine.workspace_gate import has_start_commit
+
+    # The review diffs against the task's starting commit. Without one (no
+    # repository, no git, a refused repository, an empty `git init`) the diff is
+    # empty and every task literal would read "[not in your changes]"
+    # (qemu-startup, campaign 2026-09-29), so there is no review. ``baseline`` is
+    # the commit taken at session start; an empty one means the same.
+    if not baseline or not has_start_commit(root):
         return ""
     tests: list[str] = []
     try:

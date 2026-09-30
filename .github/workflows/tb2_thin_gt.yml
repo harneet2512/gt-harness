@@ -226,7 +226,9 @@ jobs:
             -i "$TASK"
       - name: Fix artifact permissions
         if: always()
-        run: sudo chmod -R a+r results 2>/dev/null || true
+        # a+rX: directories must be traversable too, or the uploader cannot stat files in
+        # GT's state (tb2 r10 36683920875 lost 2 trials: EACCES on agent/gt-state).
+        run: sudo chmod -R a+rX results 2>/dev/null || true
       - name: Upload task result
         if: always()
         uses: actions/upload-artifact@v4
