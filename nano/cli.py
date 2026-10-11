@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 from collections.abc import Callable
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
@@ -49,6 +51,53 @@ _positive_float = _number_arg(
 )
 # Range checks already reject nan (every comparison with it is False) and inf.
 _temperature = _number_arg(float, lambda v: 0 <= v <= 2, "must be between 0 and 2")
+
+
+_REDACTED = "[redacted]"
+
+# Key shapes that must never reach a terminal or CI log. A closed list: a shape
+# that is not here is not caught. Each pattern is anchored so ordinary words
+# ("task-force", "disk-backed") are left alone.
+_KEY_SHAPES = tuple(
+    re.compile(pattern)
+    for pattern in (
+        # OpenAI and Anthropic keys, including sk-ant-, sk-proj- and the masked
+        # form providers echo back ("sk-proj-****abcd").
+        r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]{8,}",
+        r"(?i)\bBearer\s+[A-Za-z0-9._~+/=*-]{8,}",
+        r"\bgh[pos]_[A-Za-z0-9]{20,}",
+        r"\bgithub_pat_[A-Za-z0-9_]{20,}",
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bAIza[0-9A-Za-z_-]{35}",
+        r"\bxox[bp]-[A-Za-z0-9-]{10,}",
+    )
+)
+# `name=value` and `name: value` (also `"name": "value"`). Only the value is
+# replaced, so the message still says which setting was involved.
+_NAMED_SECRET = re.compile(
+    r"""(?ix)
+    (?P<name>[\w-]*(?:api[_-]?key|token|secret|password)["']?\s*[=:]\s*)
+    (?P<value>"[^"]*"|'[^']*'|[^\s,;&]+)
+    """
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace every key-shaped piece of `text` with `[redacted]`."""
+    for shape in _KEY_SHAPES:
+        text = shape.sub(_REDACTED, text)
+    return _NAMED_SECRET.sub(lambda m: m.group("name") + _REDACTED, text)
+
+
+def _setup_error_line(error: Exception) -> str:
+    """The `setup error:` line for `error`, safe to print.
+
+    Redact first, then escape for Rich: the marker and any tag-like piece of the
+    message (a stray `[/foo]` raises MarkupError) are then shown literally.
+    """
+    return "[bold red]setup error:[/] " + escape(
+        _redact_secrets(f"{type(error).__name__}: {error}")
+    )
 
 
 def build_provider(
@@ -163,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
                       gt_root=args.gt_root,
                       time_budget_seconds=args.time_budget_seconds)
     except Exception as e:
-        _console.print(f"[bold red]setup error:[/] {type(e).__name__}: {e}")
+        _console.print(_setup_error_line(e))
         return 1
     result = agent.run(args.task)
     _console.print(f"\n[bold]stop:[/] {result.stop_reason}  "

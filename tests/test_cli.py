@@ -332,3 +332,129 @@ def test_at3_note_wording_is_exact(capsys):
     assert "[truncated, 1234 more characters]" in capsys.readouterr().out
     _print_event(_tool_result("a" * 2001))
     assert "[truncated, 1 more character]" in capsys.readouterr().out
+
+
+# ---- #55: the setup error line must never print a key -------------------------
+# Key-shaped fixtures are built from pieces at run time, so no key-shaped
+# literal sits in the source.
+
+def _body(n=36):
+    return "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5"[:n]
+
+
+_KEY_SHAPES = {
+    "sk": lambda: "sk" + "-" + _body(),
+    "sk-ant": lambda: "sk" + "-ant-api03-" + _body(),
+    "sk-proj": lambda: "sk" + "-proj-" + _body(),
+    "sk-masked": lambda: "sk" + "-proj-" + "*" * 20 + "w1xY",
+    "github_pat": lambda: "github" + "_pat_" + _body(30),
+    "ghp": lambda: "gh" + "p_" + _body(36),
+    "gho": lambda: "gh" + "o_" + _body(36),
+    "ghs": lambda: "gh" + "s_" + _body(36),
+    "aws": lambda: "AK" + "IA" + "ABCDEFGH12345678",
+    "google": lambda: "AI" + "za" + _body(35),
+    "slack-bot": lambda: "xo" + "xb-" + "1234567890-" + _body(24),
+    "slack-user": lambda: "xo" + "xp-" + "1234567890-" + _body(24),
+}
+
+
+def _setup_error_output(capsys, message, exc=RuntimeError):
+    with patch("nano.cli.build_provider", side_effect=exc(message)):
+        rc = main(["run", "x"])
+    out = capsys.readouterr().out
+    return rc, out, "".join(out.split())
+
+
+@pytest.mark.parametrize("shape", sorted(_KEY_SHAPES))
+def test_at4_setup_error_redacts_key(shape, capsys):
+    key = _KEY_SHAPES[shape]()
+    rc, out, flat = _setup_error_output(capsys, f"bad credentials {key} rejected")
+    assert rc == 1
+    assert "setup error:" in out
+    assert key not in flat
+    assert "[redacted]" in flat
+    assert "badcredentials" in flat and "rejected" in flat
+
+
+def test_at4_bearer_token_redacted(capsys):
+    token = _body()
+    rc, out, flat = _setup_error_output(capsys, f"header Authorization: Bearer {token} failed")
+    assert rc == 1
+    assert token not in flat
+    assert "[redacted]" in flat
+    assert "failed" in flat
+
+
+@pytest.mark.parametrize("name", ["api_key", "apikey", "API_KEY", "token", "access_token",
+                                  "secret", "client_secret", "password", "Password"])
+@pytest.mark.parametrize("sep", ["=", ": ", " = "])
+def test_at4_name_value_redacted_name_kept(name, sep, capsys):
+    value = "hunter" + "2" + "xyz"
+    rc, out, flat = _setup_error_output(capsys, f"connect failed {name}{sep}{value} retry later")
+    assert rc == 1
+    assert value not in flat
+    assert "[redacted]" in flat
+    assert name in flat
+    assert "retrylater" in flat
+
+
+def test_at4_quoted_json_value_redacted(capsys):
+    value = "hunter" + "2" + "xyz"
+    rc, out, flat = _setup_error_output(capsys, 'body {"api_key": "' + value + '", "model": "m"}')
+    assert value not in flat
+    assert '"model":"m"' in flat
+
+
+def test_at4_several_keys_all_redacted(capsys):
+    keys = [_KEY_SHAPES["sk"](), _KEY_SHAPES["ghp"](), _KEY_SHAPES["aws"]()]
+    rc, out, flat = _setup_error_output(capsys, "tried " + " then ".join(keys) + " and gave up")
+    assert rc == 1
+    for key in keys:
+        assert key not in flat
+    assert flat.count("[redacted]") == 3
+    assert "andgaveup" in flat
+
+
+def test_at4_exception_type_kept(capsys):
+    rc, out, flat = _setup_error_output(capsys, "boom", exc=KeyError)
+    assert "KeyError" in flat
+
+
+@pytest.mark.parametrize("message", [
+    "no usable shell found",
+    "the task-force disk-backed cache is ready",
+    "ask-for-help and risk-averse mode",
+    "token budget exceeded for model",
+    "password rules changed",
+    "sk- is a prefix",
+])
+def test_at4_plain_text_unchanged(message, capsys):
+    rc, out, flat = _setup_error_output(capsys, message)
+    assert rc == 1
+    assert "[redacted]" not in flat
+    assert "".join(message.split()) in flat
+
+
+@pytest.mark.parametrize("message", ["bad tag [/foo] here", "see [red]this[/red] and [bold", "[/]"])
+def test_at4_setup_error_with_markup_does_not_crash(message, capsys):
+    rc, out, flat = _setup_error_output(capsys, message)
+    assert rc == 1
+    assert "".join(message.split()) in flat
+
+
+def test_at4_markup_and_key_together(capsys):
+    key = _KEY_SHAPES["sk"]()
+    rc, out, flat = _setup_error_output(capsys, f"[/foo] key {key} [red]x")
+    assert rc == 1
+    assert key not in flat
+    assert "[/foo]" in flat and "[redacted]" in flat
+
+
+def test_at4_agent_construction_error_also_redacted(capsys):
+    key = _KEY_SHAPES["sk-ant"]()
+    with patch("nano.cli.build_provider"), patch("nano.cli.Agent", side_effect=ValueError(f"x {key}")):
+        rc = main(["run", "x"])
+    flat = "".join(capsys.readouterr().out.split())
+    assert rc == 1
+    assert key not in flat
+    assert "[redacted]" in flat
