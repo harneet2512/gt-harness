@@ -342,7 +342,7 @@ def _body(n=36):
     return "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5"[:n]
 
 
-_KEY_SHAPES = {
+_KEY_BUILDERS = {
     "sk": lambda: "sk" + "-" + _body(),
     "sk-ant": lambda: "sk" + "-ant-api03-" + _body(),
     "sk-proj": lambda: "sk" + "-proj-" + _body(),
@@ -365,9 +365,9 @@ def _setup_error_output(capsys, message, exc=RuntimeError):
     return rc, out, "".join(out.split())
 
 
-@pytest.mark.parametrize("shape", sorted(_KEY_SHAPES))
+@pytest.mark.parametrize("shape", sorted(_KEY_BUILDERS))
 def test_at4_setup_error_redacts_key(shape, capsys):
-    key = _KEY_SHAPES[shape]()
+    key = _KEY_BUILDERS[shape]()
     rc, out, flat = _setup_error_output(capsys, f"bad credentials {key} rejected")
     assert rc == 1
     assert "setup error:" in out
@@ -406,7 +406,7 @@ def test_at4_quoted_json_value_redacted(capsys):
 
 
 def test_at4_several_keys_all_redacted(capsys):
-    keys = [_KEY_SHAPES["sk"](), _KEY_SHAPES["ghp"](), _KEY_SHAPES["aws"]()]
+    keys = [_KEY_BUILDERS["sk"](), _KEY_BUILDERS["ghp"](), _KEY_BUILDERS["aws"]()]
     rc, out, flat = _setup_error_output(capsys, "tried " + " then ".join(keys) + " and gave up")
     assert rc == 1
     for key in keys:
@@ -443,7 +443,7 @@ def test_at4_setup_error_with_markup_does_not_crash(message, capsys):
 
 
 def test_at4_markup_and_key_together(capsys):
-    key = _KEY_SHAPES["sk"]()
+    key = _KEY_BUILDERS["sk"]()
     rc, out, flat = _setup_error_output(capsys, f"[/foo] key {key} [red]x")
     assert rc == 1
     assert key not in flat
@@ -451,7 +451,7 @@ def test_at4_markup_and_key_together(capsys):
 
 
 def test_at4_agent_construction_error_also_redacted(capsys):
-    key = _KEY_SHAPES["sk-ant"]()
+    key = _KEY_BUILDERS["sk-ant"]()
     with patch("nano.cli.build_provider"), patch("nano.cli.Agent", side_effect=ValueError(f"x {key}")):
         rc = main(["run", "x"])
     flat = "".join(capsys.readouterr().out.split())
@@ -483,7 +483,7 @@ def test_at4_unterminated_quoted_value_is_redacted_to_the_end(quote, capsys):
 
 @pytest.mark.parametrize("shape", ["github_pat", "ghp", "aws", "google", "slack-bot"])
 def test_at4_key_glued_to_a_word_character_is_redacted(shape, capsys):
-    key = _KEY_SHAPES[shape]()
+    key = _KEY_BUILDERS[shape]()
     rc, out, flat = _setup_error_output(capsys, f"failed for key_{key} today")
     assert rc == 1
     assert key not in flat
