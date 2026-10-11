@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from collections.abc import Callable
@@ -40,6 +41,10 @@ def _number_arg[N: (int, float)](
 
 
 _positive_int = _number_arg(int, lambda v: v >= 1, "must be a positive whole number")
+# `inf > 0` is True and `nan > 0` is False, so finiteness is checked first.
+_positive_float = _number_arg(
+    float, lambda v: math.isfinite(v) and v > 0, "must be a positive number"
+)
 
 
 def build_provider(
@@ -112,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
                           "Omit to run stock nano (GT off).")
     run.add_argument(
         "--time-budget-seconds",
-        type=float,
+        type=_positive_float,
         default=None,
         help=(
             "Outer agent wall-clock budget. Bash timeouts are clamped to "

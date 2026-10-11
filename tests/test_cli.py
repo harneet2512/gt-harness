@@ -128,3 +128,76 @@ def test_at1_max_iterations_default_is_30():
         rc = main(["run", "x", "--model", "m"])
     assert rc == 0
     assert agent_cls.call_args.kwargs["max_iterations"] == 30
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "-0.5", "nan", "inf", "1e999", "abc", "", "0.0"])
+def test_at1_time_budget_rejects_non_positive(bad, capsys):
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--time-budget-seconds", bad])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--time-budget-seconds" in err
+    assert "must be a positive number" in err
+    assert chr(0x2014) not in err
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at1_time_budget_error_does_not_echo_value(capsys):
+    secret_shaped = "sk-" + "b" * 24
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--time-budget-seconds", secret_shaped])
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert secret_shaped not in captured.err
+    assert secret_shaped not in captured.out
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize(("text", "expected"), [("0.5", 0.5), ("1800", 1800.0), (" 3 ", 3.0)])
+def test_at1_time_budget_accepts_positive(text, expected):
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()) as agent_cls, \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")):
+        rc = main(["run", "x", "--model", "m", "--time-budget-seconds", text])
+    assert rc == 0
+    assert agent_cls.call_args.kwargs["time_budget_seconds"] == expected
+
+
+def test_at1_time_budget_default_is_none_and_not_validated():
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()) as agent_cls, \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")):
+        rc = main(["run", "x", "--model", "m"])
+    assert rc == 0
+    assert agent_cls.call_args.kwargs["time_budget_seconds"] is None
+
+
+def test_at1_time_budget_negative_inf_with_equals_is_rejected(capsys):
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--time-budget-seconds=-inf"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--time-budget-seconds" in err
+    assert "must be a positive number" in err
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at1_time_budget_negative_inf_as_separate_word_still_exits_2(capsys):
+    # argparse reads "-inf" as a flag, not a value, so the validator never runs.
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--time-budget-seconds", "-inf"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--time-budget-seconds" in err
+    assert "must be a positive number" not in err  # the validator did not run
+    agent_cls.assert_not_called()
+    build.assert_not_called()
