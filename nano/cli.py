@@ -65,11 +65,14 @@ _KEY_SHAPES = tuple(
         # form providers echo back ("sk-proj-****abcd").
         r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]{8,}",
         r"(?i)\bBearer\s+[A-Za-z0-9._~+/=*-]{8,}",
-        r"\bgh[pos]_[A-Za-z0-9]{20,}",
-        r"\bgithub_pat_[A-Za-z0-9_]{20,}",
-        r"\bAKIA[0-9A-Z]{16}\b",
-        r"\bAIza[0-9A-Za-z_-]{35}",
-        r"\bxox[bp]-[A-Za-z0-9-]{10,}",
+        # The shapes below have no leading word boundary on purpose: their long
+        # fixed bodies make a false match unlikely, and a boundary would let a
+        # key glued to a word character ("key_AKIA...") through.
+        r"gh[pos]_[A-Za-z0-9]{20,}",
+        r"github_pat_[A-Za-z0-9_]{20,}",
+        r"AKIA[0-9A-Z]{16}",
+        r"AIza[0-9A-Za-z_-]{35}",
+        r"xox[bp]-[A-Za-z0-9-]{10,}",
     )
 )
 # `name=value` and `name: value` (also `"name": "value"`). Only the value is

@@ -479,3 +479,13 @@ def test_at4_unterminated_quoted_value_is_redacted_to_the_end(quote, capsys):
     assert tail not in flat
     assert "alpha" not in flat
     assert "[redacted]" in flat
+
+
+@pytest.mark.parametrize("shape", ["github_pat", "ghp", "aws", "google", "slack-bot"])
+def test_at4_key_glued_to_a_word_character_is_redacted(shape, capsys):
+    key = _KEY_SHAPES[shape]()
+    rc, out, flat = _setup_error_output(capsys, f"failed for key_{key} today")
+    assert rc == 1
+    assert key not in flat
+    assert "[redacted]" in flat
+    assert "today" in flat
