@@ -201,3 +201,62 @@ def test_at1_time_budget_negative_inf_as_separate_word_still_exits_2(capsys):
     assert "must be a positive number" not in err  # the validator did not run
     agent_cls.assert_not_called()
     build.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", ["2.1", "-0.1", "3", "-1", "nan", "inf", "1e999", "abc", ""])
+def test_at2_temperature_out_of_range_rejected(bad, capsys):
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--temperature", bad])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--temperature" in err
+    assert "must be between 0 and 2" in err
+    assert chr(0x2014) not in err
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at2_temperature_error_does_not_echo_value(capsys):
+    secret_shaped = "sk-" + "c" * 24
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--temperature", secret_shaped])
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert secret_shaped not in captured.err
+    assert secret_shaped not in captured.out
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize(("text", "expected"), [("0", 0.0), ("2", 2.0), ("1.0", 1.0), ("0.7", 0.7)])
+def test_at2_temperature_bounds_accepted(text, expected):
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()), \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")) as build:
+        rc = main(["run", "x", "--model", "m", "--temperature", text])
+    assert rc == 0
+    assert build.call_args.kwargs["temperature"] == expected
+
+
+def test_at2_temperature_default_is_none_and_not_validated():
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()), \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")) as build:
+        rc = main(["run", "x", "--model", "m"])
+    assert rc == 0
+    assert build.call_args.kwargs["temperature"] is None
+
+
+def test_at2_temperature_negative_inf_exits_2_naming_flag(capsys):
+    # The "=" form hands "-inf" to the validator. As a separate word argparse
+    # would read it as a flag; "-0.1" as a separate word is covered above.
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--temperature=-inf"])
+    assert exc.value.code == 2
+    assert "must be between 0 and 2" in capsys.readouterr().err
+    agent_cls.assert_not_called()
+    build.assert_not_called()

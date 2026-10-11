@@ -45,6 +45,8 @@ _positive_int = _number_arg(int, lambda v: v >= 1, "must be a positive whole num
 _positive_float = _number_arg(
     float, lambda v: math.isfinite(v) and v > 0, "must be a positive number"
 )
+# Range checks already reject nan (every comparison with it is False) and inf.
+_temperature = _number_arg(float, lambda v: 0 <= v <= 2, "must be between 0 and 2")
 
 
 def build_provider(
@@ -108,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--max-iterations", type=_positive_int, default=30)
     run.add_argument(
         "--temperature",
-        type=float,
+        type=_temperature,
         default=None,
         help="Explicit OpenAI-compatible sampling temperature.",
     )
