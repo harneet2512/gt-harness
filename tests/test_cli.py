@@ -323,3 +323,12 @@ def test_at3_tag_crossing_the_limit_is_shown_literally_and_counted(capsys):
     assert "[red" in shown  # first 2000 characters end inside the tag: "[red"
     assert f"[truncated,{len(text) - 2000}morecharacters]" in shown
     assert "tail" not in shown
+
+
+def test_at3_note_wording_is_exact(capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("a" * 3234))
+    assert "[truncated, 1234 more characters]" in capsys.readouterr().out
+    _print_event(_tool_result("a" * 2001))
+    assert "[truncated, 1 more character]" in capsys.readouterr().out
