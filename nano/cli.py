@@ -8,12 +8,14 @@ from collections.abc import Callable
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
 from .agent import Agent
 from .prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT
 from .providers import AnthropicProvider, OpenAIProvider, Provider
 
 _console = Console()
+_TOOL_OUTPUT_LIMIT = 2000
 
 
 def _number_arg[N: (int, float)](
@@ -73,6 +75,23 @@ def build_provider(
     return OpenAIProvider(model=model, temperature=temperature)
 
 
+def _tool_output_body(output: str) -> Text:
+    """The panel body for a tool result: the first 2000 characters, then a note
+    saying how many were cut.
+
+    Built as Text so the output is shown literally: tool output can contain
+    things like `[red]` or a stray `[/foo]`, which Rich would otherwise treat as
+    markup (swallowing the text, or raising MarkupError). The slice happens on
+    the raw string first, so a tag cut at the limit cannot break anything.
+    """
+    body = Text(output[:_TOOL_OUTPUT_LIMIT])
+    left = len(output) - _TOOL_OUTPUT_LIMIT
+    if left > 0:
+        unit = "character" if left == 1 else "characters"
+        body.append(f"\n[truncated, {left} more {unit}]", style="dim")
+    return body
+
+
 def _print_event(event: dict) -> None:
     et = event["type"]
     if et == "assistant":
@@ -87,7 +106,7 @@ def _print_event(event: dict) -> None:
                                  border_style="yellow"))
     elif et == "tool_result":
         title = "tool_result" + (" (error)" if event.get("is_error") else "")
-        _console.print(Panel(event["output"][:2000], title=title,
+        _console.print(Panel(_tool_output_body(event["output"]), title=title,
                              border_style="red" if event.get("is_error") else "green"))
     elif et == "stats":
         _console.print(f"[dim]iter={event['iteration']} "

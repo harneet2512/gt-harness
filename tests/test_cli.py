@@ -260,3 +260,66 @@ def test_at2_temperature_negative_inf_exits_2_naming_flag(capsys):
     assert "must be between 0 and 2" in capsys.readouterr().err
     agent_cls.assert_not_called()
     build.assert_not_called()
+
+
+def _tool_result(output, *, is_error=False):
+    return {"type": "tool_result", "id": "t1", "output": output, "is_error": is_error}
+
+
+def _strip_panel(out):
+    """Printed text with panel borders, spaces and line breaks removed, to count characters."""
+    return "".join(ch for ch in out if ch not in "\n\r│─┌┐└┘ ")
+
+
+def _shown(capsys):
+    return _strip_panel(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize(("length", "left"), [(2001, 1), (3234, 1234), (2500, 500)])
+def test_at3_tool_result_over_limit_shows_truncation_note(length, left, capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("a" * length))
+    shown = _shown(capsys)
+    note = f"[truncated,{left}more{'character' if left == 1 else 'characters'}]"
+    assert note in shown
+    # Count only the output part: the note itself contains the letter "a".
+    assert shown.replace(note, "").count("a") == 2000
+
+
+def test_at3_error_result_also_shows_truncation_note(capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("b" * 2600, is_error=True))
+    out = capsys.readouterr().out
+    assert "tool_result (error)" in out
+    assert "[truncated,600morecharacters]" in _strip_panel(out)
+
+
+@pytest.mark.parametrize("length", [0, 1, 1999, 2000])
+def test_at3_at_or_under_limit_has_no_note(length, capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("c" * length))
+    out = capsys.readouterr().out
+    assert "truncated" not in out
+    assert out.count("c") == length
+
+
+def test_at3_tool_output_with_markup_is_shown_literally(capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("[red]hot[/red] and [/foo] and [bold"))
+    shown = _shown(capsys)
+    assert "[red]hot[/red]and[/foo]and[bold" in shown
+
+
+def test_at3_tag_crossing_the_limit_is_shown_literally_and_counted(capsys):
+    from nano.cli import _print_event
+
+    text = "x" * 1996 + "[red]tail[/red]" + "y" * 10
+    _print_event(_tool_result(text))
+    shown = _shown(capsys)
+    assert "[red" in shown  # first 2000 characters end inside the tag: "[red"
+    assert f"[truncated,{len(text) - 2000}morecharacters]" in shown
+    assert "tail" not in shown
