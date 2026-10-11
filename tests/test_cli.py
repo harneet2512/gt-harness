@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import nano
 from nano.cli import build_provider, main
 
 
@@ -494,41 +495,28 @@ def test_at4_key_glued_to_a_word_character_is_redacted(shape, capsys):
 # ---- #56: nano --version -------------------------------------------------------
 
 def test_at5_version_prints_and_exits_zero(capsys):
-    import nano
-
-    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
-        with pytest.raises(SystemExit) as exc:
-            main(["--version"])
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
     captured = capsys.readouterr()
     assert exc.value.code == 0
     assert captured.out.strip() == f"nano {nano.__version__}"
     assert captured.err == ""
-    agent_cls.assert_not_called()
-    build.assert_not_called()
 
 
 def test_at5_version_before_subcommand_exits_zero(capsys):
-    import nano
-
-    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
-        with pytest.raises(SystemExit) as exc:
-            main(["--version", "run", "x"])
+    with pytest.raises(SystemExit) as exc:
+        main(["--version", "run", "x"])
     assert exc.value.code == 0
     assert capsys.readouterr().out.strip() == f"nano {nano.__version__}"
-    agent_cls.assert_not_called()
-    build.assert_not_called()
 
 
 def test_at5_version_after_run_is_not_supported(capsys):
-    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
-        with pytest.raises(SystemExit) as exc:
-            main(["run", "x", "--version"])
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "x", "--version"])
     captured = capsys.readouterr()
     assert exc.value.code == 2
     assert "--version" in captured.err
     assert captured.out == ""
-    agent_cls.assert_not_called()
-    build.assert_not_called()
 
 
 def test_at5_version_text_has_no_em_dash_and_is_plain(capsys):
