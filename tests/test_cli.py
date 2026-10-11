@@ -489,3 +489,64 @@ def test_at4_key_glued_to_a_word_character_is_redacted(shape, capsys):
     assert key not in flat
     assert "[redacted]" in flat
     assert "today" in flat
+
+
+# ---- #56: nano --version -------------------------------------------------------
+
+def test_at5_version_prints_and_exits_zero(capsys):
+    import nano
+
+    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["--version"])
+    captured = capsys.readouterr()
+    assert exc.value.code == 0
+    assert captured.out.strip() == f"nano {nano.__version__}"
+    assert captured.err == ""
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at5_version_before_subcommand_exits_zero(capsys):
+    import nano
+
+    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["--version", "run", "x"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"nano {nano.__version__}"
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at5_version_after_run_is_not_supported(capsys):
+    with patch("nano.cli.Agent") as agent_cls, patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--version"])
+    captured = capsys.readouterr()
+    assert exc.value.code == 2
+    assert "--version" in captured.err
+    assert captured.out == ""
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at5_version_text_has_no_em_dash_and_is_plain(capsys):
+    with pytest.raises(SystemExit):
+        main(["--version"])
+    out = capsys.readouterr().out
+    assert chr(0x2014) not in out
+    assert out.count("\n") == 1
+
+
+def test_at5_help_lists_version(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--help"])
+    assert exc.value.code == 0
+    assert "--version" in capsys.readouterr().out
+
+
+def test_at5_missing_subcommand_still_exits_two(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 2
