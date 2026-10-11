@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 
@@ -57,6 +58,30 @@ def _positive_int(text: str) -> int:
     return value
 
 
+_FLOAT_CHARS = frozenset("0123456789.eE+-")
+
+
+def _positive_float(text: str) -> float:
+    """argparse ``type=`` for a finite number above 0.
+
+    ``float()`` alone lets ``nan`` through (``nan <= 0`` is False) and turns
+    ``1e999`` into ``inf`` without an error, so the text is limited to plain
+    number characters first and the result must be finite. The message is
+    fixed text for the same reason as ``_positive_int``: the value may be a
+    pasted key and is never repeated back.
+    """
+    message = "must be a number greater than 0"
+    if not text or not set(text) <= _FLOAT_CHARS:
+        raise argparse.ArgumentTypeError(message)
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(message) from None
+    if not (math.isfinite(value) and value > 0):
+        raise argparse.ArgumentTypeError(message)
+    return value
+
+
 def _print_event(event: dict) -> None:
     et = event["type"]
     if et == "assistant":
@@ -103,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
                           "Omit to run stock nano (GT off).")
     run.add_argument(
         "--time-budget-seconds",
-        type=float,
+        type=_positive_float,
         default=None,
         help=(
             "Outer agent wall-clock budget. Bash timeouts are clamped to "
