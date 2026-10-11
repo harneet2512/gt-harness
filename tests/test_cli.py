@@ -1,6 +1,9 @@
+import argparse
 from unittest.mock import MagicMock, patch
 
-from nano.cli import build_provider, main
+import pytest
+
+from nano.cli import _positive_int, build_provider, main
 
 
 def test_build_provider_anthropic_by_default(monkeypatch):
@@ -126,12 +129,6 @@ def test_at1_max_iterations_good_values_reach_the_agent():
 
 
 def test_at1_positive_int_validator_is_reusable_and_message_is_plain():
-    import argparse
-
-    import pytest
-
-    from nano.cli import _positive_int
-
     assert _positive_int("7") == 7
     for bad in ("0", "-1", "abc", "nan", "", "1" * 5000):
         with pytest.raises(argparse.ArgumentTypeError) as exc:
@@ -139,6 +136,16 @@ def test_at1_positive_int_validator_is_reusable_and_message_is_plain():
         message = str(exc.value)
         assert "—" not in message
         assert len(bad) < 4 or bad not in message
+
+
+def test_at1_max_iterations_only_plain_ascii_digits_are_accepted(capsys):
+    # int() alone would accept these and quietly change what the limit means.
+    for bad in (" 5 ", "+5", "1_0", "٣"):
+        code, _out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--max-iterations={bad}"], capsys)
+        assert code == 2, repr(bad)
+        assert "--max-iterations" in err
+        assert len(err) < 500  # usage line plus one short message
 
 
 def test_print_event_shows_tool_call_inputs(capsys):
@@ -152,12 +159,3 @@ def test_print_event_shows_tool_call_inputs(capsys):
     assert "bash(" in out
     assert "ls -la" in out
 
-
-def test_at1_max_iterations_only_plain_ascii_digits_are_accepted(capsys):
-    # int() alone would accept these and quietly change what the limit means.
-    for bad in (" 5 ", "+5", "1_0", "٣"):
-        code, _out, err = _refused_run(
-            ["run", "task", "--model", "m", f"--max-iterations={bad}"], capsys)
-        assert code == 2, repr(bad)
-        assert "--max-iterations" in err
-        assert len(err) < 500  # usage line plus one short message

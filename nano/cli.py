@@ -50,7 +50,7 @@ def _positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError(message)
     try:
         value = int(text)
-    except ValueError:  # more digits than Python will convert
+    except ValueError:  # Python refuses to convert more than 4300 digits
         raise argparse.ArgumentTypeError(message) from None
     if value <= 0:
         raise argparse.ArgumentTypeError(message)
