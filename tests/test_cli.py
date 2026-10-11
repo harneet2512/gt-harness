@@ -469,3 +469,13 @@ def test_at4_escaped_quote_inside_value_does_not_end_redaction(quote, capsys):
     assert tail not in flat
     assert "[redacted]" in flat
     assert "end" in flat
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_at4_unterminated_quoted_value_is_redacted_to_the_end(quote, capsys):
+    tail = "tail" + "Secret" + "99"
+    rc, out, flat = _setup_error_output(capsys, f"body password={quote}alpha {tail}")
+    assert rc == 1
+    assert tail not in flat
+    assert "alpha" not in flat
+    assert "[redacted]" in flat
