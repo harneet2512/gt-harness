@@ -458,3 +458,14 @@ def test_at4_agent_construction_error_also_redacted(capsys):
     assert rc == 1
     assert key not in flat
     assert "[redacted]" in flat
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_at4_escaped_quote_inside_value_does_not_end_redaction(quote, capsys):
+    tail = "tail" + "Secret" + "99"
+    value = "pass" + "\\" + quote + tail
+    rc, out, flat = _setup_error_output(capsys, f"body {{{quote}password{quote}: {quote}{value}{quote}}} end")
+    assert rc == 1
+    assert tail not in flat
+    assert "[redacted]" in flat
+    assert "end" in flat

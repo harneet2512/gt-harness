@@ -77,7 +77,7 @@ _KEY_SHAPES = tuple(
 _NAMED_SECRET = re.compile(
     r"""(?ix)
     (?P<name>[\w-]*(?:api[_-]?key|token|secret|password)["']?\s*[=:]\s*)
-    (?P<value>"[^"]*"|'[^']*'|[^\s,;&]+)
+    (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;&]+)
     """
 )
 
