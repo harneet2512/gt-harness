@@ -38,6 +38,25 @@ def build_provider(
     return OpenAIProvider(model=model, temperature=temperature)
 
 
+def _positive_int(text: str) -> int:
+    """argparse ``type=`` for a whole number above 0.
+
+    The message is fixed text on purpose: argparse already adds
+    ``argument --flag:`` in front, and the value the person typed may be a
+    pasted key, so it is never repeated back.
+    """
+    message = "must be a whole number greater than 0"
+    if not (text.isascii() and text.isdigit()):
+        raise argparse.ArgumentTypeError(message)
+    try:
+        value = int(text)
+    except ValueError:  # more digits than Python will convert
+        raise argparse.ArgumentTypeError(message) from None
+    if value <= 0:
+        raise argparse.ArgumentTypeError(message)
+    return value
+
+
 def _print_event(event: dict) -> None:
     et = event["type"]
     if et == "assistant":
@@ -72,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--model", default="claude-opus-4-8")
     run.add_argument("--base-url", default=None,
                      help="OpenAI-compatible base URL (Together, vLLM, etc.).")
-    run.add_argument("--max-iterations", type=int, default=30)
+    run.add_argument("--max-iterations", type=_positive_int, default=30)
     run.add_argument(
         "--temperature",
         type=float,
