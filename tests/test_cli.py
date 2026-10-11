@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from nano.cli import build_provider, main
 
 
@@ -67,3 +69,62 @@ def test_print_event_shows_tool_call_inputs(capsys):
     out = capsys.readouterr().out
     assert "bash(" in out
     assert "ls -la" in out
+
+
+def _fake_agent_result():
+    fake_agent = MagicMock()
+    fake_agent.run.return_value = MagicMock(
+        final_text="DONE",
+        stop_reason="end_turn",
+        iterations=2,
+        total_input_tokens=100,
+        total_output_tokens=20,
+        total_cache_read_tokens=80,
+    )
+    return fake_agent
+
+
+@pytest.mark.parametrize("bad", ["0", "-3", "1.5", "1e3", "abc", "", "True"])
+def test_at1_max_iterations_rejects_non_positive(bad, capsys):
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--max-iterations", bad])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--max-iterations" in err
+    assert "must be a positive whole number" in err
+    assert chr(0x2014) not in err
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+def test_at1_max_iterations_error_does_not_echo_value(capsys):
+    secret_shaped = "sk-" + "a" * 24
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider") as build:
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "x", "--max-iterations", secret_shaped])
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert secret_shaped not in captured.err
+    assert secret_shaped not in captured.out
+    agent_cls.assert_not_called()
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize(("text", "expected"), [("1", 1), ("100", 100), (" 5 ", 5)])
+def test_at1_max_iterations_accepts_positive(text, expected):
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()) as agent_cls, \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")):
+        rc = main(["run", "x", "--model", "m", "--max-iterations", text])
+    assert rc == 0
+    assert agent_cls.call_args.kwargs["max_iterations"] == expected
+
+
+def test_at1_max_iterations_default_is_30():
+    with patch("nano.cli.Agent", return_value=_fake_agent_result()) as agent_cls, \
+         patch("nano.cli.build_provider", return_value=MagicMock(model="m")):
+        rc = main(["run", "x", "--model", "m"])
+    assert rc == 0
+    assert agent_cls.call_args.kwargs["max_iterations"] == 30

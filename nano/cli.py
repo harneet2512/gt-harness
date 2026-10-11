@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable
 
 from rich.console import Console
 from rich.panel import Panel
@@ -12,6 +13,33 @@ from .prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT
 from .providers import AnthropicProvider, OpenAIProvider, Provider
 
 _console = Console()
+
+
+def _number_arg[N: (int, float)](
+    parse: Callable[[str], N],
+    accepts: Callable[[N], bool],
+    message: str,
+) -> Callable[[str], N]:
+    """Build an argparse type= function.
+
+    `parse` turns text into a number, `accepts` says whether the number is
+    allowed. Any failure raises ArgumentTypeError(message); the rejected text
+    is never echoed, because it could be a pasted key.
+    """
+
+    def convert(text: str) -> N:
+        try:
+            value = parse(text)
+        except (ValueError, OverflowError):
+            raise argparse.ArgumentTypeError(message) from None
+        if not accepts(value):
+            raise argparse.ArgumentTypeError(message)
+        return value
+
+    return convert
+
+
+_positive_int = _number_arg(int, lambda v: v >= 1, "must be a positive whole number")
 
 
 def build_provider(
@@ -72,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--model", default="claude-opus-4-8")
     run.add_argument("--base-url", default=None,
                      help="OpenAI-compatible base URL (Together, vLLM, etc.).")
-    run.add_argument("--max-iterations", type=int, default=30)
+    run.add_argument("--max-iterations", type=_positive_int, default=30)
     run.add_argument(
         "--temperature",
         type=float,
