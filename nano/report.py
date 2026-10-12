@@ -410,10 +410,11 @@ def _css() -> str:
         ".stat{flex:1 1 9rem;min-width:0;padding:.5rem .75rem;background:var(--card-bg);"
         "border:1px solid var(--border);border-radius:6px;overflow-wrap:anywhere}\n"
         ".stat .k{display:block;font-size:.85rem}\n"
-        ".stat .v{display:block;font-size:1.25rem;font-weight:600}\n"
+        ".stat .v{display:block;font-size:1.25rem;font-weight:600;max-height:6rem;overflow:auto}\n"
+        ".stat.stop_reason{flex-basis:100%}\n"
         ".outcome{margin-top:1.5rem;padding:.75rem;background:var(--card-bg);"
         "border:1px solid var(--border);border-radius:6px}\n"
-        ".outcome p{margin:0}\n"
+        ".outcome p{margin:0;overflow-wrap:anywhere}\n"
         "header p{margin:0}\n"
     )
 

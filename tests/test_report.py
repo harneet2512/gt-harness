@@ -1236,3 +1236,23 @@ def test_at3_nested_field_contract_through_the_real_command(tmp_path, line):
         v = usage.get(key) if isinstance(usage, dict) else None
         provable = isinstance(v, int) and not isinstance(v, bool) and v >= 0
         assert shown[key] == (str(v) if provable else "unknown")
+
+
+def test_at3_bar_value_is_height_capped_so_a_huge_stop_reason_cannot_push_the_page_down():
+    # Found by the review's browser probe: a 5000 character stop reason made the
+    # bar 15000px tall in a 144px column. The value scrolls inside its box instead.
+    page = _page(_asst(stop="A" * 5000))
+    css = page[page.index("<style>"):page.index("</style>")]
+    assert ".stat .v{" in css
+    rule = css[css.index(".stat .v{"):].split("}")[0]
+    assert "max-height:" in rule and "overflow:auto" in rule
+    assert ".stat.stop_reason{flex-basis:100%}" in css
+    assert bar(page)["stop_reason"] == "A" * 5000  # nothing is cut from the text itself
+
+
+def test_at3_how_it_ended_line_wraps_a_huge_stop_reason():
+    # The same probe: the unbreakable value in "How it ended" made the page 51000px wide.
+    page = _page(_asst(stop="A" * 5000))
+    css = page[page.index("<style>"):page.index("</style>")]
+    rule = css[css.index(".outcome p{"):].split("}")[0]
+    assert "overflow-wrap:anywhere" in rule
