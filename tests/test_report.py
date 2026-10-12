@@ -998,3 +998,45 @@ def test_markup_object_in_a_value_is_escaped_not_trusted():
     )
     assert "<script" not in page
     assert "&lt;script&gt;" in page
+
+
+@pytest.mark.parametrize("field", ["stop_reason", "type"])
+def test_markup_object_in_stop_reason_or_type_is_escaped(field):
+    from nano.report import Markup
+
+    evil = Markup("<style>body{display:none}</style>")
+    ev = {"type": "assistant", "text": "x", "stop_reason": "end_turn"}
+    ev[field] = evil
+    page = render_report([{"type": "user", "content": "t"}, ev], source_name="t.jsonl")
+    assert "<style>body" not in page
+    assert "&lt;style&gt;" in page
+
+
+import errno as _errno_c2  # noqa: E402
+
+
+def test_no_hard_link_fallback_never_exposes_a_partial_destination(tmp_path, monkeypatch):
+    src = tmp_path / "run.jsonl"
+    src.write_text('{"type":"user","content":"task"}\n', encoding="utf-8")
+    dest = tmp_path / "run.html"
+    real_write = os.write
+    observed = []
+
+    def unsupported_link(*args, **kwargs):
+        raise OSError(_errno_c2.EPERM, "Hard links unsupported")
+
+    def write_and_observe(fd, data):
+        # Observe through an independent file handle during the fallback write.
+        if dest.exists() and not observed:
+            written = real_write(fd, data[:32])
+            observed.append(dest.read_bytes())
+            return written
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    monkeypatch.setattr(os, "write", write_and_observe)
+    write_report(src, dest)
+    completed = dest.read_bytes()
+    assert all(snapshot == completed for snapshot in observed), (
+        f"Published partial report: {observed!r}; complete size={len(completed)}"
+    )

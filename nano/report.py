@@ -69,6 +69,13 @@ class Markup(str):
     __slots__ = ()
 
 
+class _Trusted(Markup):
+    """Markup made inside this module. A Markup object arriving as recorded data
+    is a different type and is escaped like any other text."""
+
+    __slots__ = ()
+
+
 _UNSAFE_CHARS = re.compile("[\ud800-\udfff\x00]")
 
 
@@ -81,19 +88,19 @@ def _esc(s: str) -> str:
 
 
 def _frag(x: str) -> str:
-    return x if isinstance(x, Markup) else _esc(x)
+    return x if type(x) is _Trusted else _esc(x)
 
 
 def _el(tag: str, cls: str | None, *children: str) -> Markup:
     attr = f' class="{_esc(cls)}"' if cls else ""
-    return Markup(f"<{tag}{attr}>{''.join(_frag(c) for c in children)}</{tag}>")
+    return _Trusted(f"<{tag}{attr}>{''.join(_frag(c) for c in children)}</{tag}>")
 
 
 def _pre(text: str) -> Markup:
     # Browsers drop one newline right after <pre>, so a text that starts with a
     # newline gets an extra one to keep its own.
     lead = "\n" if text.startswith("\n") else ""
-    return Markup(f"<pre>{lead}{_esc(text)}</pre>")
+    return _Trusted(f"<pre>{lead}{_esc(text)}</pre>")
 
 
 def _text(value: object) -> str:
@@ -439,15 +446,13 @@ def _refuse_destination(src: Path, dest: Path, force: bool) -> None:
         raise ReportError(f"{dest}: already exists; use --force to replace it")
 
 
-def _publish_without_link(dest: Path, data: bytes) -> None:
-    """Exclusive create + write, for filesystems with no hard links."""
-    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o666)
+def _publish_without_link(tmp: Path, dest: Path) -> None:
+    """For filesystems with no hard links: reserve the name exclusively with an
+    empty file, then move the finished temp file over it. A reader sees an empty
+    file or the whole page, never half a page."""
+    os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o666))
     try:
-        try:
-            _write_all(fd, data)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        os.replace(tmp, dest)
     except BaseException:
         try:
             os.unlink(dest)
@@ -502,7 +507,7 @@ def write_report(
                     if e.errno not in _NO_HARD_LINKS:
                         raise
                     try:
-                        _publish_without_link(dest, data)
+                        _publish_without_link(tmp, dest)
                     except FileExistsError:
                         raise ReportError(
                             f"{dest}: already exists; use --force to replace it") from None
