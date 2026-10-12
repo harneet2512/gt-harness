@@ -691,3 +691,15 @@ def test_at4_overlapping_matches_become_one_replacement(clean_env):
     clean_env.setenv("MY_API_KEY", key)
     assert _redact(f"Bearer {key} and {key}") == "Bearer [redacted] and [redacted]"
 
+
+
+@pytest.mark.parametrize("text", [
+    "see risk-1234567890123456 end",
+    "see task-1234567890abcdef1234 end",
+    "disk-123456789012345678901 is full",
+    "task-force-7-strong-team-01 is down",
+])
+def test_at4_ordinary_identifiers_with_sk_inside_are_left_alone(text, clean_env, capsys):
+    rc, out, err = _setup_error_run(text, capsys)
+    assert rc == 1
+    assert text in out

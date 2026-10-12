@@ -126,11 +126,12 @@ _MIN_SECRET_LENGTH = 8
 
 # "sk-" starting a word: sk-..., sk-ant-..., sk-proj-... and masked sk-abc***.
 # The look-behind keeps words such as "risk-free" and "task-force" alone. A
-# key glued to the letters before it is still caught when it is long and has
-# a digit, which words never are. Dot-joined segments belong to the token.
+# key glued to the letters before it is still caught when it is 32 or more
+# characters with a digit, longer than any identifier seen in an error.
+# Dot-joined segments belong to the token.
 _SK_TOKEN = re.compile(
     r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]+(?:[.][A-Za-z0-9_*-]+)*"
-    r"|sk-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{16,}(?:[.][A-Za-z0-9_-]+)*"
+    r"|sk-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{32,}(?:[.][A-Za-z0-9_-]+)*"
 )
 _BEARER_TOKEN = re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=*-]{8,}", re.IGNORECASE)
 
