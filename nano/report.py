@@ -99,7 +99,8 @@ def _pre(text: str) -> Markup:
 def _text(value: object) -> str:
     """The one way a recorded value becomes text: a string as is, else JSON."""
     if isinstance(value, str):
-        return value
+        # str() of a subclass (Markup) gives a plain str, so it gets escaped.
+        return str(value)
     try:
         indent = 2 if isinstance(value, (dict, list)) else None
         return json.dumps(value, ensure_ascii=False, indent=indent, default=repr)

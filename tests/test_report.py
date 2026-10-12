@@ -985,3 +985,16 @@ def test_stream_name_destination_never_touches_the_input(tmp_path):
             write_report(src, str(src) + ":stream", force=force)
     assert src.read_bytes() == before
     assert listing(tmp_path) == ["t.transcript.jsonl"]
+
+
+def test_markup_object_in_a_value_is_escaped_not_trusted():
+    """A caller-built Markup must not pass through a recorded value unescaped."""
+    from nano.report import Markup
+
+    evil = Markup("<script>alert(1)</script>")
+    page = render_report(
+        [{"type": "assistant", "tool_calls": [{"name": "n", "id": evil}]}],
+        source_name=evil,
+    )
+    assert "<script" not in page
+    assert "&lt;script&gt;" in page
