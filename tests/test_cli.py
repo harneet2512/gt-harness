@@ -416,3 +416,290 @@ def test_at3_count_is_in_characters_not_bytes():
     output = "A" + "\U0001F600" * 2100  # 2101 characters, 8401 bytes
     text = _printed_text(_tool_result(output))
     assert text == output[:2000] + "\n[truncated, 101 more characters]"
+
+
+# ---- AT4: the setup error line never prints a key ----
+
+CREDENTIAL_ENV = (
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_WEBHOOK_SIGNING_KEY",
+    "OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "OPENAI_WEBHOOK_SECRET",
+)
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """No credential-looking variable from the machine leaks into these tests."""
+    import os
+
+    for name in list(os.environ):
+        if name in CREDENTIAL_ENV or name.upper().endswith(
+                ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")):
+            monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def _setup_error_run(message, capsys):
+    """Run main() with provider setup failing with `message`; return (rc, out, err).
+
+    The console is wide so a long key is never split across lines: a split key
+    would hide a missed redaction from the "key not in output" checks.
+    """
+    from rich.console import Console
+
+    with patch("nano.cli.Agent") as agent_cls, \
+         patch("nano.cli.build_provider", side_effect=RuntimeError(message)), \
+         patch("nano.cli._console", Console(width=10000)):
+        rc = main(["run", "task", "--model", "m"])
+        agent_cls.assert_not_called()
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err
+
+
+def _key_shaped():
+    # Built from pieces so no key-shaped literal is committed.
+    return {
+        "sk": "sk-" + "Ab12" * 10,
+        "sk-ant": "sk-" + "ant-api03-" + "Zy98" * 8,
+        "sk-proj": "sk-" + "proj-" + "Qw34_" * 6 + "Er-56",
+        "masked": "sk-" + "abc" + "*" * 20 + "wxyz",
+    }
+
+
+def test_at4_sk_keys_are_replaced_and_the_rest_of_the_message_stays(clean_env, capsys):
+    for kind, key in _key_shaped().items():
+        rc, out, err = _setup_error_run(f"Incorrect API key provided: {key}. Check it.", capsys)
+        assert rc == 1, kind
+        assert key not in out + err, kind
+        assert "[redacted]" in out, kind
+        assert "setup error:" in out and "RuntimeError" in out, kind
+        assert "Incorrect API key provided: [redacted]. Check it." in out, kind
+
+
+def test_at4_bearer_token_is_replaced(clean_env, capsys):
+    token = "eyJhbGciOi" + "JIUzI1NiJ9.abc-DEF_123"
+    rc, out, err = _setup_error_run(f"401 with header Authorization: Bearer {token} rejected", capsys)
+    assert rc == 1
+    assert token not in out + err
+    assert "Bearer [redacted] rejected" in out
+
+
+def test_at4_every_named_credential_variable_value_is_replaced(clean_env, capsys):
+    for name in CREDENTIAL_ENV:
+        value = "plainvalue-" + name.lower()[:6] + "9X"  # no sk- prefix on purpose
+        clean_env.setenv(name, value)
+        rc, out, err = _setup_error_run(f"cannot start with {value} here", capsys)
+        assert rc == 1, name
+        assert value not in out + err, name
+        assert "cannot start with [redacted] here" in out, name
+        clean_env.delenv(name)
+
+
+def test_at4_custom_secret_variables_are_replaced(clean_env, capsys):
+    for name in ("FOO_SECRET", "my_service_token", "DB_PASSWORD", "PAID_RUN_KEY"):
+        value = "v4lue-" + name.lower() + "-zz"
+        clean_env.setenv(name, value)
+        rc, out, err = _setup_error_run(f"failed: {value}", capsys)
+        assert rc == 1, name
+        assert value not in out + err, name
+        assert "failed: [redacted]" in out, name
+        clean_env.delenv(name)
+
+
+def test_at4_short_env_values_do_not_mask_ordinary_words(clean_env, capsys):
+    clean_env.setenv("FOO_KEY", "no")          # 2 characters
+    clean_env.setenv("BAR_TOKEN", "abc1234")   # 7 characters, just under the minimum
+    rc, out, _err = _setup_error_run("no api key; abc1234 is not enough", capsys)
+    assert rc == 1
+    assert "no api key; abc1234 is not enough" in out
+    assert "[redacted]" not in out
+
+
+def test_at4_eight_character_env_value_is_replaced(clean_env, capsys):
+    clean_env.setenv("FOO_KEY", "abcd1234")
+    rc, out, err = _setup_error_run("bad value abcd1234 given", capsys)
+    assert rc == 1
+    assert "abcd1234" not in out + err
+    assert "bad value [redacted] given" in out
+
+
+def test_at4_ordinary_words_that_contain_sk_are_left_alone(clean_env, capsys):
+    message = "risk-free task-force disk-based mask-only sk learn"
+    rc, out, _err = _setup_error_run(message, capsys)
+    assert rc == 1
+    assert message in out
+    assert "[redacted]" not in out
+
+
+def test_at4_several_keys_and_repeats_are_all_replaced(clean_env, capsys):
+    keys = _key_shaped()
+    message = f"{keys['sk']} then {keys['sk-ant']} then {keys['sk']} and Bearer abcdefgh12345"
+    rc, out, err = _setup_error_run(message, capsys)
+    assert rc == 1
+    for secret in (keys["sk"], keys["sk-ant"], "abcdefgh12345"):
+        assert secret not in out + err
+    assert out.count("[redacted]") >= 4
+
+
+def test_at4_env_values_with_regex_characters_are_matched_literally(clean_env, capsys):
+    clean_env.setenv("FOO_SECRET", "a.b*c+d(e)[f]$1")
+    rc, out, err = _setup_error_run("oops a.b*c+d(e)[f]$1 and axb", capsys)
+    assert rc == 1
+    assert "a.b*c+d(e)[f]$1" not in out + err
+    assert "oops [redacted] and axb" in out
+
+
+def test_at4_longer_value_is_replaced_before_a_shorter_one_inside_it(clean_env, capsys):
+    clean_env.setenv("A_KEY", "sharedpart")
+    clean_env.setenv("B_KEY", "sharedpart-and-more")
+    rc, out, err = _setup_error_run("saw sharedpart-and-more today", capsys)
+    assert rc == 1
+    assert "and-more" not in out + err
+    assert "saw [redacted] today" in out
+
+
+def test_at4_markup_looking_text_in_the_message_prints_as_typed(clean_env, capsys):
+    rc, out, err = _setup_error_run("bad [/x] and [bold]y[/bold] and [red]z", capsys)
+    assert rc == 1
+    assert "bad [/x] and [bold]y[/bold] and [red]z" in out
+    assert "Traceback" not in out + err
+
+
+def test_at4_markup_next_to_a_key_still_hides_the_key(clean_env, capsys):
+    key = _key_shaped()["sk"]
+    rc, out, err = _setup_error_run(f"[/x] {key} [bold]", capsys)
+    assert rc == 1
+    assert key not in out + err
+    assert "[/x] [redacted] [bold]" in out
+
+
+def test_at4_real_provider_setup_failure_is_a_readable_exit_1(clean_env, capsys):
+    # No patching of build_provider: the real OpenAI client refuses to start
+    # without a key. The message stays readable and the key-bearing variable
+    # in the environment is not printed.
+    value = "envsecret-" + "Q7" * 6
+    clean_env.setenv("SOME_API_TOKEN", value)
+    with patch("nano.cli.Agent") as agent_cls:
+        rc = main(["run", "task", "--model", "gpt-5"])
+        agent_cls.assert_not_called()
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "setup error:" in captured.out and "OpenAIError" in captured.out
+    assert value not in captured.out + captured.err
+
+
+def test_at4_redact_is_a_plain_function_and_leaves_clean_text_alone(clean_env):
+    from nano.cli import _redact
+
+    assert _redact("nothing secret here") == "nothing secret here"
+    assert _redact("") == ""
+    key = _key_shaped()["sk"]
+    assert _redact(f"x {key} y") == "x [redacted] y"
+    assert "—" not in _redact(f"x {key} y")
+
+
+def test_at4_message_that_is_not_text_still_prints(clean_env, capsys):
+    with patch("nano.cli.Agent"), \
+         patch("nano.cli.build_provider", side_effect=ValueError(("tuple", 3))):
+        rc = main(["run", "task", "--model", "m"])
+    assert rc == 1
+    assert "ValueError" in capsys.readouterr().out
+
+
+def test_at4_key_glued_to_the_word_before_it_is_still_replaced(clean_env, capsys):
+    key = _key_shaped()["sk"]
+    rc, out, err = _setup_error_run(f"invalid key:{key} and bad{key}end", capsys)
+    assert rc == 1
+    assert key not in out + err
+    assert "Ab12Ab12" not in out + err
+    assert "[redacted]" in out
+
+
+def test_at4_dot_joined_key_segments_are_all_replaced(clean_env, capsys):
+    rc, out, err = _setup_error_run("bad sk-ant.api03.SECRETLEAK123 given", capsys)
+    assert rc == 1
+    assert "SECRETLEAK123" not in out + err
+    assert "api03" not in out + err
+    assert "bad [redacted] given" in out
+
+
+def test_at4_sentence_ending_dot_after_a_key_is_kept(clean_env, capsys):
+    key = _key_shaped()["sk"]
+    rc, out, err = _setup_error_run(f"rejected {key}. Try again", capsys)
+    assert "rejected [redacted]. Try again" in out
+
+
+def test_at4_long_hyphenated_word_with_no_digit_is_left_alone(clean_env, capsys):
+    rc, out, err = _setup_error_run("the task-force-with-a-very-long-name failed", capsys)
+    assert "task-force-with-a-very-long-name" in out
+
+
+def test_at4_exception_whose_text_cannot_be_built_still_exits_1(clean_env, capsys):
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    with patch("nano.cli.Agent"), \
+         patch("nano.cli.build_provider", side_effect=Unprintable("x")):
+        rc = main(["run", "task", "--model", "m"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "setup error:" in out and "Unprintable" in out
+
+
+def test_at4_credential_values_come_back_longest_first(clean_env):
+    from nano.cli import _credential_values
+
+    for i, name in enumerate(["A", "B", "C", "D", "E", "F"]):
+        clean_env.setenv(f"{name}_KEY", "sharedpart" + "x" * i)
+    values = _credential_values()
+    assert len(values) == 6
+    assert [len(v) for v in values] == sorted((len(v) for v in values), reverse=True)
+
+
+def test_at4_chain_of_nested_values_leaves_no_tail(clean_env, capsys):
+    base = "sharedpart"
+    for i in range(6):
+        clean_env.setenv(f"N{i}_KEY", base + "-" + "z" * i)
+    rc, out, err = _setup_error_run(f"saw {base}-zzzzz today", capsys)
+    assert "zzzzz" not in out + err
+    assert "saw [redacted] today" in out
+
+
+@pytest.mark.parametrize("kind", ["sk", "bearer"])
+def test_at4_env_value_that_starts_a_longer_token_hides_the_whole_token(kind, clean_env, capsys):
+    # Found by the codex code attack: replacing the env value first cut [redacted]
+    # into the longer token and the shape match then missed the rest of it.
+    prefix = "abcdefgh" + "1234"
+    tail = "Private" + "Suffix567890"
+    if kind == "sk":
+        prefix = "sk-" + prefix
+        credential = prefix + tail
+    else:
+        credential = "Bearer " + prefix + tail
+    clean_env.setenv("SERVICE_TOKEN", prefix)
+    rc, out, err = _setup_error_run("Rejected credential: " + credential + " today", capsys)
+    assert rc == 1
+    assert tail not in out + err
+    assert prefix not in out + err
+    assert "today" in out
+
+
+def test_at4_overlapping_matches_become_one_replacement(clean_env):
+    from nano.cli import _redact
+
+    key = _key_shaped()["sk"]
+    clean_env.setenv("MY_API_KEY", key)
+    assert _redact(f"Bearer {key} and {key}") == "Bearer [redacted] and [redacted]"
+
+
+
+@pytest.mark.parametrize("text", [
+    "see risk-1234567890123456 end",
+    "see task-1234567890abcdef1234 end",
+    "disk-123456789012345678901 is full",
+    "task-force-7-strong-team-01 is down",
+])
+def test_at4_ordinary_identifiers_with_sk_inside_are_left_alone(text, clean_env, capsys):
+    rc, out, err = _setup_error_run(text, capsys)
+    assert rc == 1
+    assert text in out

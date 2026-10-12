@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 from collections.abc import Callable
 
@@ -108,6 +109,72 @@ def _float_between(low: float, high: float) -> Callable[[str], float]:
     return check
 
 
+_REDACTED = "[redacted]"
+
+# Variables the Anthropic and OpenAI SDKs read a credential from.
+_CREDENTIAL_ENV_NAMES = frozenset({
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_WEBHOOK_SIGNING_KEY",
+    "OPENAI_API_KEY",
+    "OPENAI_ADMIN_KEY",
+    "OPENAI_WEBHOOK_SECRET",
+})
+_CREDENTIAL_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+# A shorter value would mask ordinary words and hide what went wrong.
+_MIN_SECRET_LENGTH = 8
+
+# "sk-" starting a word: sk-..., sk-ant-..., sk-proj-... and masked sk-abc***.
+# The look-behind keeps words such as "risk-free" and "task-force" alone. A
+# key glued to the letters before it is still caught when it is 32 or more
+# characters with a digit, longer than any identifier seen in an error.
+# Dot-joined segments belong to the token.
+_SK_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]+(?:[.][A-Za-z0-9_*-]+)*"
+    r"|sk-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{32,}(?:[.][A-Za-z0-9_-]+)*"
+)
+_BEARER_TOKEN = re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=*-]{8,}", re.IGNORECASE)
+
+
+def _credential_values() -> list[str]:
+    """Values of credential variables in the environment, longest first."""
+    values = set()
+    for name, value in os.environ.items():
+        upper = name.upper()
+        if upper in _CREDENTIAL_ENV_NAMES or upper.endswith(_CREDENTIAL_ENV_SUFFIXES):
+            value = value.strip()
+            if len(value) >= _MIN_SECRET_LENGTH:
+                values.add(value)
+    return sorted(values, key=len, reverse=True)
+
+
+def _describe(error: BaseException) -> str:
+    """``Name: message`` for an exception, even one whose ``__str__`` raises."""
+    try:
+        message = str(error)
+    except Exception:
+        message = "(message unavailable)"
+    return f"{type(error).__name__}: {message}"
+
+
+def _redact(text: str) -> str:
+    """Replace anything key-shaped in ``text`` with ``[redacted]``.
+
+    Covers the exact value of every credential variable (even without a
+    ``sk-`` prefix), ``sk-`` tokens and ``Bearer`` tokens. Names the
+    environment does not mark as credentials, and keys of other shapes, are
+    not recognised.
+    """
+    # Shaped tokens go first, whole. If an env value that is only the start of
+    # a longer token were replaced first, the marker would split the token and
+    # its tail would no longer match.
+    text = _SK_TOKEN.sub(_REDACTED, text)
+    text = _BEARER_TOKEN.sub(lambda m: m.group(1) + _REDACTED, text)
+    for value in _credential_values():
+        text = text.replace(value, _REDACTED)
+    return text
+
+
 _TOOL_OUTPUT_LIMIT = 2000
 
 
@@ -197,7 +264,10 @@ def main(argv: list[str] | None = None) -> int:
                       gt_root=args.gt_root,
                       time_budget_seconds=args.time_budget_seconds)
     except Exception as e:
-        _console.print(f"[bold red]setup error:[/] {type(e).__name__}: {e}")
+        # Exception text can carry a key (a bad-key reply quotes it back), and
+        # it is data: printed as literal text, never read as Rich markup.
+        message = _redact(_describe(e))
+        _console.print(Text.assemble(("setup error:", "bold red"), " ", message))
         return 1
     result = agent.run(args.task)
     _console.print(f"\n[bold]stop:[/] {result.stop_reason}  "
