@@ -703,3 +703,59 @@ def test_at4_ordinary_identifiers_with_sk_inside_are_left_alone(text, clean_env,
     rc, out, err = _setup_error_run(text, capsys)
     assert rc == 1
     assert text in out
+
+
+def _pyproject_version() -> str:
+    import tomllib
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    return tomllib.loads(path.read_text(encoding="utf-8"))["project"]["version"]
+
+
+def test_at5_version_flag_prints_name_and_number_and_exits_0(capsys):
+    import nano
+
+    with patch("nano.cli.build_provider") as build, patch("nano.cli.Agent") as agent:
+        with pytest.raises(SystemExit) as exc:
+            main(["--version"])
+    out, err = capsys.readouterr()
+    assert exc.value.code == 0
+    assert out == f"nano {nano.__version__}\n"
+    assert err == ""
+    build.assert_not_called()
+    agent.assert_not_called()
+
+
+def test_at5_version_number_matches_pyproject():
+    import nano
+
+    assert nano.__version__ == _pyproject_version()
+
+
+def test_at5_version_flag_wins_over_the_rest_of_the_command_line(capsys):
+    import nano
+
+    with patch("nano.cli.build_provider") as build, patch("nano.cli.Agent"):
+        with pytest.raises(SystemExit) as exc:
+            main(["--version", "run", "a task"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out == f"nano {nano.__version__}\n"
+    build.assert_not_called()
+
+
+def test_at5_no_command_is_still_a_usage_error(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 2
+    assert "nano" in capsys.readouterr().err
+
+
+def test_at5_run_still_works_next_to_the_version_flag():
+    with patch("nano.cli.build_provider") as build, patch("nano.cli.Agent") as agent:
+        agent.return_value.run.return_value = MagicMock(
+            stop_reason="end_turn", iterations=1, total_input_tokens=0,
+            total_output_tokens=0, total_cache_read_tokens=0, final_text="")
+        rc = main(["run", "a task", "--model", "m"])
+    assert rc == 0
+    build.assert_called_once()

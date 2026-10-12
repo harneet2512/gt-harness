@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from . import __version__
 from .agent import Agent
 from .prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT
 from .providers import AnthropicProvider, OpenAIProvider, Provider
@@ -221,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(prog="nano")
+    parser.add_argument("--version", action="version", version=f"nano {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", help="Run the agent on a task description.")
     run.add_argument("task", help="Plain-English task description.")
