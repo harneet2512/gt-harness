@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
+    "DARK",
     "LIGHT",
     "ReportError",
     "Summary",
@@ -51,6 +52,20 @@ LIGHT = {
     "error_text": "#82071e",
     "error_bg": "#ffebe9",
 }
+
+# The same names for a system set to dark. Used only inside the dark media query.
+DARK = {
+    "page_bg": "#0d1117",
+    "card_bg": "#161b22",
+    "text": "#e6edf3",
+    "muted": "#9da7b3",
+    "border": "#3d444d",
+    "error_text": "#ffb3ad",
+    "error_bg": "#3b1219",
+}
+
+# The one sentence this module adds at the foot of the page. Plain words, no digits.
+_FOOTER = "Made by nano report from the recorded run. The text above is shown as it was recorded."
 
 # A constant with no markup characters other than quotes, which are safe inside a
 # double-quoted attribute, so it is written as is.
@@ -376,11 +391,14 @@ def _summary_bar(s: Summary) -> Markup:
     )
 
 
+def _vars(palette: dict[str, str]) -> str:
+    return ";".join(f"--{k.replace('_', '-')}:{c}" for k, c in palette.items())
+
+
 def _css() -> str:
-    v = {k.replace("_", "-"): c for k, c in LIGHT.items()}
-    root = ";".join(f"--{k}:{c}" for k, c in v.items())
     return (
-        f":root{{{root}}}\n"
+        f":root{{color-scheme:light dark;{_vars(LIGHT)}}}\n"
+        f"@media (prefers-color-scheme: dark){{:root{{{_vars(DARK)}}}}}\n"
         "*{box-sizing:border-box}\n"
         "body{margin:0;background:var(--page-bg);color:var(--text);"
         "font:16px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}\n"
@@ -416,6 +434,9 @@ def _css() -> str:
         "border:1px solid var(--border);border-radius:6px}\n"
         ".outcome p{margin:0;overflow-wrap:anywhere}\n"
         "header p{margin:0}\n"
+        "footer{max-width:60rem;margin:0 auto;padding:1rem;color:var(--muted);"
+        "font-size:.85rem}\n"
+        "footer p{margin:0}\n"
     )
 
 
@@ -458,7 +479,9 @@ def render_report(events: Iterable[object], *, source_name: object) -> str:
         _el("section", "outcome", _el("h2", None, "How it ended"),
             _el("p", None, _el("strong", None, "Stop reason"), " ",
                 _el("span", "v", stop))), "\n",
-        "</main>\n</body>\n</html>\n",
+        "</main>\n",
+        _el("footer", None, _el("p", None, _FOOTER)), "\n",
+        "</body>\n</html>\n",
     ])
 
 

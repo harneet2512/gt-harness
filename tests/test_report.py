@@ -206,8 +206,9 @@ def test_at1_report_happy_path(tmp_path):
     text = visible_text(page)
     pos = [text.index(s) for s in expected_in_order]
     assert pos == sorted(pos), pos
-    outcome = text[text.index("How it ended"):]
+    outcome = text[text.index("How it ended"):text.index("Made by")]
     assert outcome.split() == ["How", "it", "ended", "Stop", "reason", "end_turn"]
+    assert text.rstrip().endswith("it was recorded.")  # the footer is last
 
     # self-contained: no external reference of any kind
     for needle in ("http://", "https://", "src=", "href=", "url(", "@import"):
@@ -486,7 +487,7 @@ def test_task_only_transcript_shows_task_and_unknown_stop_reason():
     page = render_report(minimal("only task"), source_name="t")
     text = visible_text(page)
     assert "only task" in text
-    assert text[text.index("How it ended"):].split() == [
+    assert text[text.index("How it ended"):text.index("Made by")].split() == [
         "How", "it", "ended", "Stop", "reason", "unknown"]
     assert len([t for t in parse(page).tags if t[0] == "li"]) == 0
     assert "no steps" in text.lower()
@@ -1256,3 +1257,135 @@ def test_at3_how_it_ended_line_wraps_a_huge_stop_reason():
     css = page[page.index("<style>"):page.index("</style>")]
     rule = css[css.index(".outcome p{"):].split("}")[0]
     assert "overflow-wrap:anywhere" in rule
+
+
+# --------------------------------------------------------------------------
+# #72: footer and dark theme (AT5)
+
+import re as _re72  # noqa: E402
+
+
+def _lum(hex_colour: str) -> float:
+    rgb = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _ratio(a: str, b: str) -> float:
+    hi, lo = sorted((_lum(a), _lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _css72(page: str) -> str:
+    return page[page.index("<style>") + 7:page.index("</style>")]
+
+
+def _body_children(page: str) -> list[str]:
+    """Names of the elements directly inside <body>, in order."""
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.depth, self.in_body, self.top = 0, False, []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "body":
+                self.in_body = True
+            elif self.in_body:
+                if self.depth == 0:
+                    self.top.append(tag)
+                if tag not in ("meta", "br", "hr", "img", "input", "link"):
+                    self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "body":
+                self.in_body = False
+            elif self.in_body:
+                self.depth -= 1
+
+    p = P()
+    p.feed(page)
+    return p.top
+
+
+def test_at5_footer_is_the_last_element_and_says_what_made_the_page():
+    page = _page(_asst())
+    assert _body_children(page) == ["header", "main", "footer"]
+    foot = _re72.search(r"<footer[^>]*>(.*?)</footer>", page, _re72.S).group(1)
+    text = html.unescape(_re72.sub(r"<[^>]+>", "", foot)).strip()
+    assert "nano report" in text and "recorded" in text
+    assert len(text) < 200
+
+
+def test_at5_footer_copy_has_no_em_dash_no_banned_phrase_no_digits():
+    page = _page(_asst())
+    foot = _re72.search(r"<footer[^>]*>(.*?)</footer>", page, _re72.S).group(0)
+    low = foot.lower()
+    assert "—" not in foot and "&mdash;" not in low and "&#8212;" not in low
+    for banned in ("ai-powered", "ai powered", "gdpr", "hipaa", "soc 2", "compliant",
+                   "certified", "secure", "guarantee"):
+        assert banned not in low
+    assert not any(c.isdigit() for c in _re72.sub(r"<[^>]+>", "", foot))
+
+
+def test_at5_footer_does_not_touch_the_recorded_text():
+    page = render_report(minimal("a — b") + [_asst(text="x — y")], source_name="t")
+    text = visible_text(page)
+    assert "a — b" in text and "x — y" in text
+    foot = _re72.search(r"<footer[^>]*>(.*?)</footer>", page, _re72.S).group(0)
+    assert "—" not in foot
+
+
+def test_at5_page_declares_both_schemes_and_switches_by_system_setting_only():
+    page = _page(_asst())
+    css = _css72(page)
+    assert "color-scheme:light dark;" in css
+    assert "@media (prefers-color-scheme: dark)" in css
+    assert "<script" not in page.lower()          # no toggle, no JS
+    assert "<button" not in page.lower() and "<input" not in page.lower()
+
+
+def test_at5_css_carries_exactly_the_palette_dicts():
+    page = _page(_asst())
+    css = _css72(page)
+    dark_at = css.index("@media (prefers-color-scheme: dark)")
+    light_part = css[:dark_at]
+    dark_part = css[dark_at:].splitlines()[0]  # the whole media query is one line
+    assert set(report.LIGHT) == set(report.DARK)
+    for name, colour in report.LIGHT.items():
+        assert f"--{name.replace('_', '-')}:{colour}" in light_part
+    for name, colour in report.DARK.items():
+        assert f"--{name.replace('_', '-')}:{colour}" in dark_part
+    # the dark block only redefines the variables; no second set of rules to drift
+    block = dark_part[dark_part.index("{") + 1:]
+    assert block.startswith(":root{--page-bg:") and ".step" not in block and "body{" not in block
+
+
+PAIRS = [("text", "page_bg"), ("text", "card_bg"), ("muted", "page_bg"),
+         ("muted", "card_bg"), ("error_text", "error_bg"), ("error_text", "page_bg")]
+
+
+@pytest.mark.parametrize("palette_name", ["LIGHT", "DARK"])
+@pytest.mark.parametrize("fg,bg", PAIRS)
+def test_at5_palettes_meet_text_contrast(palette_name, fg, bg):
+    p = getattr(report, palette_name)
+    assert _ratio(p[fg], p[bg]) >= 4.5, (palette_name, fg, bg, _ratio(p[fg], p[bg]))
+
+
+def test_at5_dark_palette_is_dark_and_light_is_light():
+    assert _lum(report.DARK["page_bg"]) < 0.05 < 0.5 < _lum(report.LIGHT["page_bg"])
+    assert _lum(report.DARK["text"]) > _lum(report.DARK["page_bg"])
+
+
+def test_at5_error_steps_still_carry_the_word_error_without_colour():
+    page = _page({"type": "tool_result", "id": "x", "name": "n", "output": "boom",
+                  "is_error": True})
+    assert "error" in visible_text(page).lower()
+
+
+def test_at5_footer_and_themes_via_the_real_cli(tmp_path):
+    src, _events = real_run(tmp_path, task="Summarise a.txt for me")
+    proc = cli([src], cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    page = src.with_name("task-001.transcript.report.html").read_text(encoding="utf-8")
+    assert _body_children(page)[-1] == "footer"
+    assert "prefers-color-scheme: dark" in page
