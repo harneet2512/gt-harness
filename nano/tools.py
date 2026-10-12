@@ -270,22 +270,27 @@ class BashTool:
 
 
 def read_file(path: str, line_start: int | None = None,
-              line_end: int | None = None) -> str:
+              line_end: int | None = None, *, display_path: str | None = None) -> str:
+    """`display_path` is the path as the model wrote it. Errors name it, not
+    the cwd-resolved `path`, so the model can match the message to its call."""
+    shown = display_path if display_path is not None else path
     p = Path(path)
     if not p.exists():
-        raise ToolError(f"File not found: {path}")
+        raise ToolError(f"File not found: {shown}")
     if not p.is_file():
-        raise ToolError(f"Not a regular file: {path}")
+        raise ToolError(f"Not a regular file: {shown}")
     try:
         text = p.read_text(encoding="utf-8")
     except UnicodeDecodeError as e:
-        raise ToolError(f"Cannot decode {path} as UTF-8 (binary file?): {e}") from e
+        raise ToolError(f"Cannot decode {shown} as UTF-8 (binary file?): {e}") from e
+    except OSError as e:
+        raise ToolError(f"Cannot read {shown}: {e.strerror or e}") from e
 
     lines = text.splitlines()
     start = (line_start or 1) - 1
     end = line_end if line_end is not None else len(lines)
     if start < 0 or start > len(lines):
-        raise ToolError(f"line_start {line_start} out of range (1..{len(lines)})")
+        raise ToolError(f"line_start {line_start} out of range (1..{len(lines)}) in {shown}")
     selected = lines[start:end]
     return _truncate("\n".join(f"{i + start + 1}\t{ln}"
                                for i, ln in enumerate(selected)) + "\n")
@@ -479,7 +484,8 @@ def dispatch(name: str, arguments: dict[str, Any], *, bash: BashTool) -> str:
             path = Path(bash.cwd()) / path
         return read_file(str(path),
                          _int_arg(arguments, "line_start"),
-                         _int_arg(arguments, "line_end"))
+                         _int_arg(arguments, "line_end"),
+                         display_path=str(arguments["path"]))
     if name == "edit_file":
         _require(arguments, name, "path", "old", "new")
         path = Path(arguments["path"])
