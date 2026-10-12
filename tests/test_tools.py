@@ -508,3 +508,10 @@ def test_read_file_default_display_is_the_path_given():
     with pytest.raises(ToolError) as exc:
         read_file("no/such/place.txt")
     assert str(exc.value) == "File not found: no/such/place.txt"
+
+
+@pytest.mark.parametrize("bad", [42, None, ["a", "b"], {"p": 1}])
+def test_dispatch_read_file_non_string_path_is_a_toolerror(bash, bad):
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": bad}, bash=bash)
+    assert "'path' must be a string" in str(exc.value)

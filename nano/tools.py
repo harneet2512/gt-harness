@@ -479,6 +479,10 @@ def dispatch(name: str, arguments: dict[str, Any], *, bash: BashTool) -> str:
         return bash.run(arguments["command"], timeout=_int_arg(arguments, "timeout", 60))
     if name == "read_file":
         _require(arguments, name, "path")
+        if not isinstance(arguments["path"], str):
+            raise ToolError(
+                f"Argument 'path' must be a string, got {type(arguments['path']).__name__}. "
+                f"Re-issue the call with a path string.")
         path = Path(arguments["path"])
         if not path.is_absolute():
             path = Path(bash.cwd()) / path
