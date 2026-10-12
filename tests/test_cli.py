@@ -315,3 +315,104 @@ def test_print_event_shows_tool_call_inputs(capsys):
     assert "bash(" in out
     assert "ls -la" in out
 
+
+
+def _letters(n):
+    """n characters that repeat a-z, so a cut at the wrong place is visible."""
+    return "".join(chr(97 + i % 26) for i in range(n))
+
+
+def _printed_text(event):
+    """Run _print_event with the console mocked; return the Text inside the Panel."""
+    from rich.text import Text
+
+    from nano.cli import _print_event
+
+    with patch("nano.cli._console") as console:
+        _print_event(event)
+    panel = console.print.call_args[0][0]
+    assert isinstance(panel.renderable, Text), "tool output must be literal Text"
+    return panel.renderable.plain
+
+
+def _rendered(event, width=2300):
+    """Run _print_event on a wide real Rich console; return everything it wrote."""
+    import io
+
+    from rich.console import Console
+
+    from nano.cli import _print_event
+
+    buffer = io.StringIO()
+    with patch("nano.cli._console", Console(file=buffer, width=width, color_system=None)):
+        _print_event(event)
+    return buffer.getvalue()
+
+
+def _tool_result(output, is_error=False):
+    return {"type": "tool_result", "output": output, "is_error": is_error}
+
+
+def test_at3_exactly_2000_characters_prints_in_full_with_no_note():
+    output = _letters(2000)
+    assert _printed_text(_tool_result(output)) == output
+
+
+def test_at3_short_and_empty_output_have_no_note():
+    assert _printed_text(_tool_result("")) == ""
+    assert _printed_text(_tool_result(_letters(1999))) == _letters(1999)
+
+
+def test_at3_one_character_over_says_one_more_character():
+    output = _letters(2001)
+    text = _printed_text(_tool_result(output))
+    assert text.startswith(output[:2000])
+    assert text.endswith("[truncated, 1 more character]")
+    assert text.split("\n")[0] == output[:2000]
+
+
+def test_at3_longer_output_says_the_exact_number_cut():
+    output = _letters(3234)
+    text = _printed_text(_tool_result(output))
+    assert text == output[:2000] + "\n[truncated, 1234 more characters]"
+
+
+def test_at3_note_is_visible_in_the_real_terminal_output():
+    out = _rendered(_tool_result(_letters(3234)))
+    assert "[truncated, 1234 more characters]" in out
+    assert _letters(2000) in out
+    assert _letters(2001) not in out
+
+
+def test_at3_square_brackets_in_output_print_as_typed(capsys):
+    from nano.cli import _print_event
+
+    _print_event(_tool_result("before [/foo] after [bold]x[/bold] [red]y"))
+    out = capsys.readouterr().out
+    assert "before [/foo] after [bold]x[/bold] [red]y" in out
+
+
+def test_at3_brackets_near_the_cut_do_not_crash_or_swallow_the_note():
+    output = _letters(1990) + "[/foo]" + _letters(10) + "tail"
+    out = _rendered(_tool_result(output))
+    assert "[/foo]" in out
+    assert "[truncated, 10 more characters]" in out
+
+
+def test_at3_error_panel_gets_the_same_note_and_literal_text():
+    event = _tool_result("[/foo] " + _letters(2500), is_error=True)
+    out = _rendered(event)
+    assert "tool_result (error)" in out
+    assert "[/foo]" in out
+    assert "[truncated, 507 more characters]" in out
+
+
+def test_at3_note_uses_plain_words():
+    text = _printed_text(_tool_result(_letters(2100)))
+    assert "—" not in text and "–" not in text
+
+
+def test_at3_count_is_in_characters_not_bytes():
+    output = "A" + "\U0001F600" * 2100  # 2101 characters, 8401 bytes
+    text = _printed_text(_tool_result(output))
+    assert text == output[:2000] + "\n[truncated, 101 more characters]"
