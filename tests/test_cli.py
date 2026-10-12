@@ -67,3 +67,46 @@ def test_print_event_shows_tool_call_inputs(capsys):
     out = capsys.readouterr().out
     assert "bash(" in out
     assert "ls -la" in out
+
+
+def _write_transcript(path, events):
+    import json
+    path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    return path
+
+
+def test_report_writes_page_beside_input_and_prints_where(tmp_path, capsys):
+    src = _write_transcript(tmp_path / "r.transcript.jsonl",
+                            [{"type": "user", "content": "do the thing"}])
+    assert main(["report", str(src)]) == 0
+    out = tmp_path / "r.transcript.report.html"
+    assert capsys.readouterr().out.strip() == f"wrote {out}"
+    assert "do the thing" in out.read_text(encoding="utf-8")
+
+
+def test_report_output_flag_and_force(tmp_path, capsys):
+    src = _write_transcript(tmp_path / "r.jsonl", [{"type": "user", "content": "t"}])
+    dest = tmp_path / "chosen.html"
+    dest.write_text("old")
+    assert main(["report", str(src), "-o", str(dest)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("report error: ") and "--force" in err
+    assert dest.read_text() == "old"
+    assert main(["report", str(src), "--output", str(dest), "--force"]) == 0
+    assert "<html" in dest.read_text(encoding="utf-8")
+
+
+def test_report_error_is_one_line_on_stderr_and_exit_one(tmp_path, capsys):
+    assert main(["report", str(tmp_path / "missing.jsonl")]) == 1
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert cap.err.count("\n") == 1 and cap.err.startswith("report error: ")
+
+
+def test_report_os_error_is_reported_not_raised(tmp_path, capsys, monkeypatch):
+    def boom(*a, **k):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("nano.cli.write_report", boom)
+    assert main(["report", "x.jsonl"]) == 1
+    assert "Permission denied" in capsys.readouterr().err

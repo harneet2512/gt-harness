@@ -1,0 +1,501 @@
+"""`nano report`: turn a recorded run (``*.transcript.jsonl``) into one HTML page.
+
+The page shows the task, each step the agent took, in order, and how the run
+ended. Three rules shape the code:
+
+* Recorded text is data. Every string from the transcript goes through
+  ``_esc`` and lands in a text node; the page has no script, no event handler,
+  no link and no external resource, and carries a Content-Security-Policy as a
+  second layer. Markup is built only by ``_el`` and ``_pre``, which escape
+  their arguments, so a value cannot reach the page unescaped by accident.
+* The report shows what the file says and nothing else. It never trims or
+  rewrites recorded text and never prints a number the file does not give.
+* The writer never destroys a file: an existing destination is refused unless
+  ``force`` is set, the transcript itself is never overwritten, and the page is
+  published whole or not at all.
+
+Loading is strict (a bad line is a line-numbered ``ReportError``); rendering is
+tolerant (any JSON object renders, wrong-typed fields are shown as JSON).
+"""
+from __future__ import annotations
+
+import errno
+import html
+import json
+import os
+import re
+import secrets
+import stat
+from collections.abc import Iterable
+from pathlib import Path
+
+__all__ = [
+    "LIGHT",
+    "ReportError",
+    "derive_stop_reason",
+    "load_transcript",
+    "render_report",
+    "write_report",
+]
+
+# Colours of the page. The CSS is generated from this one dict.
+LIGHT = {
+    "page_bg": "#ffffff",
+    "card_bg": "#f6f8fa",
+    "text": "#1f2328",
+    "muted": "#59636e",
+    "border": "#d1d9e0",
+    "error_text": "#82071e",
+    "error_bg": "#ffebe9",
+}
+
+# A constant with no markup characters other than quotes, which are safe inside a
+# double-quoted attribute, so it is written as is.
+_CSP = "default-src 'none'; style-src 'unsafe-inline'"
+_UNKNOWN = "unknown"
+
+
+class ReportError(Exception):
+    """A problem the user can act on; the message is one line."""
+
+
+# --------------------------------------------------------------------------
+# escaping and element building
+
+
+class Markup(str):
+    """Text that is already safe HTML. Only ``_el`` and ``_pre`` make it."""
+
+    __slots__ = ()
+
+
+_UNSAFE_CHARS = re.compile("[\ud800-\udfff\x00]")
+
+
+def _esc(s: str) -> str:
+    # Lone surrogates (from a JSON "\ud800") and NUL cannot be written as
+    # UTF-8 or kept by a browser; they become U+FFFD. A raw CR would be turned
+    # into LF by the HTML parser, so it is written as a character reference.
+    s = _UNSAFE_CHARS.sub("\ufffd", s)
+    return html.escape(s, quote=True).replace("\r", "&#13;")
+
+
+def _frag(x: str) -> str:
+    return x if isinstance(x, Markup) else _esc(x)
+
+
+def _el(tag: str, cls: str | None, *children: str) -> Markup:
+    attr = f' class="{_esc(cls)}"' if cls else ""
+    return Markup(f"<{tag}{attr}>{''.join(_frag(c) for c in children)}</{tag}>")
+
+
+def _pre(text: str) -> Markup:
+    # Browsers drop one newline right after <pre>, so a text that starts with a
+    # newline gets an extra one to keep its own.
+    lead = "\n" if text.startswith("\n") else ""
+    return Markup(f"<pre>{lead}{_esc(text)}</pre>")
+
+
+def _text(value: object) -> str:
+    """The one way a recorded value becomes text: a string as is, else JSON."""
+    if isinstance(value, str):
+        return value
+    try:
+        indent = 2 if isinstance(value, (dict, list)) else None
+        return json.dumps(value, ensure_ascii=False, indent=indent, default=repr)
+    except (TypeError, ValueError, RecursionError):
+        try:
+            return repr(value)
+        except Exception:
+            return "<value that cannot be shown>"
+
+
+# --------------------------------------------------------------------------
+# loading
+
+
+def load_transcript(path: str | os.PathLike[str]) -> list[dict]:
+    """Read a JSONL transcript. Every non-blank line must be a JSON object."""
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        raise ReportError(f"{path}: file not found") from None
+    except OSError as e:
+        raise ReportError(f"{path}: cannot read the file ({e.strerror or e})") from None
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    events: list[dict] = []
+    for number, chunk in enumerate(raw.split(b"\n"), start=1):
+        if not chunk.strip():
+            continue
+        try:
+            line = chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ReportError(f"{path}: line {number}: not valid UTF-8") from None
+        try:
+            event = json.loads(line)
+        except (ValueError, RecursionError):
+            raise ReportError(f"{path}: line {number}: not valid JSON") from None
+        if not isinstance(event, dict):
+            raise ReportError(
+                f"{path}: line {number}: expected a JSON object, found "
+                f"{type(event).__name__}"
+            )
+        events.append(event)
+    if not events:
+        raise ReportError(f"{path}: the file is empty")
+    return events
+
+
+# --------------------------------------------------------------------------
+# what the file proves
+
+
+def _has_tool_calls(tool_calls: object) -> bool:
+    # Missing, null or an empty list mean "no tool calls". Anything else, even
+    # a value of the wrong type, counts as having them: the file does not
+    # prove the model was finished.
+    return not (tool_calls is None or (isinstance(tool_calls, list) and not tool_calls))
+
+
+def _is_event(ev: object, kind: str) -> bool:
+    return isinstance(ev, dict) and isinstance(ev.get("type"), str) and ev["type"] == kind
+
+
+def derive_stop_reason(events: Iterable[object]) -> str:
+    """``error`` if an error event exists; else the last assistant turn's own
+    stop reason when it made no tool calls; else ``unknown``."""
+    last_assistant: dict | None = None
+    for ev in events:
+        if _is_event(ev, "error"):
+            return "error"
+        if _is_event(ev, "assistant"):
+            last_assistant = ev  # type: ignore[assignment]
+    if last_assistant is None or _has_tool_calls(last_assistant.get("tool_calls")):
+        return _UNKNOWN
+    reason = last_assistant.get("stop_reason")
+    return reason if isinstance(reason, str) and reason else _UNKNOWN
+
+
+# --------------------------------------------------------------------------
+# rendering
+
+
+def _kv(label: str, value: object) -> Markup:
+    return _el("span", "kv", _el("span", "k", label), " ", _el("span", "v", _text(value)))
+
+
+def _recorded(ev: dict, key: str, empty: str) -> Markup:
+    """A <pre> with the recorded text of ``ev[key]``, or a note when absent."""
+    if key not in ev or ev[key] is None:
+        return _el("p", "muted", empty)
+    text = _text(ev[key])
+    if text == "":
+        return _el("p", "muted", "(empty)")
+    return _pre(text)
+
+
+def _usage_is_plain(usage: object) -> bool:
+    return isinstance(usage, dict) and all(
+        isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in usage.values()
+    )
+
+
+def _call(entry: object) -> Markup:
+    if not isinstance(entry, dict):
+        return _el("div", "call", _el("div", "kind", "tool call"), _pre(_text(entry)))
+    head = [_el("span", "kind", "tool call"), " "]
+    head.append(_el("strong", None, _text(entry["name"]) if "name" in entry else "(no name)"))
+    if entry.get("id") is not None:
+        head += [" ", _kv("id", entry["id"])]
+    parts: list[str] = [_el("div", "head", *head)]
+    args = entry.get("arguments")
+    if isinstance(args, dict):
+        for key, value in args.items():
+            parts.append(_el("div", "arg", _el("div", "k", _text(key)), _pre(_text(value))))
+    elif args is not None:
+        parts.append(_el("div", "arg", _el("div", "k", "arguments"), _pre(_text(args))))
+    return _el("div", "call", *parts)
+
+
+def _assistant(ev: dict) -> Markup:
+    parts: list[str] = [_el("div", "kind", "assistant")]
+    text = ev.get("text")
+    if text is not None and text != "":
+        parts.append(_pre(_text(text)))
+    calls = ev.get("tool_calls")
+    if isinstance(calls, list):
+        parts += [_call(c) for c in calls]
+    elif calls is not None:
+        parts.append(_el("div", "call", _el("div", "kind", "tool calls (not a list)"),
+                         _pre(_text(calls))))
+    if ev.get("stop_reason") is not None:
+        parts.append(_el("div", "meta", _kv("stop reason", ev["stop_reason"])))
+    usage = ev.get("usage")
+    if usage is not None and not _usage_is_plain(usage):
+        parts.append(_el("div", "call", _el("div", "kind", "usage (not readable as counts)"),
+                         _pre(_text(usage))))
+    return _el("li", "step assistant", *parts)
+
+
+def _tool_result(ev: dict) -> Markup:
+    head = [_el("span", "kind", "tool result")]
+    if ev.get("is_error") is True:
+        head += [" ", _el("span", "flag", "error")]
+    meta: list[str] = []
+    if ev.get("name") is not None:
+        meta.append(_el("strong", None, _text(ev["name"])))
+    if ev.get("id") is not None:
+        meta += [" ", _kv("id", ev["id"])]
+    if ev.get("is_error") not in (None, True, False):
+        meta += [" ", _kv("is_error", ev["is_error"])]
+    parts: list[str] = [_el("div", "head", *head)]
+    if meta:
+        parts.append(_el("div", "meta", *meta))
+    parts.append(_recorded(ev, "output", "(no output recorded)"))
+    cls = "step result" + (" failed" if ev.get("is_error") is True else "")
+    return _el("li", cls, *parts)
+
+
+def _error(ev: dict) -> Markup:
+    return _el("li", "step failed", _el("div", "kind", "error"),
+               _recorded(ev, "message", "(no message recorded)"))
+
+
+def _nudge(ev: dict) -> Markup:
+    parts: list[str] = [_el("div", "kind", "nudge (message to the agent)")]
+    if ev.get("gt") is not None:
+        parts.append(_el("div", "meta", _kv("gt", ev["gt"])))
+    parts.append(_recorded(ev, "content", "(no text recorded)"))
+    return _el("li", "step nudge", *parts)
+
+
+def _other(ev: object) -> Markup:
+    label = "unrecognised event"
+    if isinstance(ev, dict) and isinstance(ev.get("type"), str) and ev["type"] != "":
+        label = ev["type"]
+    return _el("li", "step other", _el("div", "kind", label), _pre(_text(ev)))
+
+
+def _step(ev: object) -> Markup:
+    if isinstance(ev, dict):
+        kind = ev.get("type")
+        if kind == "assistant":
+            return _assistant(ev)
+        if kind == "tool_result":
+            return _tool_result(ev)
+        if kind == "error":
+            return _error(ev)
+        if kind == "user":
+            return _nudge(ev)
+    return _other(ev)
+
+
+def _css() -> str:
+    v = {k.replace("_", "-"): c for k, c in LIGHT.items()}
+    root = ";".join(f"--{k}:{c}" for k, c in v.items())
+    return (
+        f":root{{{root}}}\n"
+        "*{box-sizing:border-box}\n"
+        "body{margin:0;background:var(--page-bg);color:var(--text);"
+        "font:16px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}\n"
+        "header,main{max-width:60rem;margin:0 auto;padding:1rem}\n"
+        "h1{font-size:1.5rem;margin:0 0 .25rem}\n"
+        "h2{font-size:1.15rem;margin:1.5rem 0 .5rem}\n"
+        ".muted,.k,.kind{color:var(--muted)}\n"
+        ".kind{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}\n"
+        "ol{padding-left:1.75rem;margin:0}\n"
+        ".step{margin:0 0 1rem;padding:.5rem .75rem;border:1px solid var(--border);"
+        "border-radius:6px;max-width:100%;overflow-wrap:anywhere}\n"
+        ".step.failed{background:var(--error-bg);color:var(--error-text);"
+        "border-color:var(--error-text)}\n"
+        ".step.failed .kind,.step.failed .k{color:var(--error-text)}\n"
+        ".flag{font-weight:700;color:var(--error-text);background:var(--error-bg);"
+        "padding:0 .35rem;border-radius:4px}\n"
+        ".call{margin:.5rem 0;padding-left:.75rem;border-left:3px solid var(--border)}\n"
+        ".meta,.head{margin:.25rem 0}\n"
+        ".kv{margin-right:.75rem}\n"
+        ".kv .k{margin-right:.25rem}\n"
+        "pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;"
+        "unicode-bidi:isolate;max-width:100%;overflow-x:auto;margin:.25rem 0;"
+        "padding:.5rem;background:var(--card-bg);color:var(--text);"
+        "border:1px solid var(--border);border-radius:4px;"
+        "font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}\n"
+        ".outcome{margin-top:1.5rem;padding:.75rem;background:var(--card-bg);"
+        "border:1px solid var(--border);border-radius:6px}\n"
+        ".outcome p{margin:0}\n"
+        "header p{margin:0}\n"
+    )
+
+
+def render_report(events: Iterable[object], *, source_name: object) -> str:
+    """The whole page as one string. Never raises on any list of JSON values."""
+    events = list(events)
+    if events and _is_event(events[0], "user"):
+        task_event, steps = events[0], events[1:]
+    else:
+        task_event, steps = None, events
+
+    if isinstance(task_event, dict):
+        task = _recorded(task_event, "content", "(no text recorded)")
+    else:
+        task = _el("p", "muted", "No task recorded in this transcript.")
+
+    if steps:
+        body = _el("ol", None, *[_step(ev) for ev in steps])
+    else:
+        body = _el("p", "muted", "No steps recorded.")
+
+    name = _text(source_name)
+    stop = derive_stop_reason(events)
+    return "".join([
+        "<!DOCTYPE html>\n",
+        '<html lang="en">\n<head>\n',
+        '<meta charset="utf-8">\n',
+        f'<meta http-equiv="Content-Security-Policy" content="{_CSP}">\n',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        _el("title", None, f"Run report: {name}"), "\n",
+        "<style>\n", _css(), "</style>\n",
+        "</head>\n<body>\n",
+        _el("header", None, _el("h1", None, "Run report"),
+            _el("p", "muted", _kv("transcript", name))), "\n",
+        "<main>\n",
+        _el("section", "task", _el("h2", None, "Task"), task), "\n",
+        _el("section", "steps", _el("h2", None, "Steps"), body), "\n",
+        _el("section", "outcome", _el("h2", None, "How it ended"),
+            _el("p", None, _el("strong", None, "Stop reason"), " ",
+                _el("span", "v", stop))), "\n",
+        "</main>\n</body>\n</html>\n",
+    ])
+
+
+# --------------------------------------------------------------------------
+# the safe write
+
+# Errors from os.link that mean "this filesystem cannot make hard links", where
+# falling back to an exclusive create is right. Anything else (no space, no
+# permission) is a real failure and is reported, not retried another way.
+_NO_HARD_LINKS = {
+    errno.EPERM, errno.EXDEV, errno.EINVAL,
+    getattr(errno, "ENOTSUP", errno.EPERM),
+    getattr(errno, "EOPNOTSUPP", errno.EPERM),
+    getattr(errno, "ENOSYS", errno.EPERM),
+}
+_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+def _os_reason(e: OSError) -> str:
+    return e.strerror or str(e)
+
+
+def _refuse_destination(src: Path, dest: Path, force: bool) -> None:
+    parent = dest.parent
+    if not parent.is_dir():
+        raise ReportError(f"{dest}: the folder {parent} does not exist")
+    try:
+        st = os.lstat(dest)
+    except FileNotFoundError:
+        st = None
+    except OSError as e:
+        raise ReportError(f"{dest}: cannot check the output path ({_os_reason(e)})") from None
+    if st is None:
+        # Not there yet, so it cannot be the transcript; compare spellings anyway.
+        if os.path.normcase(os.path.realpath(dest)) == os.path.normcase(os.path.realpath(src)):
+            raise ReportError(f"{dest}: that is the transcript itself; it is never overwritten")
+        return
+    if stat.S_ISLNK(st.st_mode) or (hasattr(os.path, "isjunction") and os.path.isjunction(dest)):
+        raise ReportError(f"{dest}: is a link; give a plain file path")
+    if not stat.S_ISREG(st.st_mode):
+        raise ReportError(f"{dest}: is not a regular file")
+    try:
+        same = os.path.samefile(src, dest)
+    except OSError:
+        same = False
+    if same:
+        raise ReportError(f"{dest}: that is the transcript itself; it is never overwritten")
+    if not force:
+        raise ReportError(f"{dest}: already exists; use --force to replace it")
+
+
+def _publish_without_link(dest: Path, data: bytes) -> None:
+    """Exclusive create + write, for filesystems with no hard links."""
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o666)
+    try:
+        try:
+            _write_all(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except BaseException:
+        try:
+            os.unlink(dest)
+        except OSError:
+            pass
+        raise
+
+
+def write_report(
+    src: str | os.PathLike[str],
+    out: str | os.PathLike[str] | None = None,
+    *,
+    force: bool = False,
+) -> Path:
+    """Write the report for ``src`` and return where it went.
+
+    The default destination is ``<src stem>.report.html`` beside ``src``. An
+    existing destination is refused unless ``force``; ``src`` itself, links and
+    non-regular files are always refused. The page is written to a temporary
+    file in the destination folder and then published whole: with ``force`` by
+    ``os.replace``, without it by a hard link that fails if the name is taken,
+    so two writers can never both win and nothing is half written.
+    """
+    src = Path(src)
+    events = load_transcript(src)
+    dest = Path(out) if out is not None else src.with_name(src.stem + ".report.html")
+    _refuse_destination(src, dest, force)
+    data = render_report(events, source_name=src.name).encode("utf-8", errors="replace")
+
+    tmp = dest.with_name(f".{dest.name}.{secrets.token_hex(6)}.tmp")
+    try:
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o666)
+        except OSError as e:
+            raise ReportError(f"{dest}: cannot write here ({_os_reason(e)})") from None
+        try:
+            _write_all(fd, data)
+            os.fsync(fd)
+        except OSError as e:
+            raise ReportError(f"{dest}: could not write the report ({_os_reason(e)})") from None
+        finally:
+            os.close(fd)
+        try:
+            if force:
+                os.replace(tmp, dest)
+            else:
+                try:
+                    os.link(tmp, dest)
+                except FileExistsError:
+                    raise ReportError(f"{dest}: already exists; use --force to replace it") from None
+                except OSError as e:
+                    if e.errno not in _NO_HARD_LINKS:
+                        raise
+                    try:
+                        _publish_without_link(dest, data)
+                    except FileExistsError:
+                        raise ReportError(
+                            f"{dest}: already exists; use --force to replace it") from None
+        except OSError as e:
+            raise ReportError(f"{dest}: could not write the report ({_os_reason(e)})") from None
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    return dest
