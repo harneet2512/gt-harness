@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nano.cli import _positive_int, build_provider, main
+from nano.cli import _positive_float, _positive_int, build_provider, main
 
 
 def test_build_provider_anthropic_by_default(monkeypatch):
@@ -146,6 +146,75 @@ def test_at1_max_iterations_only_plain_ascii_digits_are_accepted(capsys):
         assert code == 2, repr(bad)
         assert "--max-iterations" in err
         assert len(err) < 500  # usage line plus one short message
+
+
+BAD_TIME_BUDGET = [
+    "0", "0.0", "-0", "-5", "-0.5", "abc", "nan", "NaN", "inf", "-inf",
+    "infinity", "1e999", "", "1" * 5000, " 5 ", "1_0", "+inf", "٣", "0x10",
+    "1e", ".", "--5", "5s",
+]
+
+
+def test_at1_time_budget_bad_values_refused_naming_the_flag(capsys):
+    for bad in BAD_TIME_BUDGET:
+        code, out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--time-budget-seconds={bad}"],
+            capsys)
+        assert code == 2, repr(bad[:20])
+        assert "--time-budget-seconds" in err, repr(bad[:20])
+        assert "Traceback" not in err and "Traceback" not in out
+
+
+def test_at1_time_budget_separate_value_form_is_refused_too(capsys):
+    for bad in ("0", "-5", "nan", "inf"):
+        code, _out, err = _refused_run(
+            ["run", "task", "--model", "m", "--time-budget-seconds", bad],
+            capsys)
+        assert code == 2, bad
+        assert "--time-budget-seconds" in err
+
+
+def test_at1_time_budget_error_does_not_echo_the_bad_value(capsys):
+    # Same reasoning as --max-iterations: the value may be a pasted key.
+    secret = "sk-" + "ab12" * 8
+    for bad in (secret, "nope-" + "x" * 12, "-77", "1" * 5000):
+        code, out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--time-budget-seconds={bad}"],
+            capsys)
+        assert code == 2
+        assert bad not in err and bad not in out
+
+
+def test_at1_time_budget_good_values_reach_the_agent():
+    for argv_extra, expected in (
+        ([], None),
+        (["--time-budget-seconds", "1800"], 1800.0),
+        (["--time-budget-seconds", "0.5"], 0.5),
+        (["--time-budget-seconds", "1e3"], 1000.0),
+        (["--time-budget-seconds", "1800.0"], 1800.0),
+    ):
+        fake_agent = MagicMock()
+        fake_agent.run.return_value = MagicMock(
+            final_text="", stop_reason="end_turn", iterations=1,
+            total_input_tokens=0, total_output_tokens=0,
+            total_cache_read_tokens=0)
+        with patch("nano.cli.Agent", return_value=fake_agent) as agent_cls, \
+             patch("nano.cli.build_provider", return_value=MagicMock(model="m")):
+            rc = main(["run", "task", "--model", "m", *argv_extra])
+        assert rc == 0
+        got = agent_cls.call_args.kwargs["time_budget_seconds"]
+        assert got == expected and (expected is None or isinstance(got, float))
+
+
+def test_at1_positive_float_validator_is_reusable_and_message_is_plain():
+    assert _positive_float("7") == 7.0
+    assert _positive_float("0.25") == 0.25
+    for bad in ("0", "-1", "abc", "nan", "inf", "1e999", "", "1" * 5000):
+        with pytest.raises(argparse.ArgumentTypeError) as exc:
+            _positive_float(bad)
+        message = str(exc.value)
+        assert "—" not in message
+        assert len(bad) < 4 or bad not in message
 
 
 def test_print_event_shows_tool_call_inputs(capsys):
