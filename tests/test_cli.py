@@ -3,7 +3,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nano.cli import _positive_float, _positive_int, build_provider, main
+from nano.cli import (
+    _float_between,
+    _positive_float,
+    _positive_int,
+    build_provider,
+    main,
+)
 
 
 def test_build_provider_anthropic_by_default(monkeypatch):
@@ -215,6 +221,87 @@ def test_at1_positive_float_validator_is_reusable_and_message_is_plain():
         message = str(exc.value)
         assert "—" not in message
         assert len(bad) < 4 or bad not in message
+
+
+BAD_TEMPERATURE = [
+    "2.5", "2.0000001", "-0.1", "-1", "nan", "inf", "-inf", "infinity", "1e999",
+    "abc", "", "3", "20",
+]
+
+
+def test_at2_temperature_bad_values_refused_naming_flag_and_range(capsys):
+    for bad in BAD_TEMPERATURE:
+        code, out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--temperature={bad}"], capsys)
+        assert code == 2, bad
+        assert "--temperature" in err, bad
+        assert "between 0 and 2" in err, bad
+        assert "Traceback" not in err and "Traceback" not in out
+
+
+def test_at2_temperature_separate_value_form_is_refused_too(capsys):
+    code, _out, err = _refused_run(
+        ["run", "task", "--model", "m", "--temperature", "2.5"], capsys)
+    assert code == 2
+    assert "--temperature" in err
+
+
+def test_at2_temperature_only_plain_number_text_is_accepted(capsys):
+    for bad in (" 1 ", "1_0", "٣", "0x1", "1,5"):
+        code, _out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--temperature={bad}"], capsys)
+        assert code == 2, repr(bad)
+        assert "--temperature" in err
+        assert len(err) < 500  # usage line plus one short message
+
+
+def test_at2_temperature_error_does_not_echo_the_bad_value(capsys):
+    # The value may be a pasted key, and eval callers tee stderr into a CI log.
+    secret = "sk-" + "ab12" * 8
+    for bad in (secret, "nope-" + "x" * 12, "-77", "9" * 5000):
+        code, out, err = _refused_run(
+            ["run", "task", "--model", "m", f"--temperature={bad}"], capsys)
+        assert code == 2
+        assert bad not in err and bad not in out
+
+
+def test_at2_temperature_good_values_reach_build_provider():
+    for argv_extra, expected in (
+        ([], None),
+        (["--temperature", "0"], 0.0),
+        (["--temperature=-0"], 0.0),
+        (["--temperature", "1"], 1.0),
+        (["--temperature", "2"], 2.0),
+        (["--temperature", "0.7"], 0.7),
+        (["--temperature", "1e0"], 1.0),
+    ):
+        fake_agent = MagicMock()
+        fake_agent.run.return_value = MagicMock(
+            final_text="", stop_reason="end_turn", iterations=1,
+            total_input_tokens=0, total_output_tokens=0,
+            total_cache_read_tokens=0)
+        with patch("nano.cli.Agent", return_value=fake_agent), \
+             patch("nano.cli.build_provider",
+                   return_value=MagicMock(model="m")) as build:
+            rc = main(["run", "task", "--model", "m", *argv_extra])
+        assert rc == 0
+        got = build.call_args.kwargs["temperature"]
+        assert got == expected, argv_extra
+        assert expected is None or isinstance(got, float)
+        # 0 must stay 0.0, not be mistaken for "unset".
+        assert (got is None) == (expected is None)
+
+
+def test_at2_float_between_validator_is_reusable_and_message_is_plain():
+    check = _float_between(0, 2)
+    assert check("0") == 0.0 and check("2") == 2.0 and check("1.5") == 1.5
+    for bad in ("2.5", "-0.1", "nan", "inf", "1e999", "abc", "", "9" * 5000):
+        with pytest.raises(argparse.ArgumentTypeError) as exc:
+            check(bad)
+        message = str(exc.value)
+        assert message == "must be between 0 and 2"
+        assert "—" not in message
+    assert _float_between(1, 10)("10") == 10.0
 
 
 def test_print_event_shows_tool_call_inputs(capsys):
