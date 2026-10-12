@@ -27,14 +27,17 @@ import re
 import secrets
 import stat
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
     "LIGHT",
     "ReportError",
+    "Summary",
     "derive_stop_reason",
     "load_transcript",
     "render_report",
+    "summarize",
     "write_report",
 ]
 
@@ -197,6 +200,52 @@ def derive_stop_reason(events: Iterable[object]) -> str:
     return reason if isinstance(reason, str) and reason else _UNKNOWN
 
 
+@dataclass(frozen=True)
+class Summary:
+    """The numbers in the summary bar. ``None`` means the file does not prove it.
+
+    Built only by ``summarize``, which guarantees the types; not validated here.
+
+    ``total_time`` is always ``None``: the transcript has no timestamps and the
+    report does not guess a duration."""
+
+    iterations: int
+    input_tokens: int | None
+    output_tokens: int | None
+    stop_reason: str
+    total_time: None = None
+
+
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _token_total(assistants: list[dict], field: str) -> int | None:
+    """The sum of ``usage[field]`` over every assistant event, only when there is
+    at least one and every one of them records a real count >= 0."""
+    if not assistants:
+        return None
+    total = 0
+    for ev in assistants:
+        usage = ev.get("usage")
+        value = usage.get(field) if isinstance(usage, dict) else None
+        if not _is_count(value):
+            return None
+        total += value
+    return total
+
+
+def summarize(events: Iterable[object]) -> Summary:
+    events = list(events)
+    assistants = [ev for ev in events if _is_event(ev, "assistant")]
+    return Summary(
+        iterations=len(assistants),
+        input_tokens=_token_total(assistants, "input_tokens"),  # type: ignore[arg-type]
+        output_tokens=_token_total(assistants, "output_tokens"),  # type: ignore[arg-type]
+        stop_reason=derive_stop_reason(events),
+    )
+
+
 # --------------------------------------------------------------------------
 # rendering
 
@@ -311,6 +360,22 @@ def _step(ev: object) -> Markup:
     return _other(ev)
 
 
+def _stat(cls: str, label: str, value: int | str | None) -> Markup:
+    shown = _UNKNOWN if value is None else str(value)
+    return _el("div", f"stat {cls}", _el("span", "k", label), _el("span", "v", shown))
+
+
+def _summary_bar(s: Summary) -> Markup:
+    return _el(
+        "section", "summary",
+        _stat("iterations", "Iterations", s.iterations),
+        _stat("input_tokens", "Input tokens", s.input_tokens),
+        _stat("output_tokens", "Output tokens", s.output_tokens),
+        _stat("stop_reason", "Stop reason (last model turn)", s.stop_reason),
+        _stat("total_time", "Total time", s.total_time),
+    )
+
+
 def _css() -> str:
     v = {k.replace("_", "-"): c for k, c in LIGHT.items()}
     root = ";".join(f"--{k}:{c}" for k, c in v.items())
@@ -341,9 +406,15 @@ def _css() -> str:
         "padding:.5rem;background:var(--card-bg);color:var(--text);"
         "border:1px solid var(--border);border-radius:4px;"
         "font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}\n"
+        ".summary{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .5rem}\n"
+        ".stat{flex:1 1 9rem;min-width:0;padding:.5rem .75rem;background:var(--card-bg);"
+        "border:1px solid var(--border);border-radius:6px;overflow-wrap:anywhere}\n"
+        ".stat .k{display:block;font-size:.85rem}\n"
+        ".stat .v{display:block;font-size:1.25rem;font-weight:600;max-height:6rem;overflow:auto}\n"
+        ".stat.stop_reason{flex-basis:100%}\n"
         ".outcome{margin-top:1.5rem;padding:.75rem;background:var(--card-bg);"
         "border:1px solid var(--border);border-radius:6px}\n"
-        ".outcome p{margin:0}\n"
+        ".outcome p{margin:0;overflow-wrap:anywhere}\n"
         "header p{margin:0}\n"
     )
 
@@ -367,7 +438,8 @@ def render_report(events: Iterable[object], *, source_name: object) -> str:
         body = _el("p", "muted", "No steps recorded.")
 
     name = _text(source_name)
-    stop = derive_stop_reason(events)
+    summary = summarize(events)
+    stop = summary.stop_reason
     return "".join([
         "<!DOCTYPE html>\n",
         '<html lang="en">\n<head>\n',
@@ -380,6 +452,7 @@ def render_report(events: Iterable[object], *, source_name: object) -> str:
         _el("header", None, _el("h1", None, "Run report"),
             _el("p", "muted", _kv("transcript", name))), "\n",
         "<main>\n",
+        _summary_bar(summary), "\n",
         _el("section", "task", _el("h2", None, "Task"), task), "\n",
         _el("section", "steps", _el("h2", None, "Steps"), body), "\n",
         _el("section", "outcome", _el("h2", None, "How it ended"),
