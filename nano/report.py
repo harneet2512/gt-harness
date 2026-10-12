@@ -204,6 +204,8 @@ def derive_stop_reason(events: Iterable[object]) -> str:
 class Summary:
     """The numbers in the summary bar. ``None`` means the file does not prove it.
 
+    Built only by ``summarize``, which guarantees the types; not validated here.
+
     ``total_time`` is always ``None``: the transcript has no timestamps and the
     report does not guess a duration."""
 

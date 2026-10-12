@@ -207,7 +207,7 @@ def test_at1_report_happy_path(tmp_path):
     pos = [text.index(s) for s in expected_in_order]
     assert pos == sorted(pos), pos
     outcome = text[text.index("How it ended"):]
-    assert "end_turn" in outcome
+    assert outcome.split() == ["How", "it", "ended", "Stop", "reason", "end_turn"]
 
     # self-contained: no external reference of any kind
     for needle in ("http://", "https://", "src=", "href=", "url(", "@import"):
@@ -486,7 +486,8 @@ def test_task_only_transcript_shows_task_and_unknown_stop_reason():
     page = render_report(minimal("only task"), source_name="t")
     text = visible_text(page)
     assert "only task" in text
-    assert text[text.index("How it ended"):].split()[-1] == "unknown"
+    assert text[text.index("How it ended"):].split() == [
+        "How", "it", "ended", "Stop", "reason", "unknown"]
     assert len([t for t in parse(page).tags if t[0] == "li"]) == 0
     assert "no steps" in text.lower()
 
