@@ -419,3 +419,99 @@ def test_edit_file_edits_through_symlink(tmp_workdir):
     edit_file(str(link), old="v = 1", new="v = 2")
     assert target.read_text() == "v = 2\n"
     assert link.is_symlink(), "edit replaced the symlink with a regular file"
+
+
+# --- #71: read_file errors name the path exactly as the model asked for it ---
+
+
+def _cd(bash, d):
+    bash.run(f'cd "{d.as_posix()}"')
+
+
+def test_dispatch_missing_relative_path_is_named_as_asked(tmp_path, bash):
+    _cd(bash, tmp_path)
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": "sub/missing.txt"}, bash=bash)
+    msg = str(exc.value)
+    assert msg == "File not found: sub/missing.txt"
+    assert tmp_path.name not in msg
+
+
+def test_dispatch_missing_absolute_path_is_named_as_asked(tmp_path, bash):
+    ask = str(tmp_path / "gone.txt")
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": ask}, bash=bash)
+    assert str(exc.value) == f"File not found: {ask}"
+
+
+def test_dispatch_directory_is_named_as_asked(tmp_path, bash):
+    (tmp_path / "d").mkdir()
+    _cd(bash, tmp_path)
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": "d"}, bash=bash)
+    assert str(exc.value) == "Not a regular file: d"
+
+
+def test_dispatch_binary_file_is_named_as_asked(tmp_path, bash):
+    (tmp_path / "blob.bin").write_bytes(b"\x00\xff\xfe BIN")
+    _cd(bash, tmp_path)
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": "blob.bin"}, bash=bash)
+    assert str(exc.value).startswith("Cannot decode blob.bin as UTF-8")
+    assert tmp_path.name not in str(exc.value)
+
+
+def test_dispatch_out_of_range_line_start_names_the_path(tmp_path, bash):
+    (tmp_path / "short.txt").write_text("a\nb\n", encoding="utf-8")
+    _cd(bash, tmp_path)
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": "short.txt", "line_start": 99}, bash=bash)
+    msg = str(exc.value)
+    assert "short.txt" in msg and "line_start 99 out of range (1..2)" in msg
+    assert tmp_path.name not in msg
+
+
+def test_dispatch_path_with_spaces_and_unicode_is_named_verbatim(tmp_path, bash):
+    ask = "dir with space/naïve 文件.txt"
+    _cd(bash, tmp_path)
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": ask}, bash=bash)
+    assert str(exc.value) == f"File not found: {ask}"
+
+
+def test_dispatch_still_reads_relative_file_from_shell_cwd(tmp_path, bash):
+    (tmp_path / "ok.txt").write_text("fine\n", encoding="utf-8")
+    _cd(bash, tmp_path)
+    assert "1\tfine" in dispatch("read_file", {"path": "ok.txt"}, bash=bash)
+
+
+def test_read_file_unreadable_path_is_a_toolerror_naming_the_path(tmp_path, monkeypatch):
+    """A PermissionError (or any OSError) must not escape as a raw exception."""
+    p = tmp_path / "locked.txt"
+    p.write_text("secret\n", encoding="utf-8")
+    real = type(p).read_text
+
+    def deny(self, *a, **k):
+        if self.name == "locked.txt":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(type(p), "read_text", deny)
+    with pytest.raises(ToolError) as exc:
+        read_file(str(p), display_path="locked.txt")
+    assert str(exc.value).startswith("Cannot read locked.txt")
+    assert "Permission denied" in str(exc.value)
+    assert tmp_path.name not in str(exc.value)
+
+
+def test_read_file_default_display_is_the_path_given():
+    with pytest.raises(ToolError) as exc:
+        read_file("no/such/place.txt")
+    assert str(exc.value) == "File not found: no/such/place.txt"
+
+
+@pytest.mark.parametrize("bad", [42, None, ["a", "b"], {"p": 1}])
+def test_dispatch_read_file_non_string_path_is_a_toolerror(bash, bad):
+    with pytest.raises(ToolError) as exc:
+        dispatch("read_file", {"path": bad}, bash=bash)
+    assert "'path' must be a string" in str(exc.value)
