@@ -4,6 +4,7 @@ import argparse
 import math
 import os
 import sys
+from collections.abc import Callable
 
 from rich.console import Console
 from rich.panel import Panel
@@ -61,25 +62,49 @@ def _positive_int(text: str) -> int:
 _FLOAT_CHARS = frozenset("0123456789.eE+-")
 
 
-def _positive_float(text: str) -> float:
-    """argparse ``type=`` for a finite number above 0.
+def _finite_float(text: str) -> float | None:
+    """Parse plain number text to a finite float, or return None.
 
     ``float()`` alone lets ``nan`` through (``nan <= 0`` is False) and turns
     ``1e999`` into ``inf`` without an error, so the text is limited to plain
-    number characters first and the result must be finite. The message is
-    fixed text for the same reason as ``_positive_int``: the value may be a
-    pasted key and is never repeated back.
+    number characters first and the result must be finite.
     """
-    message = "must be a number greater than 0"
     if not text or not set(text) <= _FLOAT_CHARS:
-        raise argparse.ArgumentTypeError(message)
+        return None
     try:
         value = float(text)
     except ValueError:
-        raise argparse.ArgumentTypeError(message) from None
-    if not (math.isfinite(value) and value > 0):
-        raise argparse.ArgumentTypeError(message)
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _positive_float(text: str) -> float:
+    """argparse ``type=`` for a finite number above 0.
+
+    The message is fixed text for the same reason as ``_positive_int``: the
+    value may be a pasted key and is never repeated back.
+    """
+    value = _finite_float(text)
+    if value is None or value <= 0:
+        raise argparse.ArgumentTypeError("must be a number greater than 0")
     return value
+
+
+def _float_between(low: float, high: float) -> Callable[[str], float]:
+    """Build an argparse ``type=`` for a finite number from low to high.
+
+    Both ends are allowed. The message states the range and never repeats the
+    typed value, as in ``_positive_float``.
+    """
+    message = f"must be between {low:g} and {high:g}"
+
+    def check(text: str) -> float:
+        value = _finite_float(text)
+        if value is None or not (low <= value <= high):
+            raise argparse.ArgumentTypeError(message)
+        return value + 0.0  # turns -0.0 into 0.0
+
+    return check
 
 
 def _print_event(event: dict) -> None:
@@ -119,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--max-iterations", type=_positive_int, default=30)
     run.add_argument(
         "--temperature",
-        type=float,
+        type=_float_between(0, 2),
         default=None,
         help="Explicit OpenAI-compatible sampling temperature.",
     )
