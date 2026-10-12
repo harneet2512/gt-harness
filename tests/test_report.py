@@ -202,12 +202,11 @@ def test_at1_report_happy_path(tmp_path):
         "read_file",
         "file body line",
         "all done, the file says hello",
-        "end_turn",
     ]
     text = visible_text(page)
     pos = [text.index(s) for s in expected_in_order]
     assert pos == sorted(pos), pos
-    outcome = text[text.index("Stop reason"):]
+    outcome = text[text.index("How it ended"):]
     assert "end_turn" in outcome
 
     # self-contained: no external reference of any kind
@@ -487,7 +486,7 @@ def test_task_only_transcript_shows_task_and_unknown_stop_reason():
     page = render_report(minimal("only task"), source_name="t")
     text = visible_text(page)
     assert "only task" in text
-    assert text[text.index("Stop reason"):].split()[2] == "unknown"
+    assert text[text.index("How it ended"):].split()[-1] == "unknown"
     assert len([t for t in parse(page).tags if t[0] == "li"]) == 0
     assert "no steps" in text.lower()
 
@@ -513,7 +512,10 @@ def test_numbers_on_the_page_are_only_step_positions():
           {"type": "tool_result", "id": "x", "name": "n", "output": "beta",
            "is_error": False}]
     page = render_report(ev, source_name="t.jsonl")
-    digits = "".join(c for c in visible_text(page) if c.isdigit())
+    # #70: the summary bar is the one place that shows token totals; outside it
+    # the only numbers are step positions.
+    outside_bar = _re70.sub(r'<section class="summary">.*?</section>', "", page, flags=_re70.S)
+    digits = "".join(c for c in visible_text(outside_bar) if c.isdigit())
     assert "7777" not in digits and "8888" not in digits
     assert set(digits) <= {"1", "2"}  # step positions 1 and 2 only
 
@@ -1040,3 +1042,196 @@ def test_no_hard_link_fallback_never_exposes_a_partial_destination(tmp_path, mon
     assert all(snapshot == completed for snapshot in observed), (
         f"Published partial report: {observed!r}; complete size={len(completed)}"
     )
+
+
+# --------------------------------------------------------------------------
+# #70: the summary bar (AT3)
+
+import dataclasses as _dc70  # noqa: E402
+import re as _re70  # noqa: E402
+
+from nano.report import Summary, summarize  # noqa: E402
+
+
+def bar(page: str) -> dict[str, str]:
+    """class -> shown value, read from the summary bar of a rendered page."""
+    m = _re70.search(r'<section class="summary">(.*?)</section>', page, _re70.S)
+    assert m, "no summary bar in the page"
+    pairs = _re70.findall(
+        r'<div class="stat ([a-z_]+)"><span class="k">(.*?)</span>'
+        r'<span class="v">(.*?)</span></div>', m.group(1))
+    return {cls: html.unescape(v) for cls, _k, v in pairs}
+
+
+def _asst(usage: object = ..., calls: object = None, stop: object = "end_turn",
+          text="t") -> dict:
+    ev: dict = {"type": "assistant", "text": text, "tool_calls": calls or [],
+                "stop_reason": stop}
+    if usage is not ...:
+        ev["usage"] = usage
+    return ev
+
+
+def _page(*events) -> str:
+    return render_report(list(minimal()) + list(events), source_name="t.jsonl")
+
+
+def test_at3_bar_numbers_match_the_recorded_run(tmp_path):
+    src, _events = real_run(tmp_path, task="Summarise a.txt for me")
+    proc = cli([src], cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    page = src.with_name("task-001.transcript.report.html").read_text(encoding="utf-8")
+
+    # expected values come from the file itself, by a route independent of summarize()
+    lines = [json.loads(x) for x in src.read_text(encoding="utf-8").splitlines()]
+    asst = [e for e in lines if e["type"] == "assistant"]
+    want_in = sum(e["usage"]["input_tokens"] for e in asst)
+    want_out = sum(e["usage"]["output_tokens"] for e in asst)
+    assert (want_in, want_out, len(asst)) == (120, 14, 2)
+
+    assert bar(page) == {
+        "iterations": "2",
+        "input_tokens": "120",
+        "output_tokens": "14",
+        "stop_reason": "end_turn",
+        "total_time": "unknown",
+    }
+
+
+def test_at3_bar_comes_before_the_task_and_the_steps():
+    page = _page(_asst(usage={"input_tokens": 1, "output_tokens": 2}))
+    assert page.index('class="summary"') < page.index('class="task"')
+    assert page.index('class="summary"') < page.index("<ol>") < page.index("How it ended")
+
+
+def test_at3_bar_labels_are_plain_words():
+    text = visible_text(_page(_asst(usage={"input_tokens": 1, "output_tokens": 2})))
+    for label in ("Iterations", "Input tokens", "Output tokens",
+                  "Stop reason (last model turn)", "Total time"):
+        assert label in text, label
+
+
+def test_at3_no_assistant_event_means_unknown_tokens_not_zero():
+    shown = bar(_page())
+    assert shown["input_tokens"] == shown["output_tokens"] == "unknown"
+    assert shown["iterations"] == "0"  # zero model turns are in the file; that is a count
+    assert shown["stop_reason"] == "unknown"
+
+
+def test_at3_missing_usage_on_one_turn_makes_both_totals_unknown():
+    page = _page(_asst(usage={"input_tokens": 5, "output_tokens": 6}, calls=[{"name": "x"}],
+                       stop="tool_use"),
+                 _asst())  # no usage key at all
+    shown = bar(page)
+    assert shown["input_tokens"] == shown["output_tokens"] == "unknown"
+    assert shown["iterations"] == "2"
+
+
+@pytest.mark.parametrize("usage, want_in, want_out", [
+    ({"input_tokens": "bad", "output_tokens": -1}, "unknown", "unknown"),
+    ({"input_tokens": True, "output_tokens": 7}, "unknown", "7"),
+    ({"input_tokens": 3.0, "output_tokens": 7}, "unknown", "7"),
+    ({"input_tokens": 3, "output_tokens": 7.5}, "3", "unknown"),
+    ({"input_tokens": 3}, "3", "unknown"),
+    ({"output_tokens": 9}, "unknown", "9"),
+    ({"input_tokens": None, "output_tokens": 4}, "unknown", "4"),
+    ({"input_tokens": -2, "output_tokens": 4}, "unknown", "4"),
+    ({}, "unknown", "unknown"),
+    (None, "unknown", "unknown"),
+    ("lots", "unknown", "unknown"),
+    ([1, 2], "unknown", "unknown"),
+    (42, "unknown", "unknown"),
+])
+def test_at3_a_value_the_file_cannot_prove_is_unknown_per_field(usage, want_in, want_out):
+    shown = bar(_page(_asst(usage=usage)))
+    assert (shown["input_tokens"], shown["output_tokens"]) == (want_in, want_out)
+
+
+def test_at3_one_bad_turn_poisons_only_its_field():
+    good = _asst(usage={"input_tokens": 10, "output_tokens": 1}, calls=[{"name": "x"}],
+                 stop="tool_use")
+    bad = _asst(usage={"input_tokens": 20, "output_tokens": "x"})
+    shown = bar(_page(good, bad))
+    assert (shown["input_tokens"], shown["output_tokens"]) == ("30", "unknown")
+
+
+def test_at3_zero_is_a_real_value_when_recorded():
+    shown = bar(_page(_asst(usage={"input_tokens": 0, "output_tokens": 0})))
+    assert (shown["input_tokens"], shown["output_tokens"]) == ("0", "0")
+
+
+@pytest.mark.parametrize("calls", [42, "x", {"a": 1}, True])
+def test_at3_tool_calls_of_the_wrong_type_do_not_crash_and_count_as_calls(calls):
+    page = _page(_asst(usage={"input_tokens": 1, "output_tokens": 1}, calls=calls))
+    assert bar(page)["stop_reason"] == "unknown"
+
+
+@pytest.mark.parametrize("events, want", [
+    ([_asst(stop="end_turn")], "end_turn"),
+    ([_asst(stop="max_tokens")], "max_tokens"),
+    ([_asst(stop="end_turn"), {"type": "error", "message": "boom"}], "error"),
+    ([{"type": "error", "message": "boom"}, _asst(stop="end_turn")], "error"),
+    ([_asst(calls=[{"name": "x"}], stop="tool_use"),
+      {"type": "tool_result", "name": "x", "output": "o"}], "unknown"),
+    ([_asst(stop=None)], "unknown"),
+    ([_asst(stop="")], "unknown"),
+    ([_asst(stop=5)], "unknown"),
+    ([_asst(stop=["end_turn"])], "unknown"),
+    ([_asst(stop="end_turn", calls=[{"name": "x"}])], "unknown"),
+])
+def test_at3_stop_reason_is_only_what_the_file_proves(events, want):
+    assert bar(_page(*events))["stop_reason"] == want
+
+
+def test_at3_total_time_is_always_unknown_even_with_timestamps():
+    ev = _asst(usage={"input_tokens": 1, "output_tokens": 1})
+    ev["timestamp"] = "2026-01-01T00:00:00Z"
+    ev["wall_seconds"] = 12.5
+    first = {"type": "user", "content": "task", "timestamp": "2026-01-01T00:00:00Z"}
+    page = render_report([first, ev], source_name="t.jsonl")
+    assert bar(page)["total_time"] == "unknown"
+
+
+def test_summarize_returns_a_frozen_value():
+    s = summarize(minimal() + [_asst(usage={"input_tokens": 4, "output_tokens": 5})])
+    assert isinstance(s, Summary)
+    assert (s.iterations, s.input_tokens, s.output_tokens, s.stop_reason, s.total_time) == (
+        1, 4, 5, "end_turn", None)
+    with pytest.raises(_dc70.FrozenInstanceError):
+        s.iterations = 9  # type: ignore[misc]
+
+
+def test_summarize_ignores_non_objects_and_non_string_types():
+    s = summarize([1, "x", None, {"type": 5, "usage": {"input_tokens": 9}},
+                   _asst(usage={"input_tokens": 4, "output_tokens": 5})])
+    assert (s.iterations, s.input_tokens, s.output_tokens) == (1, 4, 5)
+
+
+def test_at3_hostile_values_in_usage_and_stop_reason_stay_inert():
+    page = _page(_asst(usage={"input_tokens": HOSTILE[0], "output_tokens": HOSTILE[1]},
+                       stop=HOSTILE[4]))
+    _assert_inert(page)
+    assert bar(page)["input_tokens"] == "unknown"
+
+
+@pytest.mark.parametrize("line", [
+    {"type": "assistant", "usage": {"input_tokens": "bad", "output_tokens": -1},
+     "tool_calls": 42},
+    {"type": "assistant", "usage": {"input_tokens": True, "output_tokens": 1.5}},
+    {"type": "assistant", "usage": {"input_tokens": 3}},
+    {"type": "assistant", "usage": None},
+])
+def test_at3_nested_field_contract_through_the_real_command(tmp_path, line):
+    src = write_events(tmp_path / "w.jsonl", minimal() + [line])
+    proc = cli([src], cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert "Traceback" not in proc.stderr
+    shown = bar((tmp_path / "w.report.html").read_text(encoding="utf-8"))
+    assert shown["iterations"] == "1"
+    assert shown["total_time"] == "unknown"
+    # never a number the file does not prove
+    usage = line.get("usage")
+    for key in ("input_tokens", "output_tokens"):
+        v = usage.get(key) if isinstance(usage, dict) else None
+        provable = isinstance(v, int) and not isinstance(v, bool) and v >= 0
+        assert shown[key] == (str(v) if provable else "unknown")
