@@ -125,8 +125,13 @@ _CREDENTIAL_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
 _MIN_SECRET_LENGTH = 8
 
 # "sk-" starting a word: sk-..., sk-ant-..., sk-proj-... and masked sk-abc***.
-# The look-behind keeps words such as "risk-free" and "task-force" alone.
-_SK_TOKEN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]+")
+# The look-behind keeps words such as "risk-free" and "task-force" alone. A
+# key glued to the letters before it is still caught when it is long and has
+# a digit, which words never are. Dot-joined segments belong to the token.
+_SK_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_*-]+(?:[.][A-Za-z0-9_*-]+)*"
+    r"|sk-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{16,}(?:[.][A-Za-z0-9_-]+)*"
+)
 _BEARER_TOKEN = re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=*-]{8,}", re.IGNORECASE)
 
 
@@ -142,6 +147,15 @@ def _credential_values() -> list[str]:
     return sorted(values, key=len, reverse=True)
 
 
+def _describe(error: BaseException) -> str:
+    """``Name: message`` for an exception, even one whose ``__str__`` raises."""
+    try:
+        message = str(error)
+    except Exception:
+        message = "(message unavailable)"
+    return f"{type(error).__name__}: {message}"
+
+
 def _redact(text: str) -> str:
     """Replace anything key-shaped in ``text`` with ``[redacted]``.
 
@@ -150,10 +164,14 @@ def _redact(text: str) -> str:
     environment does not mark as credentials, and keys of other shapes, are
     not recognised.
     """
+    # Shaped tokens go first, whole. If an env value that is only the start of
+    # a longer token were replaced first, the marker would split the token and
+    # its tail would no longer match.
+    text = _SK_TOKEN.sub(_REDACTED, text)
+    text = _BEARER_TOKEN.sub(lambda m: m.group(1) + _REDACTED, text)
     for value in _credential_values():
         text = text.replace(value, _REDACTED)
-    text = _SK_TOKEN.sub(_REDACTED, text)
-    return _BEARER_TOKEN.sub(lambda m: m.group(1) + _REDACTED, text)
+    return text
 
 
 _TOOL_OUTPUT_LIMIT = 2000
@@ -247,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         # Exception text can carry a key (a bad-key reply quotes it back), and
         # it is data: printed as literal text, never read as Rich markup.
-        message = _redact(f"{type(e).__name__}: {e}")
+        message = _redact(_describe(e))
         _console.print(Text.assemble(("setup error:", "bold red"), " ", message))
         return 1
     result = agent.run(args.task)

@@ -603,3 +603,91 @@ def test_at4_message_that_is_not_text_still_prints(clean_env, capsys):
         rc = main(["run", "task", "--model", "m"])
     assert rc == 1
     assert "ValueError" in capsys.readouterr().out
+
+
+def test_at4_key_glued_to_the_word_before_it_is_still_replaced(clean_env, capsys):
+    key = _key_shaped()["sk"]
+    rc, out, err = _setup_error_run(f"invalid key:{key} and bad{key}end", capsys)
+    assert rc == 1
+    assert key not in out + err
+    assert "Ab12Ab12" not in out + err
+    assert "[redacted]" in out
+
+
+def test_at4_dot_joined_key_segments_are_all_replaced(clean_env, capsys):
+    rc, out, err = _setup_error_run("bad sk-ant.api03.SECRETLEAK123 given", capsys)
+    assert rc == 1
+    assert "SECRETLEAK123" not in out + err
+    assert "api03" not in out + err
+    assert "bad [redacted] given" in out
+
+
+def test_at4_sentence_ending_dot_after_a_key_is_kept(clean_env, capsys):
+    key = _key_shaped()["sk"]
+    rc, out, err = _setup_error_run(f"rejected {key}. Try again", capsys)
+    assert "rejected [redacted]. Try again" in out
+
+
+def test_at4_long_hyphenated_word_with_no_digit_is_left_alone(clean_env, capsys):
+    rc, out, err = _setup_error_run("the task-force-with-a-very-long-name failed", capsys)
+    assert "task-force-with-a-very-long-name" in out
+
+
+def test_at4_exception_whose_text_cannot_be_built_still_exits_1(clean_env, capsys):
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    with patch("nano.cli.Agent"), \
+         patch("nano.cli.build_provider", side_effect=Unprintable("x")):
+        rc = main(["run", "task", "--model", "m"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "setup error:" in out and "Unprintable" in out
+
+
+def test_at4_credential_values_come_back_longest_first(clean_env):
+    from nano.cli import _credential_values
+
+    for i, name in enumerate(["A", "B", "C", "D", "E", "F"]):
+        clean_env.setenv(f"{name}_KEY", "sharedpart" + "x" * i)
+    values = _credential_values()
+    assert len(values) == 6
+    assert [len(v) for v in values] == sorted((len(v) for v in values), reverse=True)
+
+
+def test_at4_chain_of_nested_values_leaves_no_tail(clean_env, capsys):
+    base = "sharedpart"
+    for i in range(6):
+        clean_env.setenv(f"N{i}_KEY", base + "-" + "z" * i)
+    rc, out, err = _setup_error_run(f"saw {base}-zzzzz today", capsys)
+    assert "zzzzz" not in out + err
+    assert "saw [redacted] today" in out
+
+
+@pytest.mark.parametrize("kind", ["sk", "bearer"])
+def test_at4_env_value_that_starts_a_longer_token_hides_the_whole_token(kind, clean_env, capsys):
+    # Found by the codex code attack: replacing the env value first cut [redacted]
+    # into the longer token and the shape match then missed the rest of it.
+    prefix = "abcdefgh" + "1234"
+    tail = "Private" + "Suffix567890"
+    if kind == "sk":
+        prefix = "sk-" + prefix
+        credential = prefix + tail
+    else:
+        credential = "Bearer " + prefix + tail
+    clean_env.setenv("SERVICE_TOKEN", prefix)
+    rc, out, err = _setup_error_run("Rejected credential: " + credential + " today", capsys)
+    assert rc == 1
+    assert tail not in out + err
+    assert prefix not in out + err
+    assert "today" in out
+
+
+def test_at4_overlapping_matches_become_one_replacement(clean_env):
+    from nano.cli import _redact
+
+    key = _key_shaped()["sk"]
+    clean_env.setenv("MY_API_KEY", key)
+    assert _redact(f"Bearer {key} and {key}") == "Bearer [redacted] and [redacted]"
+
