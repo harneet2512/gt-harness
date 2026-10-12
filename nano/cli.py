@@ -10,6 +10,7 @@ from rich.panel import Panel
 from .agent import Agent
 from .prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT
 from .providers import AnthropicProvider, OpenAIProvider, Provider
+from .report import ReportError, write_report
 
 _console = Console()
 
@@ -59,6 +60,20 @@ def _print_event(event: dict) -> None:
                        f"in={event['input_tokens']} out={event['output_tokens']}[/dim]")
 
 
+def _report(args: argparse.Namespace) -> int:
+    # Plain print, not the rich console: paths contain brackets and must not wrap.
+    try:
+        out = write_report(args.transcript, args.output, force=args.force)
+    except ReportError as e:
+        print(f"report error: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"report error: {args.transcript}: {e.strerror or e}", file=sys.stderr)
+        return 1
+    print(f"wrote {out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windows consoles and pipes default to cp1252; model output is full of
     # unicode. Never let the printer kill a finished run.
@@ -91,7 +106,18 @@ def main(argv: list[str] | None = None) -> int:
             "preserve time for the final verified response."
         ),
     )
+    report = sub.add_parser(
+        "report", help="Write a one-page HTML report from a recorded transcript.")
+    report.add_argument("transcript", help="A <task>.transcript.jsonl file.")
+    report.add_argument("-o", "--output", default=None,
+                        help="Where to write the page (default: beside the transcript, "
+                             "<name>.report.html).")
+    report.add_argument("--force", action="store_true",
+                        help="Replace the output file if it already exists.")
     args = parser.parse_args(argv)
+
+    if args.cmd == "report":
+        return _report(args)
 
     # Construction failures (missing SDK/key, no usable shell) happen before
     # Agent.run()'s error boundary - turn them into a clean nonzero exit.
