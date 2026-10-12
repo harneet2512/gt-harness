@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
 from .agent import Agent
 from .prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT
@@ -107,6 +108,24 @@ def _float_between(low: float, high: float) -> Callable[[str], float]:
     return check
 
 
+_TOOL_OUTPUT_LIMIT = 2000
+
+
+def _tool_output_text(output: str) -> Text:
+    """Tool output as literal text, cut at the limit with a note saying how much.
+
+    ``Text`` is used so square brackets in the output (``[/foo]``) print as
+    typed: a plain string is read as Rich markup, which eats the note and
+    raises ``MarkupError`` on a stray closing tag.
+    """
+    text = Text(output[:_TOOL_OUTPUT_LIMIT])
+    cut = len(output) - _TOOL_OUTPUT_LIMIT
+    if cut > 0:
+        unit = "character" if cut == 1 else "characters"
+        text.append(f"\n[truncated, {cut} more {unit}]")
+    return text
+
+
 def _print_event(event: dict) -> None:
     et = event["type"]
     if et == "assistant":
@@ -121,7 +140,7 @@ def _print_event(event: dict) -> None:
                                  border_style="yellow"))
     elif et == "tool_result":
         title = "tool_result" + (" (error)" if event.get("is_error") else "")
-        _console.print(Panel(event["output"][:2000], title=title,
+        _console.print(Panel(_tool_output_text(event["output"]), title=title,
                              border_style="red" if event.get("is_error") else "green"))
     elif et == "stats":
         _console.print(f"[dim]iter={event['iteration']} "
