@@ -118,6 +118,17 @@ def load_transcript(path: str | os.PathLike[str]) -> list[dict]:
     """Read a JSONL transcript. Every non-blank line must be a JSON object."""
     path = Path(path)
     try:
+        mode = os.stat(path).st_mode
+    except FileNotFoundError:
+        raise ReportError(f"{path}: file not found") from None
+    except OSError as e:
+        raise ReportError(f"{path}: cannot read the file ({e.strerror or e})") from None
+    if stat.S_ISDIR(mode):
+        raise ReportError(f"{path}: is a folder, not a transcript file")
+    if not stat.S_ISREG(mode):
+        # A device such as CON would block forever on read.
+        raise ReportError(f"{path}: is not a regular file")
+    try:
         raw = path.read_bytes()
     except FileNotFoundError:
         raise ReportError(f"{path}: file not found") from None
@@ -397,6 +408,9 @@ def _os_reason(e: OSError) -> str:
 
 def _refuse_destination(src: Path, dest: Path, force: bool) -> None:
     parent = dest.parent
+    if os.name == "nt" and ":" in dest.name:
+        # "file:stream" would attach a hidden data stream to an existing file.
+        raise ReportError(f"{dest}: a colon in the file name is not allowed")
     if not parent.is_dir():
         raise ReportError(f"{dest}: the folder {parent} does not exist")
     try:

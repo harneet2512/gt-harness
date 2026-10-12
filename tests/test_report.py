@@ -962,3 +962,26 @@ def test_symlink_destination_is_refused_when_lstat_says_link(tmp_path, monkeypat
         assert "is a link" in str(e.value)
     monkeypatch.undo()
     assert dest.read_text() == "KEEP"
+
+
+def test_input_that_is_a_folder_gets_a_plain_message(tmp_path):
+    with pytest.raises(ReportError) as e:
+        load_transcript(tmp_path)
+    assert "folder" in str(e.value) and "Permission" not in str(e.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="reserved device names are a Windows thing")
+def test_reserved_device_name_as_input_does_not_hang(tmp_path):
+    with pytest.raises(ReportError):
+        load_transcript("CON")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="alternate data streams are NTFS only")
+def test_stream_name_destination_never_touches_the_input(tmp_path):
+    src = _src(tmp_path)
+    before = src.read_bytes()
+    for force in (False, True):
+        with pytest.raises(ReportError):
+            write_report(src, str(src) + ":stream", force=force)
+    assert src.read_bytes() == before
+    assert listing(tmp_path) == ["t.transcript.jsonl"]
